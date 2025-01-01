@@ -1,0 +1,37 @@
+[workspace]
+resolver = "2"
+members = [
+  "dynlib",
+  "g0",
+  "w0",
+  "wayland-scanner",
+]
+
+[workspace.package]
+edition = "2021"
+
+[workspace.dependencies]
+anyhow = "1.0"
+env_logger = { version = "0.11", default-features = false, features = ["auto-color"] }
+glow = "0.16"
+libc = "0.2"
+log = "0.4"
+quick-xml = "0.37"
+# internal
+dynlib = { path = "dynlib" }
+g0 = { path = "g0" }
+w0 = { path = "w0" }
+wayland-scanner = { path = "wayland-scanner" }
+
+[package]
+name = "shin"
+version = "0.0.0"
+edition.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true
+env_logger.workspace = true
+g0.workspace = true
+glow.workspace = true
+w0.workspace = true
+
