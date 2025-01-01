@@ -1,36 +1,21 @@
-use std::{ptr::null, rc::Rc};
-
-use anyhow::anyhow;
-use glow::HasContext;
-use graphics::{egl::EglContext, libegl, libwayland_egl};
+use glow::HasContext as _;
+use graphics::egl::{EglContext, EglSurface};
+use graphics::libegl;
 use raw_window_handle::{self as rwh, HasDisplayHandle as _, HasWindowHandle as _};
-use window::{Event, EventLoop as _, Size, WindowConfig, libwayland_client};
+use window::{Event, EventLoop as _, Size, WindowConfig};
 
 struct InitializedGraphicsContext {
-    egl: Rc<libegl::Lib>,
-    wayland_egl: libwayland_egl::Lib,
-    gl: glow::Context,
-
+    egl: libegl::Lib,
     egl_context: EglContext,
-    wl_egl_window: *mut libwayland_egl::wl_egl_window,
-    egl_surface: libegl::EGLSurface,
+    egl_surface: EglSurface,
 
-    logical_size: Size,
+    gl: glow::Context,
 }
 
 impl InitializedGraphicsContext {
+    #[inline]
     fn resize(&mut self, logical_size: Size) {
-        unsafe {
-            (self.wayland_egl.wl_egl_window_resize)(
-                self.wl_egl_window,
-                logical_size.width as i32,
-                logical_size.height as i32,
-                0,
-                0,
-            );
-        }
-
-        self.logical_size = logical_size;
+        self.egl_surface.resize(logical_size)
     }
 }
 
@@ -48,45 +33,9 @@ impl GraphicsContext {
     ) -> anyhow::Result<()> {
         assert!(matches!(self, Self::Uninitialized));
 
-        let egl = Rc::new(libegl::Lib::load()?);
-        let wayland_egl = libwayland_egl::Lib::load()?;
-
-        let display_handle_ptr = match display_handle.as_raw() {
-            rwh::RawDisplayHandle::Wayland(payload) => payload.display.as_ptr(),
-            _ => todo!(),
-        };
-        let egl_context = unsafe { EglContext::new(&egl, display_handle_ptr)? };
-
-        let window_handle_ptr = match window_handle.as_raw() {
-            rwh::RawWindowHandle::Wayland(payload) => payload.surface.as_ptr(),
-            _ => todo!(),
-        };
-        let wl_egl_window = unsafe {
-            (wayland_egl.wl_egl_window_create)(
-                window_handle_ptr as *mut libwayland_client::wl_surface,
-                logical_size.width as i32,
-                logical_size.height as i32,
-            )
-        };
-        if wl_egl_window.is_null() {
-            return Err(anyhow!("could not create wl egl window"));
-        }
-
-        let egl_surface = unsafe {
-            (egl.eglCreateWindowSurface)(
-                egl_context.display,
-                egl_context.config,
-                wl_egl_window as libegl::EGLNativeWindowType,
-                null(),
-            )
-        };
-        if egl_surface.is_null() {
-            return Err(anyhow!("could not create egl surface"));
-        }
-
-        unsafe {
-            egl_context.make_current_surfaceless()?;
-        }
+        let egl = libegl::Lib::load()?;
+        let egl_context = EglContext::new(&egl, display_handle)?;
+        let egl_surface = EglSurface::new(&egl, &egl_context, window_handle, logical_size)?;
 
         let gl = unsafe {
             glow::Context::from_loader_function_cstr(|cstr| {
@@ -96,14 +45,10 @@ impl GraphicsContext {
 
         *self = Self::Initialized(InitializedGraphicsContext {
             egl,
-            wayland_egl,
-            gl,
-
             egl_context,
-            wl_egl_window,
             egl_surface,
 
-            logical_size,
+            gl,
         });
 
         Ok(())
@@ -136,12 +81,14 @@ fn main() -> anyhow::Result<()> {
 
         if let GraphicsContext::Initialized(ref igc) = graphics_context {
             unsafe {
-                igc.egl_context.make_current(igc.egl_surface)?;
+                igc.egl_context
+                    .make_current(&igc.egl, igc.egl_surface.as_ptr())?;
 
                 igc.gl.clear_color(1.0, 0.0, 0.0, 1.0);
                 igc.gl.clear(glow::COLOR_BUFFER_BIT);
 
-                igc.egl_context.swap_buffers(igc.egl_surface)?;
+                igc.egl_context
+                    .swap_buffers(&igc.egl, igc.egl_surface.as_ptr())?;
             }
         }
     }

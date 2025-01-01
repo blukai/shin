@@ -2,7 +2,7 @@
 
 use std::ffi::c_int;
 
-use dynlib::{DynLib, opaque_struct};
+use dynlib::{opaque_struct, DynLib};
 use window::libwayland_client;
 
 opaque_struct!(wl_egl_window);

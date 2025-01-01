@@ -3,7 +3,7 @@
 
 use std::ffi::{c_char, c_int, c_void};
 
-use dynlib::{DynLib, opaque_struct};
+use dynlib::{opaque_struct, DynLib};
 
 pub const WL_MARSHAL_FLAG_DESTROY: u32 = 1 << 0;
 

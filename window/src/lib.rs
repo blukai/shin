@@ -32,7 +32,7 @@ impl Size {
     }
 }
 
-pub const DEFAULT_LOGICAL_SIZE: Size = Size::new(800, 600);
+pub const DEFAULT_LOGICAL_SIZE: Size = Size::new(640, 480);
 
 #[derive(Debug, Default)]
 pub struct WindowConfig {

@@ -2,10 +2,8 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 
-use std::{
-    ffi::{c_char, c_uint, c_void},
-    ptr::null_mut,
-};
+use std::ffi::{c_char, c_uint, c_void};
+use std::ptr::null_mut;
 
 use dynlib::DynLib;
 

@@ -3,7 +3,7 @@
 
 use std::ffi::{c_char, c_int};
 
-use dynlib::{DynLib, opaque_struct};
+use dynlib::{opaque_struct, DynLib};
 
 // *Real* modifiers names are hardcoded in libxkbcommon
 pub const XKB_MOD_NAME_SHIFT: &[u8] = b"Shift\0";
