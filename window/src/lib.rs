@@ -1,5 +1,4 @@
-use std::ffi::c_void;
-use std::ptr::NonNull;
+use raw_window_handle as rwh;
 
 pub mod libwayland_client;
 pub mod libxkbcommon;
@@ -46,10 +45,8 @@ pub enum Event {
     CloseRequested,
 }
 
-pub trait EventLoop {
-    fn display_handle(&self) -> NonNull<c_void>;
-    fn window_handle(&self) -> NonNull<c_void>;
-    fn update(&mut self);
+pub trait EventLoop: rwh::HasDisplayHandle + rwh::HasWindowHandle {
+    fn update(&mut self) -> anyhow::Result<()>;
     fn pop_event(&mut self) -> Option<Event>;
 }
 

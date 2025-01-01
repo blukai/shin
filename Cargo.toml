@@ -2,9 +2,9 @@
 resolver = "2"
 members = [
   "dynlib",
-  "g0",
-  "w0",
+  "graphics",
   "wayland-scanner",
+  "window",
 ]
 
 [workspace.package]
@@ -17,11 +17,12 @@ glow = "0.16"
 libc = "0.2"
 log = "0.4"
 quick-xml = "0.37"
+raw-window-handle = { version = "0.6", features = ["std"] }
 # internal
 dynlib = { path = "dynlib" }
-g0 = { path = "g0" }
-w0 = { path = "w0" }
+graphics = { path = "graphics" }
 wayland-scanner = { path = "wayland-scanner" }
+window = { path = "window" }
 
 [package]
 name = "shin"
@@ -31,7 +32,7 @@ edition.workspace = true
 [dev-dependencies]
 anyhow.workspace = true
 env_logger.workspace = true
-g0.workspace = true
 glow.workspace = true
-w0.workspace = true
-
+graphics.workspace = true
+raw-window-handle.workspace = true
+window.workspace = true

@@ -1,13 +1,10 @@
-use std::{
-    ffi::c_void,
-    ptr::{NonNull, null},
-    rc::Rc,
-};
+use std::{ptr::null, rc::Rc};
 
 use anyhow::anyhow;
-use g0::{egl::EglContext, libegl, libwayland_egl};
 use glow::HasContext;
-use w0::{Event, EventLoop as _, Size, WindowConfig, libwayland_client};
+use graphics::{egl::EglContext, libegl, libwayland_egl};
+use raw_window_handle::{self as rwh, HasDisplayHandle as _, HasWindowHandle as _};
+use window::{Event, EventLoop as _, Size, WindowConfig, libwayland_client};
 
 struct InitializedGraphicsContext {
     egl: Rc<libegl::Lib>,
@@ -45,8 +42,8 @@ enum GraphicsContext {
 impl GraphicsContext {
     fn init(
         &mut self,
-        display_handle: NonNull<c_void>,
-        window_handle: NonNull<c_void>,
+        display_handle: rwh::DisplayHandle,
+        window_handle: rwh::WindowHandle,
         logical_size: Size,
     ) -> anyhow::Result<()> {
         assert!(matches!(self, Self::Uninitialized));
@@ -54,11 +51,19 @@ impl GraphicsContext {
         let egl = Rc::new(libegl::Lib::load()?);
         let wayland_egl = libwayland_egl::Lib::load()?;
 
-        let egl_context = unsafe { EglContext::new(&egl, display_handle.as_ptr())? };
+        let display_handle_ptr = match display_handle.as_raw() {
+            rwh::RawDisplayHandle::Wayland(payload) => payload.display.as_ptr(),
+            _ => todo!(),
+        };
+        let egl_context = unsafe { EglContext::new(&egl, display_handle_ptr)? };
 
+        let window_handle_ptr = match window_handle.as_raw() {
+            rwh::RawWindowHandle::Wayland(payload) => payload.surface.as_ptr(),
+            _ => todo!(),
+        };
         let wl_egl_window = unsafe {
             (wayland_egl.wl_egl_window_create)(
-                window_handle.as_ptr() as *mut libwayland_client::wl_surface,
+                window_handle_ptr as *mut libwayland_client::wl_surface,
                 logical_size.width as i32,
                 logical_size.height as i32,
             )
@@ -109,24 +114,23 @@ fn main() -> anyhow::Result<()> {
     env_logger::init();
 
     let mut event_loop =
-        w0::platform::wayland::WaylandEventLoop::new_boxed(WindowConfig::default())?;
+        window::platform::wayland::WaylandEventLoop::new_boxed(WindowConfig::default())?;
     let mut graphics_context = GraphicsContext::Uninitialized;
 
-    'main_loop: loop {
-        event_loop.update();
+    'update_loop: while let Ok(_) = event_loop.update() {
         while let Some(event) = event_loop.pop_event() {
             match event {
                 Event::Configure { logical_size } => match graphics_context {
                     GraphicsContext::Uninitialized => graphics_context.init(
-                        event_loop.display_handle(),
-                        event_loop.window_handle(),
+                        event_loop.display_handle()?,
+                        event_loop.window_handle()?,
                         logical_size,
                     )?,
                     GraphicsContext::Initialized(ref mut igc) => {
                         igc.resize(logical_size);
                     }
                 },
-                Event::CloseRequested => break 'main_loop,
+                Event::CloseRequested => break 'update_loop,
             }
         }
 

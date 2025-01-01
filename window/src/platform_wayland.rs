@@ -3,6 +3,7 @@ use std::ffi::{CStr, c_char, c_void};
 use std::ptr::{NonNull, null_mut};
 
 use anyhow::{Context as _, anyhow};
+use raw_window_handle as rwh;
 
 use crate::{
     DEFAULT_LOGICAL_SIZE, Event, EventLoop, Size, WindowConfig, libwayland_client, libxkbcommon,
@@ -21,13 +22,11 @@ struct WaylandConnection {
 }
 
 struct WaylandWindow {
-    conf: WindowConfig,
+    config: WindowConfig,
 
     wl_surface: *mut libwayland_client::wl_surface,
     xdg_surface: *mut libwayland_client::xdg_surface,
     xdg_toplevel: *mut libwayland_client::xdg_toplevel,
-
-    configured: bool,
 }
 
 pub struct WaylandEventLoop {
@@ -121,7 +120,6 @@ unsafe extern "C" fn handle_xdg_surface_configure(
 
     let evl = &mut *(data as *mut WaylandEventLoop);
     libwayland_client::xdg_surface_ack_configure(&evl.conn.libwayland_client, xdg_surface, serial);
-    evl.window.configured = true;
 }
 
 const XDG_SURFACE_LISTENER: libwayland_client::xdg_surface_listener =
@@ -144,7 +142,7 @@ unsafe extern "C" fn handle_xdg_toplevel_configure(
     let logical_size = if width > 0 || height > 0 {
         Some(Size::new(width as u32, height as u32))
     } else {
-        evl.window.conf.logical_size
+        evl.window.config.logical_size
     }
     .unwrap_or(DEFAULT_LOGICAL_SIZE);
     log::debug!("logical_size: {logical_size:?}");
@@ -174,7 +172,7 @@ const XDG_TOPLEVEL_LISTENER: libwayland_client::xdg_toplevel_listener =
     };
 
 impl WaylandEventLoop {
-    pub fn new_boxed(conf: WindowConfig) -> anyhow::Result<Box<Self>> {
+    pub fn new_boxed(config: WindowConfig) -> anyhow::Result<Box<Self>> {
         let libwayland_client = libwayland_client::Lib::load()?;
         let libxkbcommon = libxkbcommon::Lib::load()?;
 
@@ -195,13 +193,11 @@ impl WaylandEventLoop {
                 xdg_wm_base: null_mut(),
             },
             window: WaylandWindow {
-                conf,
+                config,
 
                 wl_surface: null_mut(),
                 xdg_surface: null_mut(),
                 xdg_toplevel: null_mut(),
-
-                configured: false,
             },
             events: VecDeque::new(),
         });
@@ -296,23 +292,36 @@ impl WaylandEventLoop {
     }
 }
 
-impl EventLoop for Box<WaylandEventLoop> {
-    fn display_handle(&self) -> NonNull<c_void> {
-        self.conn.wl_display.cast()
+impl rwh::HasDisplayHandle for WaylandEventLoop {
+    fn display_handle(&self) -> Result<rwh::DisplayHandle<'_>, rwh::HandleError> {
+        let wayland_display_handle = rwh::WaylandDisplayHandle::new(self.conn.wl_display.cast());
+        let raw_display_handle = rwh::RawDisplayHandle::Wayland(wayland_display_handle);
+        let display_handle = unsafe { rwh::DisplayHandle::borrow_raw(raw_display_handle) };
+        Ok(display_handle)
     }
+}
 
-    fn window_handle(&self) -> NonNull<c_void> {
-        NonNull::new(self.window.wl_surface)
-            .expect("valid wl_surface")
-            .cast()
+impl rwh::HasWindowHandle for WaylandEventLoop {
+    fn window_handle(&self) -> Result<rwh::WindowHandle<'_>, rwh::HandleError> {
+        let Some(wl_surface) = NonNull::new(self.window.wl_surface) else {
+            return Err(rwh::HandleError::Unavailable);
+        };
+        let wayland_window_handle = rwh::WaylandWindowHandle::new(wl_surface.cast());
+        let raw_window_handle = rwh::RawWindowHandle::Wayland(wayland_window_handle);
+        let window_handle = unsafe { rwh::WindowHandle::borrow_raw(raw_window_handle) };
+        Ok(window_handle)
     }
+}
 
-    fn update(&mut self) {
-        unsafe {
-            (self.conn.libwayland_client.wl_display_dispatch_pending)(
-                self.conn.wl_display.as_ptr(),
-            );
+impl EventLoop for WaylandEventLoop {
+    fn update(&mut self) -> anyhow::Result<()> {
+        let n = unsafe {
+            (self.conn.libwayland_client.wl_display_dispatch_pending)(self.conn.wl_display.as_ptr())
+        };
+        if n == -1 {
+            return Err(anyhow!("wl_display_dispatch_pending failed"));
         }
+        Ok(())
     }
 
     fn pop_event(&mut self) -> Option<Event> {
