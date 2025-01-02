@@ -18,6 +18,7 @@ libc = "0.2"
 log = "0.4"
 quick-xml = "0.37"
 raw-window-handle = { version = "0.6", features = ["std"] }
+winit = "0.30"
 # internal
 dynlib = { path = "dynlib" }
 graphics = { path = "graphics" }
@@ -34,5 +35,9 @@ anyhow.workspace = true
 env_logger.workspace = true
 glow.workspace = true
 graphics.workspace = true
+log.workspace = true
 raw-window-handle.workspace = true
 window.workspace = true
+
+[features]
+winit = ["window/winit"]

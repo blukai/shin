@@ -2,7 +2,7 @@ use glow::HasContext as _;
 use graphics::egl::{EglContext, EglSurface};
 use graphics::libegl;
 use raw_window_handle::{self as rwh, HasDisplayHandle as _, HasWindowHandle as _};
-use window::{Event, EventLoop as _, Size, WindowConfig};
+use window::{Event, Size, WindowConfig};
 
 struct InitializedGraphicsContext {
     egl: libegl::Lib,
@@ -58,17 +58,18 @@ impl GraphicsContext {
 fn main() -> anyhow::Result<()> {
     env_logger::init();
 
-    let mut event_loop =
-        window::platform::wayland::WaylandEventLoop::new_boxed(WindowConfig::default())?;
+    let mut window = window::create_window(WindowConfig::default())?;
     let mut graphics_context = GraphicsContext::Uninitialized;
 
-    'update_loop: while let Ok(_) = event_loop.update() {
-        while let Some(event) = event_loop.pop_event() {
+    'update_loop: while let Ok(_) = window.update() {
+        while let Some(event) = window.pop_event() {
+            log::debug!("event: {event:?}");
+
             match event {
                 Event::Configure { logical_size } => match graphics_context {
                     GraphicsContext::Uninitialized => graphics_context.init(
-                        event_loop.display_handle()?,
-                        event_loop.window_handle()?,
+                        window.display_handle()?,
+                        window.window_handle()?,
                         logical_size,
                     )?,
                     GraphicsContext::Initialized(ref mut igc) => {
