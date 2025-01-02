@@ -1,10 +1,19 @@
+use anyhow::anyhow;
 use raw_window_handle as rwh;
 
+#[cfg(target_os = "linux")]
 pub mod libwayland_client;
+#[cfg(target_os = "linux")]
 pub mod libxkbcommon;
-mod platform_wayland;
+
+#[cfg(target_os = "linux")]
+mod backend_wayland;
+
 #[cfg(feature = "winit")]
-mod platform_winit;
+mod backend_winit;
+
+#[cfg(target_family = "wasm")]
+mod backend_web;
 
 pub const DEFAULT_LOGICAL_SIZE: Size = Size::new(640, 480);
 
@@ -34,6 +43,10 @@ impl Size {
             height: ((self.height as f64) / scale_factor).round() as u32,
         }
     }
+
+    pub fn as_tuple(&self) -> (u32, u32) {
+        (self.width, self.height)
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -54,15 +67,25 @@ pub trait Window: rwh::HasDisplayHandle + rwh::HasWindowHandle {
 }
 
 pub fn create_window(config: WindowConfig) -> anyhow::Result<Box<dyn Window>> {
-    match platform_wayland::WaylandWindow::new_boxed(config.clone()) {
-        Ok(wayland_window) => Ok(wayland_window),
-        #[cfg(not(feature = "winit"))]
-        Err(err) => Err(err),
-        #[cfg(feature = "winit")]
-        Err(err) => {
-            log::error!("could not create wayland window (err: {err:?}), trying winit..");
-            let winit_window = platform_winit::WinitWindow::new(config)?;
-            Ok(Box::new(winit_window))
-        }
+    let mut errors: Vec<anyhow::Error> = Vec::new();
+
+    #[cfg(target_os = "linux")]
+    match backend_wayland::WaylandWindow::new_boxed(config.clone()) {
+        Ok(wayland_window) => return Ok(wayland_window),
+        Err(err) => errors.push(err),
     }
+
+    #[cfg(feature = "winit")]
+    match backend_winit::WinitWindow::new(config.clone()) {
+        Ok(winit_window) => return Ok(Box::new(winit_window)),
+        Err(err) => errors.push(err),
+    }
+
+    #[cfg(not(any(target_os = "linux", feature = "winit", target_family = "wasm")))]
+    compile_error!("all window backend are disabled");
+
+    #[cfg(target_family = "wasm")]
+    unimplemented!("wasm window");
+
+    Err(anyhow!("{errors:?}"))
 }

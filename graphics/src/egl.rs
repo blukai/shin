@@ -1,9 +1,8 @@
 use std::ffi::c_void;
 use std::ptr::{null, null_mut};
 
-use anyhow::{anyhow, Context as _};
+use anyhow::{Context as _, anyhow};
 use raw_window_handle as rwh;
-use window::{libwayland_client, Size};
 
 use crate::{libegl, libwayland_egl};
 
@@ -24,7 +23,7 @@ impl EglContext {
     pub fn new(egl: &libegl::Lib, display_handle: rwh::DisplayHandle) -> anyhow::Result<Self> {
         unsafe {
             // TODO: make api configurable
-            if (egl.eglBindAPI)(libegl::EGL_OPENGL_API) == libegl::EGL_FALSE {
+            if (egl.eglBindAPI)(libegl::EGL_OPENGL_ES_API) == libegl::EGL_FALSE {
                 return Err(egl_get_error(egl)).context("could not bind api");
             }
 
@@ -155,13 +154,8 @@ struct EglWaylandWsi {
 impl EglWaylandWsi {
     fn new(wayland_wh: rwh::WaylandWindowHandle) -> anyhow::Result<Self> {
         let wayland_egl = libwayland_egl::Lib::load()?;
-        let wl_egl_window = unsafe {
-            (wayland_egl.wl_egl_window_create)(
-                wayland_wh.surface.as_ptr() as *mut libwayland_client::wl_surface,
-                640,
-                480,
-            )
-        };
+        let wl_egl_window =
+            unsafe { (wayland_egl.wl_egl_window_create)(wayland_wh.surface.as_ptr(), 640, 480) };
         if wl_egl_window.is_null() {
             return Err(anyhow!("could not create wl egl window"));
         }
@@ -207,7 +201,7 @@ impl EglSurface {
         egl: &libegl::Lib,
         egl_context: &EglContext,
         window_handle: rwh::WindowHandle,
-        logical_size: Size,
+        logical_size: (u32, u32),
     ) -> anyhow::Result<Self> {
         let egl_wsi = EglWsi::new(window_handle)?;
         let egl_surface = unsafe {
@@ -228,8 +222,8 @@ impl EglSurface {
             EglWsi::Wayland(ref payload) => unsafe {
                 (payload.wayland_egl.wl_egl_window_resize)(
                     payload.wl_egl_window,
-                    logical_size.width as i32,
-                    logical_size.height as i32,
+                    logical_size.0 as i32,
+                    logical_size.0 as i32,
                     0,
                     0,
                 );
@@ -242,13 +236,13 @@ impl EglSurface {
         })
     }
 
-    pub fn resize(&self, logical_size: Size) {
+    pub fn resize(&self, logical_size: (u32, u32)) {
         match self.wsi {
             EglWsi::Wayland(ref payload) => unsafe {
                 (payload.wayland_egl.wl_egl_window_resize)(
                     payload.wl_egl_window,
-                    logical_size.width as i32,
-                    logical_size.height as i32,
+                    logical_size.0 as i32,
+                    logical_size.1 as i32,
                     0,
                     0,
                 );

@@ -5,13 +5,17 @@ edition.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-dynlib.workspace = true
 log.workspace = true
 raw-window-handle.workspace = true
 winit = { workspace = true, optional = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+dynlib.workspace = true
+
 [build-dependencies]
 anyhow.workspace = true
+
+[target.'cfg(target_os = "linux")'.build-dependencies]
 wayland-scanner.workspace = true
 
 [features]

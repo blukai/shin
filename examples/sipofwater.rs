@@ -15,7 +15,7 @@ struct InitializedGraphicsContext {
 impl InitializedGraphicsContext {
     #[inline]
     fn resize(&mut self, logical_size: Size) {
-        self.egl_surface.resize(logical_size)
+        self.egl_surface.resize(logical_size.as_tuple())
     }
 }
 
@@ -35,13 +35,15 @@ impl GraphicsContext {
 
         let egl = libegl::Lib::load()?;
         let egl_context = EglContext::new(&egl, display_handle)?;
-        let egl_surface = EglSurface::new(&egl, &egl_context, window_handle, logical_size)?;
+        let egl_surface =
+            EglSurface::new(&egl, &egl_context, window_handle, logical_size.as_tuple())?;
 
         let gl = unsafe {
             glow::Context::from_loader_function_cstr(|cstr| {
                 (egl.eglGetProcAddress)(cstr.as_ptr() as _) as _
             })
         };
+        log::info!("initialized gl version {:?}", gl.version());
 
         *self = Self::Initialized(InitializedGraphicsContext {
             egl,

@@ -2,6 +2,7 @@ use std::env;
 use std::fs::{self, File};
 use std::path::PathBuf;
 
+#[cfg(target_os = "linux")]
 fn generate_wayland_bindings() -> anyhow::Result<()> {
     println!("cargo:rerun-if-changed=../wayland-scanner");
     println!("cargo:rerun-if-changed=../wayland-protocols");
@@ -21,6 +22,7 @@ fn generate_wayland_bindings() -> anyhow::Result<()> {
 fn main() -> anyhow::Result<()> {
     println!("cargo:rerun-if-changed=build.rs");
 
+    #[cfg(target_os = "linux")]
     generate_wayland_bindings()?;
 
     Ok(())

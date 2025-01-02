@@ -1,15 +1,14 @@
 #![allow(non_camel_case_types)]
 
-use std::ffi::c_int;
+use std::ffi::{c_int, c_void};
 
-use dynlib::{opaque_struct, DynLib};
-use window::libwayland_client;
+use dynlib::{DynLib, opaque_struct};
 
 opaque_struct!(wl_egl_window);
 
 pub struct Lib {
     pub wl_egl_window_create: unsafe extern "C" fn(
-        surface: *mut libwayland_client::wl_surface,
+        surface: *mut c_void,
         width: c_int,
         height: c_int,
     ) -> *mut wl_egl_window,
