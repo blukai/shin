@@ -2,7 +2,7 @@ use glow::HasContext as _;
 use graphics::egl::{EglContext, EglSurface};
 use graphics::libegl;
 use raw_window_handle::{self as rwh, HasDisplayHandle as _, HasWindowHandle as _};
-use window::{Event, Size, WindowConfig};
+use window::{WindowConfig, WindowEvent};
 
 struct InitializedGraphicsContext {
     egl: libegl::Lib,
@@ -14,8 +14,8 @@ struct InitializedGraphicsContext {
 
 impl InitializedGraphicsContext {
     #[inline]
-    fn resize(&mut self, logical_size: Size) {
-        self.egl_surface.resize(logical_size.as_tuple())
+    fn resize(&mut self, logical_size: (u32, u32)) {
+        self.egl_surface.resize(logical_size)
     }
 }
 
@@ -29,14 +29,13 @@ impl GraphicsContext {
         &mut self,
         display_handle: rwh::DisplayHandle,
         window_handle: rwh::WindowHandle,
-        logical_size: Size,
+        logical_size: (u32, u32),
     ) -> anyhow::Result<()> {
         assert!(matches!(self, Self::Uninitialized));
 
         let egl = libegl::Lib::load()?;
         let egl_context = EglContext::new(&egl, display_handle)?;
-        let egl_surface =
-            EglSurface::new(&egl, &egl_context, window_handle, logical_size.as_tuple())?;
+        let egl_surface = EglSurface::new(&egl, &egl_context, window_handle, logical_size)?;
 
         let gl = unsafe {
             glow::Context::from_loader_function_cstr(|cstr| {
@@ -68,7 +67,7 @@ fn main() -> anyhow::Result<()> {
             log::debug!("event: {event:?}");
 
             match event {
-                Event::Configure { logical_size } => match graphics_context {
+                WindowEvent::Configure { logical_size } => match graphics_context {
                     GraphicsContext::Uninitialized => graphics_context.init(
                         window.display_handle()?,
                         window.window_handle()?,
@@ -78,7 +77,7 @@ fn main() -> anyhow::Result<()> {
                         igc.resize(logical_size);
                     }
                 },
-                Event::CloseRequested => break 'update_loop,
+                WindowEvent::CloseRequested => break 'update_loop,
             }
         }
 

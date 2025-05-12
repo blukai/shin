@@ -15,55 +15,22 @@ mod backend_winit;
 #[cfg(target_family = "wasm")]
 mod backend_web;
 
-pub const DEFAULT_LOGICAL_SIZE: Size = Size::new(640, 480);
-
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
-pub struct Size {
-    pub width: u32,
-    pub height: u32,
-}
-
-impl Size {
-    pub const fn new(width: u32, height: u32) -> Self {
-        Self { width, height }
-    }
-
-    /// rounds away from zero
-    pub fn to_physical(&self, scale_factor: f64) -> Self {
-        Self {
-            width: ((self.width as f64) * scale_factor).round() as u32,
-            height: ((self.height as f64) * scale_factor).round() as u32,
-        }
-    }
-
-    /// rounds away from zero
-    pub fn to_logical(&self, scale_factor: f64) -> Self {
-        Self {
-            width: ((self.width as f64) / scale_factor).round() as u32,
-            height: ((self.height as f64) / scale_factor).round() as u32,
-        }
-    }
-
-    pub fn as_tuple(&self) -> (u32, u32) {
-        (self.width, self.height)
-    }
-}
+pub const DEFAULT_LOGICAL_SIZE: (u32, u32) = (640, 480);
 
 #[derive(Debug, Default, Clone)]
 pub struct WindowConfig {
-    logical_size: Option<Size>,
+    logical_size: Option<(u32, u32)>,
 }
 
-// TODO: rename to window event
 #[derive(Debug)]
-pub enum Event {
-    Configure { logical_size: Size },
+pub enum WindowEvent {
+    Configure { logical_size: (u32, u32) },
     CloseRequested,
 }
 
 pub trait Window: rwh::HasDisplayHandle + rwh::HasWindowHandle {
     fn update(&mut self) -> anyhow::Result<()>;
-    fn pop_event(&mut self) -> Option<Event>;
+    fn pop_event(&mut self) -> Option<WindowEvent>;
 }
 
 pub fn create_window(config: WindowConfig) -> anyhow::Result<Box<dyn Window>> {
@@ -81,11 +48,11 @@ pub fn create_window(config: WindowConfig) -> anyhow::Result<Box<dyn Window>> {
         Err(err) => errors.push(err),
     }
 
-    #[cfg(not(any(target_os = "linux", feature = "winit", target_family = "wasm")))]
-    compile_error!("all window backend are disabled");
-
     #[cfg(target_family = "wasm")]
     unimplemented!("wasm window");
+
+    #[cfg(not(any(target_os = "linux", feature = "winit", target_family = "wasm")))]
+    compile_error!("all window backend are disabled");
 
     Err(anyhow!("{errors:?}"))
 }

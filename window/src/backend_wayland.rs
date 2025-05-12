@@ -1,12 +1,12 @@
 use std::collections::VecDeque;
-use std::ffi::{CStr, c_char, c_void};
-use std::ptr::{NonNull, null_mut};
+use std::ffi::{c_char, c_void, CStr};
+use std::ptr::{null_mut, NonNull};
 
-use anyhow::{Context as _, anyhow};
+use anyhow::{anyhow, Context as _};
 use raw_window_handle as rwh;
 
 use crate::{
-    DEFAULT_LOGICAL_SIZE, Event, Size, Window, WindowConfig, libwayland_client, libxkbcommon,
+    libwayland_client, libxkbcommon, Window, WindowConfig, WindowEvent, DEFAULT_LOGICAL_SIZE,
 };
 
 pub struct WaylandWindow {
@@ -26,7 +26,7 @@ pub struct WaylandWindow {
     xdg_surface: *mut libwayland_client::xdg_surface,
     xdg_toplevel: *mut libwayland_client::xdg_toplevel,
 
-    events: VecDeque<Event>,
+    events: VecDeque<WindowEvent>,
 }
 
 unsafe extern "C" fn handle_wl_registry_global(
@@ -134,14 +134,14 @@ unsafe extern "C" fn handle_xdg_toplevel_configure(
 
     assert!(width >= 0 && height >= 0);
     let logical_size = if width > 0 || height > 0 {
-        Some(Size::new(width as u32, height as u32))
+        Some((width as u32, height as u32))
     } else {
         evl.config.logical_size
     }
     .unwrap_or(DEFAULT_LOGICAL_SIZE);
     log::debug!("logical_size: {logical_size:?}");
 
-    let event = Event::Configure { logical_size };
+    let event = WindowEvent::Configure { logical_size };
     evl.events.push_back(event);
 }
 
@@ -153,7 +153,7 @@ unsafe extern "C" fn handle_xdg_toplevel_close(
 
     let evl = &mut *(data as *mut WaylandWindow);
 
-    let event = Event::CloseRequested;
+    let event = WindowEvent::CloseRequested;
     evl.events.push_back(event);
 }
 
@@ -310,7 +310,7 @@ impl Window for WaylandWindow {
         Ok(())
     }
 
-    fn pop_event(&mut self) -> Option<Event> {
+    fn pop_event(&mut self) -> Option<WindowEvent> {
         self.events.pop_back()
     }
 }

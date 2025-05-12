@@ -4,14 +4,14 @@ use anyhow::{anyhow, Context};
 use raw_window_handle as rwh;
 use winit::platform::pump_events::EventLoopExtPumpEvents;
 
-use crate::{Event, Size, Window, WindowConfig, DEFAULT_LOGICAL_SIZE};
+use crate::{Window, WindowConfig, WindowEvent, DEFAULT_LOGICAL_SIZE};
 
 struct WinitApp {
     window_config: WindowConfig,
     window: Option<winit::window::Window>,
     window_create_error: Option<winit::error::OsError>,
 
-    events: VecDeque<Event>,
+    events: VecDeque<WindowEvent>,
 }
 
 pub struct WinitWindow {
@@ -31,14 +31,14 @@ impl winit::application::ApplicationHandler for WinitApp {
             .unwrap_or(DEFAULT_LOGICAL_SIZE);
 
         let attrs = winit::window::WindowAttributes::default().with_inner_size(
-            winit::dpi::LogicalSize::new(logical_size.width as f64, logical_size.height as f64),
+            winit::dpi::LogicalSize::new(logical_size.0 as f64, logical_size.1 as f64),
         );
         match event_loop.create_window(attrs) {
             Ok(window) => self.window = Some(window),
             Err(err) => self.window_create_error = Some(err),
         }
 
-        let event = Event::Configure { logical_size };
+        let event = WindowEvent::Configure { logical_size };
         self.events.push_back(event);
 
         log::info!("created winit window");
@@ -53,16 +53,15 @@ impl winit::application::ApplicationHandler for WinitApp {
         let window = self.window.as_ref().unwrap();
         assert!(window.id() == window_id);
 
-        use winit::event::WindowEvent;
         let maybe_event = match window_event {
-            WindowEvent::Resized(physical_size) => Some(Event::Configure {
+            winit::event::WindowEvent::Resized(physical_size) => Some(WindowEvent::Configure {
                 logical_size: {
                     // TODO: i probably should switch to physical size everywhere
                     let logical_size = physical_size.to_logical(1.0);
-                    Size::new(logical_size.width, logical_size.height)
+                    (logical_size.width, logical_size.height)
                 },
             }),
-            WindowEvent::CloseRequested => Some(Event::CloseRequested),
+            winit::event::WindowEvent::CloseRequested => Some(WindowEvent::CloseRequested),
             window_event => {
                 log::debug!("unused window event: {window_event:?}");
                 None
@@ -122,7 +121,7 @@ impl Window for WinitWindow {
         ret
     }
 
-    fn pop_event(&mut self) -> Option<Event> {
+    fn pop_event(&mut self) -> Option<WindowEvent> {
         self.app.events.pop_back()
     }
 }
