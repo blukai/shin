@@ -18,7 +18,7 @@ mod backend_web;
 pub const DEFAULT_LOGICAL_SIZE: (u32, u32) = (640, 480);
 
 #[derive(Debug, Default, Clone)]
-pub struct WindowConfig {
+pub struct WindowAttrs {
     logical_size: Option<(u32, u32)>,
 }
 
@@ -29,21 +29,21 @@ pub enum WindowEvent {
 }
 
 pub trait Window: rwh::HasDisplayHandle + rwh::HasWindowHandle {
-    fn update(&mut self) -> anyhow::Result<()>;
+    fn pump_events(&mut self) -> anyhow::Result<()>;
     fn pop_event(&mut self) -> Option<WindowEvent>;
 }
 
-pub fn create_window(config: WindowConfig) -> anyhow::Result<Box<dyn Window>> {
+pub fn create_window(window_attrs: WindowAttrs) -> anyhow::Result<Box<dyn Window>> {
     let mut errors: Vec<anyhow::Error> = Vec::new();
 
     #[cfg(target_os = "linux")]
-    match backend_wayland::WaylandWindow::new_boxed(config.clone()) {
+    match backend_wayland::WaylandWindow::new_boxed(window_attrs.clone()) {
         Ok(wayland_window) => return Ok(wayland_window),
         Err(err) => errors.push(err),
     }
 
     #[cfg(feature = "winit")]
-    match backend_winit::WinitWindow::new(config.clone()) {
+    match backend_winit::WinitWindow::new(window_attrs.clone()) {
         Ok(winit_window) => return Ok(Box::new(winit_window)),
         Err(err) => errors.push(err),
     }

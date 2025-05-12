@@ -4,14 +4,15 @@ use anyhow::{anyhow, Context};
 use raw_window_handle as rwh;
 use winit::platform::pump_events::EventLoopExtPumpEvents;
 
-use crate::{Window, WindowConfig, WindowEvent, DEFAULT_LOGICAL_SIZE};
+use crate::{Window, WindowAttrs, WindowEvent, DEFAULT_LOGICAL_SIZE};
 
 struct WinitApp {
-    window_config: WindowConfig,
+    window_attrs: WindowAttrs,
+
     window: Option<winit::window::Window>,
     window_create_error: Option<winit::error::OsError>,
 
-    events: VecDeque<WindowEvent>,
+    window_events: VecDeque<WindowEvent>,
 }
 
 pub struct WinitWindow {
@@ -26,20 +27,20 @@ impl winit::application::ApplicationHandler for WinitApp {
         }
 
         let logical_size = self
-            .window_config
+            .window_attrs
             .logical_size
             .unwrap_or(DEFAULT_LOGICAL_SIZE);
 
-        let attrs = winit::window::WindowAttributes::default().with_inner_size(
+        let window_attrs = winit::window::WindowAttributes::default().with_inner_size(
             winit::dpi::LogicalSize::new(logical_size.0 as f64, logical_size.1 as f64),
         );
-        match event_loop.create_window(attrs) {
+        match event_loop.create_window(window_attrs) {
             Ok(window) => self.window = Some(window),
             Err(err) => self.window_create_error = Some(err),
         }
 
-        let event = WindowEvent::Configure { logical_size };
-        self.events.push_back(event);
+        let window_event = WindowEvent::Configure { logical_size };
+        self.window_events.push_back(window_event);
 
         log::info!("created winit window");
     }
@@ -53,7 +54,7 @@ impl winit::application::ApplicationHandler for WinitApp {
         let window = self.window.as_ref().unwrap();
         assert!(window.id() == window_id);
 
-        let maybe_event = match window_event {
+        let maybe_window_event = match window_event {
             winit::event::WindowEvent::Resized(physical_size) => Some(WindowEvent::Configure {
                 logical_size: {
                     // TODO: i probably should switch to physical size everywhere
@@ -67,22 +68,23 @@ impl winit::application::ApplicationHandler for WinitApp {
                 None
             }
         };
-        if let Some(event) = maybe_event {
-            self.events.push_back(event);
+        if let Some(window_event) = maybe_window_event {
+            self.window_events.push_back(window_event);
         }
     }
 }
 
 impl WinitWindow {
-    pub fn new(window_config: WindowConfig) -> anyhow::Result<Self> {
+    pub fn new(attrs: WindowAttrs) -> anyhow::Result<Self> {
         let this = Self {
             event_loop: winit::event_loop::EventLoop::new()?,
             app: WinitApp {
-                window_config,
+                window_attrs: attrs,
+
                 window: None,
                 window_create_error: None,
 
-                events: VecDeque::new(),
+                window_events: VecDeque::new(),
             },
         };
         Ok(this)
@@ -106,7 +108,7 @@ impl rwh::HasWindowHandle for WinitWindow {
 }
 
 impl Window for WinitWindow {
-    fn update(&mut self) -> anyhow::Result<()> {
+    fn pump_events(&mut self) -> anyhow::Result<()> {
         use winit::platform::pump_events::PumpStatus;
         let ret = match self.event_loop.pump_app_events(None, &mut self.app) {
             PumpStatus::Exit(code) => Err(anyhow!(format!("unexpected exit (code {code})"))),
@@ -122,6 +124,6 @@ impl Window for WinitWindow {
     }
 
     fn pop_event(&mut self) -> Option<WindowEvent> {
-        self.app.events.pop_back()
+        self.app.window_events.pop_back()
     }
 }

@@ -1,7 +1,7 @@
 use std::ffi::c_void;
 use std::ptr::{null, null_mut};
 
-use anyhow::{Context as _, anyhow};
+use anyhow::{anyhow, Context as _};
 use raw_window_handle as rwh;
 
 use crate::{libegl, libwayland_egl};
@@ -13,6 +13,12 @@ pub fn egl_get_error(egl: &libegl::Lib) -> anyhow::Error {
     }
 }
 
+#[derive(Default)]
+pub struct EglConfig {
+    pub min_swap_interval: Option<u16>,
+    pub max_swap_interval: Option<u16>,
+}
+
 pub struct EglContext {
     config: libegl::EGLConfig,
     context: libegl::EGLContext,
@@ -20,7 +26,11 @@ pub struct EglContext {
 }
 
 impl EglContext {
-    pub fn new(egl: &libegl::Lib, display_handle: rwh::DisplayHandle) -> anyhow::Result<Self> {
+    pub fn new(
+        egl: &libegl::Lib,
+        display_handle: rwh::DisplayHandle,
+        config: EglConfig,
+    ) -> anyhow::Result<Self> {
         unsafe {
             // TODO: make api configurable
             if (egl.eglBindAPI)(libegl::EGL_OPENGL_ES_API) == libegl::EGL_FALSE {
@@ -46,28 +56,32 @@ impl EglContext {
             }
             log::info!("initialized egl version {major}.{minor}");
 
-            // TODO: make config attrs configurable
-            let config_attrs = &[
-                libegl::EGL_RED_SIZE,
-                8,
-                libegl::EGL_GREEN_SIZE,
-                8,
-                libegl::EGL_BLUE_SIZE,
-                8,
-                // NOTE: it is important to set EGL_ALPHA_SIZE, it enables transparency
-                libegl::EGL_ALPHA_SIZE,
-                8,
-                libegl::EGL_CONFORMANT,
-                libegl::EGL_OPENGL_ES3_BIT,
-                libegl::EGL_RENDERABLE_TYPE,
-                libegl::EGL_OPENGL_ES3_BIT,
-                // NOTE: EGL_SAMPLE_BUFFERS + EGL_SAMPLES enables some kind of don't care anti aliasing
-                libegl::EGL_SAMPLE_BUFFERS,
-                1,
-                libegl::EGL_SAMPLES,
-                4,
-                libegl::EGL_NONE,
-            ];
+            // 64 seems enough?
+            let mut config_attrs = [libegl::EGL_NONE; 64];
+            let mut num_config_attrs = 0;
+            let mut push_config_attr = |attr: libegl::EGLenum, value: libegl::EGLenum| {
+                config_attrs[num_config_attrs] = attr;
+                num_config_attrs += 1;
+                config_attrs[num_config_attrs] = value;
+                num_config_attrs += 1;
+            };
+            push_config_attr(libegl::EGL_RED_SIZE, 8);
+            push_config_attr(libegl::EGL_GREEN_SIZE, 8);
+            push_config_attr(libegl::EGL_BLUE_SIZE, 8);
+            // NOTE: it is important to set EGL_ALPHA_SIZE, it enables transparency
+            push_config_attr(libegl::EGL_ALPHA_SIZE, 8);
+            push_config_attr(libegl::EGL_CONFORMANT, libegl::EGL_OPENGL_ES3_BIT);
+            push_config_attr(libegl::EGL_RENDERABLE_TYPE, libegl::EGL_OPENGL_ES3_BIT);
+            // NOTE: EGL_SAMPLE_BUFFERS + EGL_SAMPLES enable some kind of don't care anti aliasing
+            push_config_attr(libegl::EGL_SAMPLE_BUFFERS, 1);
+            push_config_attr(libegl::EGL_SAMPLES, 4);
+            if let Some(min_swap_interval) = config.min_swap_interval {
+                push_config_attr(libegl::EGL_MIN_SWAP_INTERVAL, min_swap_interval as _);
+            }
+            if let Some(max_swap_interval) = config.max_swap_interval {
+                push_config_attr(libegl::EGL_MAX_SWAP_INTERVAL, max_swap_interval as _);
+            }
+
             let mut num_configs = 0;
             if (egl.eglGetConfigs)(display, null_mut(), 0, &mut num_configs) == libegl::EGL_FALSE {
                 return Err(egl_get_error(egl)).context("could not get num of available configs");
@@ -126,6 +140,20 @@ impl EglContext {
 
     pub fn make_current_surfaceless(&self, egl: &libegl::Lib) -> anyhow::Result<()> {
         self.make_current(egl, libegl::EGL_NO_SURFACE)
+    }
+
+    pub fn set_swap_interval(
+        &self,
+        egl: &libegl::Lib,
+        interval: libegl::EGLint,
+    ) -> anyhow::Result<()> {
+        unsafe {
+            if (egl.eglSwapInterval)(self.display, interval) == libegl::EGL_FALSE {
+                Err(egl_get_error(&egl)).context("could not set swap interval")
+            } else {
+                Ok(())
+            }
+        }
     }
 
     pub fn swap_buffers(
@@ -223,7 +251,7 @@ impl EglSurface {
                 (payload.wayland_egl.wl_egl_window_resize)(
                     payload.wl_egl_window,
                     logical_size.0 as i32,
-                    logical_size.0 as i32,
+                    logical_size.1 as i32,
                     0,
                     0,
                 );

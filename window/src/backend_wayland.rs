@@ -6,11 +6,11 @@ use anyhow::{anyhow, Context as _};
 use raw_window_handle as rwh;
 
 use crate::{
-    libwayland_client, libxkbcommon, Window, WindowConfig, WindowEvent, DEFAULT_LOGICAL_SIZE,
+    libwayland_client, libxkbcommon, Window, WindowAttrs, WindowEvent, DEFAULT_LOGICAL_SIZE,
 };
 
 pub struct WaylandWindow {
-    config: WindowConfig,
+    attrs: WindowAttrs,
 
     libwayland_client: libwayland_client::Lib,
     libxkbcommon: libxkbcommon::Lib,
@@ -133,10 +133,12 @@ unsafe extern "C" fn handle_xdg_toplevel_configure(
     let evl = &mut *(data as *mut WaylandWindow);
 
     assert!(width >= 0 && height >= 0);
+    // NOTE: if the width or height arguments are zero, it means the client should decide its own
+    // window dimension.
     let logical_size = if width > 0 || height > 0 {
         Some((width as u32, height as u32))
     } else {
-        evl.config.logical_size
+        evl.attrs.logical_size
     }
     .unwrap_or(DEFAULT_LOGICAL_SIZE);
     log::debug!("logical_size: {logical_size:?}");
@@ -166,7 +168,7 @@ const XDG_TOPLEVEL_LISTENER: libwayland_client::xdg_toplevel_listener =
     };
 
 impl WaylandWindow {
-    pub fn new_boxed(config: WindowConfig) -> anyhow::Result<Box<Self>> {
+    pub fn new_boxed(attrs: WindowAttrs) -> anyhow::Result<Box<Self>> {
         let libwayland_client = libwayland_client::Lib::load()?;
         let libxkbcommon = libxkbcommon::Lib::load()?;
 
@@ -175,7 +177,7 @@ impl WaylandWindow {
                 .context("could not connect to wayland display")?;
 
         let mut boxed = Box::new(WaylandWindow {
-            config,
+            attrs,
 
             libwayland_client,
             libxkbcommon,
@@ -300,7 +302,7 @@ impl rwh::HasWindowHandle for WaylandWindow {
 }
 
 impl Window for WaylandWindow {
-    fn update(&mut self) -> anyhow::Result<()> {
+    fn pump_events(&mut self) -> anyhow::Result<()> {
         let n = unsafe {
             (self.libwayland_client.wl_display_dispatch_pending)(self.wl_display.as_ptr())
         };

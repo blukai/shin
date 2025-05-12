@@ -1,8 +1,8 @@
 use glow::HasContext as _;
-use graphics::egl::{EglContext, EglSurface};
+use graphics::egl::{EglConfig, EglContext, EglSurface};
 use graphics::libegl;
 use raw_window_handle::{self as rwh, HasDisplayHandle as _, HasWindowHandle as _};
-use window::{WindowConfig, WindowEvent};
+use window::{WindowAttrs, WindowEvent};
 
 struct InitializedGraphicsContext {
     egl: libegl::Lib,
@@ -34,8 +34,19 @@ impl GraphicsContext {
         assert!(matches!(self, Self::Uninitialized));
 
         let egl = libegl::Lib::load()?;
-        let egl_context = EglContext::new(&egl, display_handle)?;
+        let egl_context = EglContext::new(
+            &egl,
+            display_handle,
+            EglConfig {
+                min_swap_interval: Some(0),
+                ..EglConfig::default()
+            },
+        )?;
         let egl_surface = EglSurface::new(&egl, &egl_context, window_handle, logical_size)?;
+
+        // TODO: figure out an okay way to toggle vsync.
+        // egl_context.make_current(&egl, egl_surface.as_ptr())?;
+        // egl_context.set_swap_interval(&egl, 0)?;
 
         let gl = unsafe {
             glow::Context::from_loader_function_cstr(|cstr| {
@@ -59,10 +70,12 @@ impl GraphicsContext {
 fn main() -> anyhow::Result<()> {
     env_logger::init();
 
-    let mut window = window::create_window(WindowConfig::default())?;
+    let mut window = window::create_window(WindowAttrs::default())?;
     let mut graphics_context = GraphicsContext::Uninitialized;
 
-    'update_loop: while let Ok(_) = window.update() {
+    'update_loop: loop {
+        window.pump_events()?;
+
         while let Some(event) = window.pop_event() {
             log::debug!("event: {event:?}");
 
