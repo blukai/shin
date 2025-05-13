@@ -9,7 +9,7 @@ use crate::{
     libwayland_client, libxkbcommon, Window, WindowAttrs, WindowEvent, DEFAULT_LOGICAL_SIZE,
 };
 
-pub struct WaylandWindow {
+pub struct WaylandBackend {
     attrs: WindowAttrs,
 
     libwayland_client: libwayland_client::Lib,
@@ -36,51 +36,53 @@ unsafe extern "C" fn handle_wl_registry_global(
     interface: *const c_char,
     version: u32,
 ) {
-    let evl = &mut *(data as *mut WaylandWindow);
+    unsafe {
+        let evl = &mut *(data as *mut WaylandBackend);
 
-    let interface = CStr::from_ptr(interface)
-        .to_str()
-        .expect("invalid interface string");
+        let interface = CStr::from_ptr(interface)
+            .to_str()
+            .expect("invalid interface string");
 
-    match interface {
-        "wl_compositor" => {
-            evl.wl_compositor = libwayland_client::wl_registry_bind(
-                &evl.libwayland_client,
-                wl_registry,
-                name,
-                &libwayland_client::wl_compositor_interface,
-                6.min(version),
-            ) as _;
-        }
-        "wl_seat" => {
-            evl.wl_seat = libwayland_client::wl_registry_bind(
-                &evl.libwayland_client,
-                wl_registry,
-                name,
-                &libwayland_client::wl_seat_interface,
-                9.min(version),
-            ) as _;
-        }
-        "wp_viewporter" => {
-            evl.wp_viewporter = libwayland_client::wl_registry_bind(
-                &evl.libwayland_client,
-                wl_registry,
-                name,
-                &libwayland_client::wp_viewporter_interface,
-                1.min(version),
-            ) as _;
-        }
-        "xdg_wm_base" => {
-            evl.xdg_wm_base = libwayland_client::wl_registry_bind(
-                &evl.libwayland_client,
-                wl_registry,
-                name,
-                &libwayland_client::xdg_wm_base_interface,
-                6.min(version),
-            ) as _;
-        }
-        _ => {
-            log::debug!("unused interface: {interface}");
+        match interface {
+            "wl_compositor" => {
+                evl.wl_compositor = libwayland_client::wl_registry_bind(
+                    &evl.libwayland_client,
+                    wl_registry,
+                    name,
+                    &libwayland_client::wl_compositor_interface,
+                    6.min(version),
+                ) as _;
+            }
+            "wl_seat" => {
+                evl.wl_seat = libwayland_client::wl_registry_bind(
+                    &evl.libwayland_client,
+                    wl_registry,
+                    name,
+                    &libwayland_client::wl_seat_interface,
+                    9.min(version),
+                ) as _;
+            }
+            "wp_viewporter" => {
+                evl.wp_viewporter = libwayland_client::wl_registry_bind(
+                    &evl.libwayland_client,
+                    wl_registry,
+                    name,
+                    &libwayland_client::wp_viewporter_interface,
+                    1.min(version),
+                ) as _;
+            }
+            "xdg_wm_base" => {
+                evl.xdg_wm_base = libwayland_client::wl_registry_bind(
+                    &evl.libwayland_client,
+                    wl_registry,
+                    name,
+                    &libwayland_client::xdg_wm_base_interface,
+                    6.min(version),
+                ) as _;
+            }
+            _ => {
+                log::debug!("unused interface: {interface}");
+            }
         }
     }
 }
@@ -96,8 +98,10 @@ unsafe extern "C" fn handle_xdg_wm_base_ping(
     xdg_wm_base: *mut libwayland_client::xdg_wm_base,
     serial: u32,
 ) {
-    let evl = &mut *(data as *mut WaylandWindow);
-    libwayland_client::xdg_wm_base_pong(&evl.libwayland_client, xdg_wm_base, serial);
+    unsafe {
+        let evl = &mut *(data as *mut WaylandBackend);
+        libwayland_client::xdg_wm_base_pong(&evl.libwayland_client, xdg_wm_base, serial);
+    }
 }
 
 const XDG_WM_BASE_LISTENER: libwayland_client::xdg_wm_base_listener =
@@ -110,10 +114,12 @@ unsafe extern "C" fn handle_xdg_surface_configure(
     xdg_surface: *mut libwayland_client::xdg_surface,
     serial: u32,
 ) {
-    log::debug!("recv xdg_surface_configure");
+    unsafe {
+        log::debug!("recv xdg_surface_configure");
 
-    let evl = &mut *(data as *mut WaylandWindow);
-    libwayland_client::xdg_surface_ack_configure(&evl.libwayland_client, xdg_surface, serial);
+        let evl = &mut *(data as *mut WaylandBackend);
+        libwayland_client::xdg_surface_ack_configure(&evl.libwayland_client, xdg_surface, serial);
+    }
 }
 
 const XDG_SURFACE_LISTENER: libwayland_client::xdg_surface_listener =
@@ -128,35 +134,39 @@ unsafe extern "C" fn handle_xdg_toplevel_configure(
     height: i32,
     _states: *mut libwayland_client::wl_array,
 ) {
-    log::debug!("recv xdg_toplevel_configure");
+    unsafe {
+        log::debug!("recv xdg_toplevel_configure");
 
-    let evl = &mut *(data as *mut WaylandWindow);
+        let evl = &mut *(data as *mut WaylandBackend);
 
-    assert!(width >= 0 && height >= 0);
-    // NOTE: if the width or height arguments are zero, it means the client should decide its own
-    // window dimension.
-    let logical_size = if width > 0 || height > 0 {
-        Some((width as u32, height as u32))
-    } else {
-        evl.attrs.logical_size
+        assert!(width >= 0 && height >= 0);
+        // NOTE: if the width or height arguments are zero, it means the client should decide its own
+        // window dimension.
+        let logical_size = if width > 0 || height > 0 {
+            Some((width as u32, height as u32))
+        } else {
+            evl.attrs.logical_size
+        }
+        .unwrap_or(DEFAULT_LOGICAL_SIZE);
+        log::debug!("logical_size: {logical_size:?}");
+
+        let event = WindowEvent::Configure { logical_size };
+        evl.events.push_back(event);
     }
-    .unwrap_or(DEFAULT_LOGICAL_SIZE);
-    log::debug!("logical_size: {logical_size:?}");
-
-    let event = WindowEvent::Configure { logical_size };
-    evl.events.push_back(event);
 }
 
 unsafe extern "C" fn handle_xdg_toplevel_close(
     data: *mut c_void,
     _xdg_toplevel: *mut libwayland_client::xdg_toplevel,
 ) {
-    log::debug!("recv xdg_toplevel_close");
+    unsafe {
+        log::debug!("recv xdg_toplevel_close");
 
-    let evl = &mut *(data as *mut WaylandWindow);
+        let evl = &mut *(data as *mut WaylandBackend);
 
-    let event = WindowEvent::CloseRequested;
-    evl.events.push_back(event);
+        let event = WindowEvent::CloseRequested;
+        evl.events.push_back(event);
+    }
 }
 
 const XDG_TOPLEVEL_LISTENER: libwayland_client::xdg_toplevel_listener =
@@ -167,7 +177,7 @@ const XDG_TOPLEVEL_LISTENER: libwayland_client::xdg_toplevel_listener =
         configure_bounds: libwayland_client::noop_listener!(),
     };
 
-impl WaylandWindow {
+impl WaylandBackend {
     pub fn new_boxed(attrs: WindowAttrs) -> anyhow::Result<Box<Self>> {
         let libwayland_client = libwayland_client::Lib::load()?;
         let libxkbcommon = libxkbcommon::Lib::load()?;
@@ -176,7 +186,7 @@ impl WaylandWindow {
             NonNull::new(unsafe { (libwayland_client.wl_display_connect)(null_mut()) })
                 .context("could not connect to wayland display")?;
 
-        let mut boxed = Box::new(WaylandWindow {
+        let mut boxed = Box::new(WaylandBackend {
             attrs,
 
             libwayland_client,
@@ -211,7 +221,7 @@ impl WaylandWindow {
             (boxed.libwayland_client.wl_proxy_add_listener)(
                 wl_registry as *mut libwayland_client::wl_proxy,
                 &WL_REGISTRY_LISTENER as *const libwayland_client::wl_registry_listener as _,
-                boxed.as_mut() as *mut WaylandWindow as *mut c_void,
+                boxed.as_mut() as *mut WaylandBackend as *mut c_void,
             );
             (boxed.libwayland_client.wl_display_roundtrip)(boxed.wl_display.as_ptr());
         }
@@ -223,7 +233,7 @@ impl WaylandWindow {
             (boxed.libwayland_client.wl_proxy_add_listener)(
                 boxed.xdg_wm_base as *mut libwayland_client::wl_proxy,
                 &XDG_WM_BASE_LISTENER as *const libwayland_client::xdg_wm_base_listener as _,
-                boxed.as_mut() as *mut WaylandWindow as *mut c_void,
+                boxed.as_mut() as *mut WaylandBackend as *mut c_void,
             );
         }
 
@@ -263,12 +273,12 @@ impl WaylandWindow {
             (boxed.libwayland_client.wl_proxy_add_listener)(
                 boxed.xdg_surface as *mut libwayland_client::wl_proxy,
                 &XDG_SURFACE_LISTENER as *const libwayland_client::xdg_surface_listener as _,
-                boxed.as_mut() as *mut WaylandWindow as *mut c_void,
+                boxed.as_mut() as *mut WaylandBackend as *mut c_void,
             );
             (boxed.libwayland_client.wl_proxy_add_listener)(
                 boxed.xdg_toplevel as *mut libwayland_client::wl_proxy,
                 &XDG_TOPLEVEL_LISTENER as *const libwayland_client::xdg_toplevel_listener as _,
-                boxed.as_mut() as *mut WaylandWindow as *mut c_void,
+                boxed.as_mut() as *mut WaylandBackend as *mut c_void,
             );
             libwayland_client::wl_surface_commit(&boxed.libwayland_client, boxed.wl_surface);
             (boxed.libwayland_client.wl_display_roundtrip)(boxed.wl_display.as_ptr());
@@ -280,7 +290,7 @@ impl WaylandWindow {
     }
 }
 
-impl rwh::HasDisplayHandle for WaylandWindow {
+impl rwh::HasDisplayHandle for WaylandBackend {
     fn display_handle(&self) -> Result<rwh::DisplayHandle<'_>, rwh::HandleError> {
         let wayland_display_handle = rwh::WaylandDisplayHandle::new(self.wl_display.cast());
         let raw_display_handle = rwh::RawDisplayHandle::Wayland(wayland_display_handle);
@@ -289,7 +299,7 @@ impl rwh::HasDisplayHandle for WaylandWindow {
     }
 }
 
-impl rwh::HasWindowHandle for WaylandWindow {
+impl rwh::HasWindowHandle for WaylandBackend {
     fn window_handle(&self) -> Result<rwh::WindowHandle<'_>, rwh::HandleError> {
         let Some(wl_surface) = NonNull::new(self.wl_surface) else {
             return Err(rwh::HandleError::Unavailable);
@@ -301,7 +311,7 @@ impl rwh::HasWindowHandle for WaylandWindow {
     }
 }
 
-impl Window for WaylandWindow {
+impl Window for WaylandBackend {
     fn pump_events(&mut self) -> anyhow::Result<()> {
         let n = unsafe {
             (self.libwayland_client.wl_display_dispatch_pending)(self.wl_display.as_ptr())

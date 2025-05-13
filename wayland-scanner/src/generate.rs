@@ -263,62 +263,68 @@ fn emit_stubs<W: io::Write>(w: &mut W, interface: &Interface) -> io::Result<()> 
 
         // body
 
-        write!(w, "    (lib.wl_proxy_marshal_flags)(\n",)?;
+        write!(w, "    unsafe {{\n")?;
+        write!(w, "        (lib.wl_proxy_marshal_flags)(\n",)?;
 
         // proxy: *mut super::wl_proxy,
-        write!(w, "        {} as *mut super::wl_proxy,\n", interface.name)?;
+        write!(
+            w,
+            "            {} as *mut super::wl_proxy,\n",
+            interface.name
+        )?;
         // opcode: u32,
         write!(
             w,
-            "        {}_{},\n",
+            "            {}_{},\n",
             interface.name.to_uppercase(),
             msg.name.to_uppercase()
         )?;
         // interface: *const wl_interface,
         if let Some(ret) = ret {
             if let Some(interface_name) = ret.interface.as_ref() {
-                write!(w, "        &{}_interface,\n", interface_name)?;
+                write!(w, "            &{}_interface,\n", interface_name)?;
             } else {
-                write!(w, "        interface,\n")?;
+                write!(w, "            interface,\n")?;
             }
         } else {
-            write!(w, "        std::ptr::null(),\n")?;
+            write!(w, "            std::ptr::null(),\n")?;
         }
         // version: u32,
         if ret.is_some_and(|arg| arg.interface.is_none()) {
-            write!(w, "        version,\n")?;
+            write!(w, "            version,\n")?;
         } else {
             write!(
                 w,
-                "        (lib.wl_proxy_get_version)({} as *mut super::wl_proxy),\n",
+                "            (lib.wl_proxy_get_version)({} as *mut super::wl_proxy),\n",
                 interface.name
             )?;
         }
         // flags: u32,
         if msg.r#type.as_ref().is_some_and(|ty| ty.eq("destructor")) {
-            write!(w, "        super::WL_MARSHAL_FLAG_DESTROY,\n")?;
+            write!(w, "            super::WL_MARSHAL_FLAG_DESTROY,\n")?;
         } else {
-            write!(w, "        0,\n")?;
+            write!(w, "            0,\n")?;
         }
         // ...
         for arg in msg.args.iter() {
             if arg.r#type == ArgType::NewId {
                 if arg.interface.is_none() {
-                    write!(w, "        (*interface).name,\n")?;
-                    write!(w, "        version,\n")?;
+                    write!(w, "            (*interface).name,\n")?;
+                    write!(w, "            version,\n")?;
                 }
-                write!(w, "        std::ptr::null::<std::ffi::c_void>(),\n")?;
+                write!(w, "            std::ptr::null::<std::ffi::c_void>(),\n")?;
             } else {
-                write!(w, "        {},\n", arg.name)?;
+                write!(w, "            {},\n", arg.name)?;
             }
         }
 
         if ret.is_some() {
-            write!(w, "    ) as _\n")?;
+            write!(w, "        ) as _\n")?;
         } else {
-            write!(w, "    );\n")?;
+            write!(w, "        );\n")?;
         }
 
+        write!(w, "    }}\n")?;
         write!(w, "}}\n\n")?;
     }
 

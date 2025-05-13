@@ -12,7 +12,7 @@ mod backend_wayland;
 #[cfg(feature = "winit")]
 mod backend_winit;
 
-#[cfg(target_family = "wasm")]
+#[cfg(target_arch = "wasm32")]
 mod backend_web;
 
 pub const DEFAULT_LOGICAL_SIZE: (u32, u32) = (640, 480);
@@ -37,21 +37,24 @@ pub fn create_window(window_attrs: WindowAttrs) -> anyhow::Result<Box<dyn Window
     let mut errors: Vec<anyhow::Error> = Vec::new();
 
     #[cfg(target_os = "linux")]
-    match backend_wayland::WaylandWindow::new_boxed(window_attrs.clone()) {
+    match backend_wayland::WaylandBackend::new_boxed(window_attrs.clone()) {
         Ok(wayland_window) => return Ok(wayland_window),
         Err(err) => errors.push(err),
     }
 
+    #[cfg(target_arch = "wasm32")]
+    match backend_web::WebBackend::new_boxed(window_attrs.clone()) {
+        Ok(web_window) => return Ok(web_window),
+        Err(err) => errors.push(err),
+    }
+
     #[cfg(feature = "winit")]
-    match backend_winit::WinitWindow::new(window_attrs.clone()) {
+    match backend_winit::WinitBackend::new(window_attrs.clone()) {
         Ok(winit_window) => return Ok(Box::new(winit_window)),
         Err(err) => errors.push(err),
     }
 
-    #[cfg(target_family = "wasm")]
-    unimplemented!("wasm window");
-
-    #[cfg(not(any(target_os = "linux", feature = "winit", target_family = "wasm")))]
+    #[cfg(not(any(target_os = "linux", feature = "winit", target_arch = "wasm32")))]
     compile_error!("all window backend are disabled");
 
     Err(anyhow!("{errors:?}"))

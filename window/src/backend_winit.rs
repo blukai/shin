@@ -6,7 +6,7 @@ use winit::platform::pump_events::EventLoopExtPumpEvents;
 
 use crate::{Window, WindowAttrs, WindowEvent, DEFAULT_LOGICAL_SIZE};
 
-struct WinitApp {
+struct App {
     window_attrs: WindowAttrs,
 
     window: Option<winit::window::Window>,
@@ -15,12 +15,12 @@ struct WinitApp {
     window_events: VecDeque<WindowEvent>,
 }
 
-pub struct WinitWindow {
+pub struct WinitBackend {
     event_loop: winit::event_loop::EventLoop<()>,
-    app: WinitApp,
+    app: App,
 }
 
-impl winit::application::ApplicationHandler for WinitApp {
+impl winit::application::ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         if self.window.is_some() {
             return;
@@ -74,11 +74,11 @@ impl winit::application::ApplicationHandler for WinitApp {
     }
 }
 
-impl WinitWindow {
+impl WinitBackend {
     pub fn new(attrs: WindowAttrs) -> anyhow::Result<Self> {
         let this = Self {
             event_loop: winit::event_loop::EventLoop::new()?,
-            app: WinitApp {
+            app: App {
                 window_attrs: attrs,
 
                 window: None,
@@ -91,13 +91,13 @@ impl WinitWindow {
     }
 }
 
-impl rwh::HasDisplayHandle for WinitWindow {
+impl rwh::HasDisplayHandle for WinitBackend {
     fn display_handle(&self) -> Result<rwh::DisplayHandle<'_>, rwh::HandleError> {
         self.event_loop.display_handle()
     }
 }
 
-impl rwh::HasWindowHandle for WinitWindow {
+impl rwh::HasWindowHandle for WinitBackend {
     fn window_handle(&self) -> Result<rwh::WindowHandle<'_>, rwh::HandleError> {
         if let Some(ref window) = self.app.window {
             window.window_handle()
@@ -107,7 +107,7 @@ impl rwh::HasWindowHandle for WinitWindow {
     }
 }
 
-impl Window for WinitWindow {
+impl Window for WinitBackend {
     fn pump_events(&mut self) -> anyhow::Result<()> {
         use winit::platform::pump_events::PumpStatus;
         let ret = match self.event_loop.pump_app_events(None, &mut self.app) {

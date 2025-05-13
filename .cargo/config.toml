@@ -1,0 +1,5 @@
+[target.wasm32-unknown-unknown]
+rustflags = [
+  # https://users.rust-lang.org/t/solved-get-wasm32-unknown-unknown-to-emit-funcref-for-fn-parameter-type/46458/2
+  "-Clink-arg=--export-table"
+]

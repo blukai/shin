@@ -2,7 +2,7 @@ use glow::HasContext as _;
 use graphics::egl::{EglConfig, EglContext, EglSurface};
 use graphics::libegl;
 use raw_window_handle::{self as rwh, HasDisplayHandle as _, HasWindowHandle as _};
-use window::{WindowAttrs, WindowEvent};
+use window::{Window, WindowAttrs, WindowEvent};
 
 struct InitializedGraphicsContext {
     egl: libegl::Lib,
@@ -67,34 +67,49 @@ impl GraphicsContext {
     }
 }
 
-fn main() -> anyhow::Result<()> {
-    env_logger::init();
+struct Context {
+    window: Box<dyn Window>,
+    graphics_context: GraphicsContext,
+    close_requested: bool,
+}
 
-    let mut window = window::create_window(WindowAttrs::default())?;
-    let mut graphics_context = GraphicsContext::Uninitialized;
+impl Context {
+    fn new() -> anyhow::Result<Self> {
+        let window = window::create_window(WindowAttrs::default())?;
+        let graphics_context = GraphicsContext::Uninitialized;
 
-    'update_loop: loop {
-        window.pump_events()?;
+        Ok(Self {
+            window,
+            graphics_context,
+            close_requested: false,
+        })
+    }
 
-        while let Some(event) = window.pop_event() {
+    fn iterate(&mut self) -> anyhow::Result<()> {
+        self.window.pump_events()?;
+
+        while let Some(event) = self.window.pop_event() {
             log::debug!("event: {event:?}");
 
             match event {
-                WindowEvent::Configure { logical_size } => match graphics_context {
-                    GraphicsContext::Uninitialized => graphics_context.init(
-                        window.display_handle()?,
-                        window.window_handle()?,
+                WindowEvent::Configure { logical_size } => match self.graphics_context {
+                    GraphicsContext::Uninitialized => self.graphics_context.init(
+                        self.window.display_handle()?,
+                        self.window.window_handle()?,
                         logical_size,
                     )?,
                     GraphicsContext::Initialized(ref mut igc) => {
                         igc.resize(logical_size);
                     }
                 },
-                WindowEvent::CloseRequested => break 'update_loop,
+                WindowEvent::CloseRequested => {
+                    self.close_requested = true;
+                    return Ok(());
+                }
             }
         }
 
-        if let GraphicsContext::Initialized(ref igc) = graphics_context {
+        if let GraphicsContext::Initialized(ref igc) = self.graphics_context {
             unsafe {
                 igc.egl_context
                     .make_current(&igc.egl, igc.egl_surface.as_ptr())?;
@@ -106,7 +121,16 @@ fn main() -> anyhow::Result<()> {
                     .swap_buffers(&igc.egl, igc.egl_surface.as_ptr())?;
             }
         }
-    }
 
-    Ok(())
+        Ok(())
+    }
+}
+
+fn main() {
+    env_logger::init();
+
+    let mut ctx = Context::new().expect("could not create context");
+    while !ctx.close_requested {
+        ctx.iterate().expect("iteration failure");
+    }
 }
