@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
   "dynlib",
+  "gl-generator",
   "graphics",
   "wayland-scanner",
   "window",
@@ -13,7 +14,6 @@ edition = "2024"
 [workspace.dependencies]
 anyhow = "1.0"
 env_logger = { version = "0.11", default-features = false }
-glow = "0.16"
 libc = "0.2"
 log = "0.4"
 quick-xml = "0.37"
@@ -21,6 +21,7 @@ raw-window-handle = { version = "0.6", features = ["std"] }
 winit = "0.30"
 # internal
 dynlib = { path = "dynlib" }
+gl-generator = { path = "gl-generator" }
 graphics = { path = "graphics" }
 wayland-scanner = { path = "wayland-scanner" }
 window = { path = "window" }
@@ -33,10 +34,10 @@ edition.workspace = true
 [dev-dependencies]
 anyhow.workspace = true
 env_logger.workspace = true
-glow.workspace = true
-graphics.workspace = true
 log.workspace = true
 raw-window-handle.workspace = true
+# internal
+graphics.workspace = true
 window.workspace = true
 
 [features]

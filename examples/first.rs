@@ -1,5 +1,5 @@
-use glow::HasContext as _;
 use graphics::egl::{EglConfig, EglContext, EglSurface};
+use graphics::gl;
 use graphics::libegl;
 use raw_window_handle::{self as rwh, HasDisplayHandle as _, HasWindowHandle as _};
 use window::{Window, WindowAttrs, WindowEvent};
@@ -9,7 +9,7 @@ struct InitializedGraphicsContext {
     egl_context: EglContext,
     egl_surface: EglSurface,
 
-    gl: glow::Context,
+    gl: gl::sys::Api,
 }
 
 impl InitializedGraphicsContext {
@@ -44,16 +44,14 @@ impl GraphicsContext {
         )?;
         let egl_surface = EglSurface::new(&egl, &egl_context, window_handle, logical_size)?;
 
-        // TODO: figure out an okay way to toggle vsync.
+        // TODO: figure out an okay way to include vsync toggle.
         // egl_context.make_current(&egl, egl_surface.as_ptr())?;
         // egl_context.set_swap_interval(&egl, 0)?;
 
         let gl = unsafe {
-            glow::Context::from_loader_function_cstr(|cstr| {
-                (egl.eglGetProcAddress)(cstr.as_ptr() as _) as _
-            })
+            gl::sys::Api::load_with(|procname| (egl.eglGetProcAddress)(procname as _) as _)
         };
-        log::info!("initialized gl version {:?}", gl.version());
+        // log::info!("initialized gl version {:?}", gl.version());
 
         *self = Self::Initialized(InitializedGraphicsContext {
             egl,
@@ -114,8 +112,8 @@ impl Context {
                 igc.egl_context
                     .make_current(&igc.egl, igc.egl_surface.as_ptr())?;
 
-                igc.gl.clear_color(1.0, 0.0, 0.0, 1.0);
-                igc.gl.clear(glow::COLOR_BUFFER_BIT);
+                igc.gl.ClearColor(1.0, 0.0, 0.0, 1.0);
+                igc.gl.Clear(gl::sys::COLOR_BUFFER_BIT);
 
                 igc.egl_context
                     .swap_buffers(&igc.egl, igc.egl_surface.as_ptr())?;

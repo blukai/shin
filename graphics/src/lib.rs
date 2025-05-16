@@ -4,3 +4,5 @@ pub mod egl;
 pub mod libegl;
 #[cfg(target_os = "linux")]
 pub mod libwayland_egl;
+
+pub mod gl;
