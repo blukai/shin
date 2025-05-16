@@ -5,4 +5,4 @@ edition.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-quick-xml.workspace = true
+xml-iterator.workspace = true

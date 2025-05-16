@@ -6,6 +6,7 @@ members = [
   "graphics",
   "wayland-scanner",
   "window",
+  "xml-iterator",
 ]
 
 [workspace.package]
@@ -25,6 +26,7 @@ gl-generator = { path = "gl-generator" }
 graphics = { path = "graphics" }
 wayland-scanner = { path = "wayland-scanner" }
 window = { path = "window" }
+xml-iterator = { path = "xml-iterator" }
 
 [package]
 name = "shin"

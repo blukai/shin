@@ -1,11 +1,8 @@
-use std::borrow::Cow;
 use std::collections::HashSet;
 use std::io;
 use std::str::FromStr;
 
 use anyhow::{Context as _, bail};
-use quick_xml::events::{BytesStart, Event};
-use quick_xml::reader::Reader;
 
 const BOILERPLATE: &str = r#"
 use std::ffi::{c_char, c_double, c_float, c_int, c_short, c_uchar, c_uint, c_ushort, c_void};
@@ -65,119 +62,127 @@ pub type GLDEBUGPROC = Option<extern "system" fn(
 // https://github.com/KhronosGroup/OpenGL-Registry/blob/8e772a3b0c9e8a85ccb6f471b4cdbf94c8bcd71d/xml/readme.pdf
 
 #[derive(Debug)]
-pub struct Enum {
-    pub value: String,
-    pub name: String,
-    pub api: Option<String>,
-    pub ty: String,
-    pub group: Option<String>,
-    pub alias: Option<String>,
-    pub comment: Option<String>,
+pub struct Enum<'a> {
+    pub value: &'a str,
+    pub name: &'a str,
+    pub api: Option<&'a str>,
+    pub ty: &'a str,
+    pub group: Option<&'a str>,
+    pub alias: Option<&'a str>,
+    pub comment: Option<&'a str>,
 }
 
 #[derive(Debug)]
-pub enum CommandTypePart {
-    Defined(String),
-    Other(String),
+pub enum CommandTypePart<'a> {
+    Defined(&'a str),
+    Other(&'a str),
 }
 
 #[derive(Debug)]
-pub struct CommandProto {
-    pub return_type_parts: Vec<CommandTypePart>,
-    pub name: String,
+pub struct CommandProto<'a> {
+    pub return_type_parts: Vec<CommandTypePart<'a>>,
+    pub name: &'a str,
 }
 
 #[derive(Debug)]
-pub struct CommandParam {
-    pub type_parts: Vec<CommandTypePart>,
-    pub name: String,
+pub struct CommandParam<'a> {
+    pub type_parts: Vec<CommandTypePart<'a>>,
+    pub name: &'a str,
 }
 
 #[derive(Debug)]
-pub struct Command {
-    pub proto: CommandProto,
-    pub params: Vec<CommandParam>,
+pub struct Command<'a> {
+    pub proto: CommandProto<'a>,
+    pub params: Vec<CommandParam<'a>>,
 }
 
 #[derive(Debug)]
-pub struct Interface {
-    pub enums: Vec<String>,
-    pub commands: Vec<String>,
+pub struct Interface<'a> {
+    pub enums: Vec<&'a str>,
+    pub commands: Vec<&'a str>,
 }
 
 #[derive(Debug)]
-pub struct Feature {
-    pub api: String,
-    pub name: String,
-    pub number: String,
-    pub requires: Vec<Interface>,
-    pub removes: Vec<Interface>,
+pub struct Feature<'a> {
+    pub api: &'a str,
+    pub name: &'a str,
+    pub number: &'a str,
+    pub requires: Vec<Interface<'a>>,
+    pub removes: Vec<Interface<'a>>,
 }
 
 #[derive(Debug)]
-pub struct Extension {
-    pub name: String,
-    pub supported: String,
-    pub requires: Vec<Interface>,
+pub struct Extension<'a> {
+    pub name: &'a str,
+    pub supported: &'a str,
+    pub requires: Vec<Interface<'a>>,
 }
 
 #[derive(Debug)]
-pub struct Registry {
-    pub enums: Vec<Enum>,
-    pub commands: Vec<Command>,
-    pub features: Vec<Feature>,
-    pub extensions: Vec<Extension>,
+pub struct Registry<'a> {
+    pub enums: Vec<Enum<'a>>,
+    pub commands: Vec<Command<'a>>,
+    pub features: Vec<Feature<'a>>,
+    pub extensions: Vec<Extension<'a>>,
 }
 
-fn bytes_to_string(bytes: &[u8]) -> String {
-    unsafe { String::from_utf8_unchecked(bytes.to_vec()) }
-}
-
-fn text_or_err(event: Event) -> anyhow::Result<String> {
-    let Event::Text(text) = event else {
-        bail!("unexpected event (got {event:?}, want text)");
+fn expect_text<'a>(
+    element_iterator: &mut xml_iterator::ElementIterator<'a>,
+) -> anyhow::Result<&'a str> {
+    let Some(element) = element_iterator.next() else {
+        bail!("unexpected eof");
     };
-    Ok(bytes_to_string(&text))
+    let xml_iterator::Element::Text(text) = element else {
+        bail!("unexpected element (got {element:?}, want text)");
+    };
+    Ok(&text)
 }
 
-fn end_or_err(event: Event) -> anyhow::Result<()> {
-    let Event::End(_) = event else {
-        bail!("unexpected event (got {event:?}, want end)");
+fn expect_end_tag<'a>(
+    element_iterator: &mut xml_iterator::ElementIterator<'a>,
+) -> anyhow::Result<()> {
+    let Some(element) = element_iterator.next() else {
+        bail!("unexpected eof");
+    };
+    let xml_iterator::Element::EndTag(_) = element else {
+        bail!("unexpected element (got {element:?}, want end)");
     };
     Ok(())
 }
 
-fn get_enum_type(bytes_start: BytesStart) -> anyhow::Result<Cow<'static, str>> {
-    let ty = bytes_start.try_get_attribute(b"type")?;
-    match ty.as_ref().map(|attr| attr.value.as_ref()) {
-        Some(b"bitmask") => Ok(Cow::from("GLbitfield")),
-        None => Ok(Cow::from("GLenum")),
+fn get_enum_type<'a>(start_tag: xml_iterator::StartTag<'a>) -> anyhow::Result<&'static str> {
+    let ty = start_tag
+        .iter_attrs()
+        .find(|attr| attr.key == "type")
+        .map(|attr| attr.value);
+    match ty {
+        Some("bitmask") => Ok("GLbitfield"),
+        None => Ok("GLenum"),
         other => bail!("unknown enum block ty: {other:?}"),
     }
 }
 
-fn parse_enum_token_attrs(
-    bytes_start: BytesStart,
-    block_type: &Cow<'static, str>,
-) -> anyhow::Result<Enum> {
-    let mut value: Option<String> = None;
-    let mut name: Option<String> = None;
-    let mut api: Option<String> = None;
-    let mut ty: Option<String> = None;
-    let mut group: Option<String> = None;
-    let mut alias: Option<String> = None;
-    let mut comment: Option<String> = None;
-    for attr in bytes_start.attributes() {
-        let attr = attr?;
-        let prev = match attr.key.as_ref() {
-            b"value" => value.replace(bytes_to_string(&attr.value)),
-            b"name" => name.replace(bytes_to_string(&attr.value)),
-            b"api" => api.replace(bytes_to_string(&attr.value)),
-            b"type" => ty.replace(bytes_to_string(&attr.value)),
-            b"group" => group.replace(bytes_to_string(&attr.value)),
-            b"alias" => alias.replace(bytes_to_string(&attr.value)),
-            b"comment" => comment.replace(bytes_to_string(&attr.value)),
-            other => bail!("unexpected attr: {:?}", bytes_to_string(other)),
+fn parse_enum_token_attrs<'a>(
+    empty_tag: xml_iterator::EmptyTag<'a>,
+    block_type: &'static str,
+) -> anyhow::Result<Enum<'a>> {
+    let mut value: Option<&'a str> = None;
+    let mut name: Option<&'a str> = None;
+    let mut api: Option<&'a str> = None;
+    let mut ty: Option<&'a str> = None;
+    let mut group: Option<&'a str> = None;
+    let mut alias: Option<&'a str> = None;
+    let mut comment: Option<&'a str> = None;
+    for attr in empty_tag.iter_attrs() {
+        let prev = match attr.key {
+            "value" => value.replace(attr.value),
+            "name" => name.replace(attr.value),
+            "api" => api.replace(attr.value),
+            "type" => ty.replace(attr.value),
+            "group" => group.replace(attr.value),
+            "alias" => alias.replace(attr.value),
+            "comment" => comment.replace(attr.value),
+            other => bail!("unexpected attr: {:?}", other),
         };
         if prev.is_some() {
             bail!("duplicate attr: {prev:?}");
@@ -188,80 +193,70 @@ fn parse_enum_token_attrs(
         name: name.context("name is missing")?,
         api,
         ty: ty
-            .map(|ty| match ty.as_str() {
-                "u" => "GLuint".to_string(),
-                "ull" => "GLuint64".to_string(),
+            .map(|ty| match ty {
+                "u" => "GLuint",
+                "ull" => "GLuint64",
                 _ => ty,
             })
-            .unwrap_or_else(|| block_type.to_string()),
+            .unwrap_or(block_type),
         group,
         alias,
         comment,
     })
 }
 
-fn parse_enum_block<R>(
-    bytes_start: BytesStart,
-    reader: &mut Reader<R>,
-    buf: &mut Vec<u8>,
-) -> anyhow::Result<Vec<Enum>>
-where
-    R: io::BufRead,
-{
-    let block_type = get_enum_type(bytes_start)?;
-    let mut enums: Vec<Enum> = Vec::new();
-    loop {
-        let event = reader.read_event_into(buf)?;
-        match event {
-            Event::Empty(empty) => match empty.name().as_ref() {
-                b"enum" => {
-                    let token = parse_enum_token_attrs(empty, &block_type)
+fn parse_enum_block_into<'a>(
+    start_tag: xml_iterator::StartTag<'a>,
+    element_iterator: &mut xml_iterator::ElementIterator<'a>,
+    enums: &mut Vec<Enum<'a>>,
+) -> anyhow::Result<()> {
+    let block_type = get_enum_type(start_tag)?;
+    while let Some(element) = element_iterator.next() {
+        match element {
+            xml_iterator::Element::EmptyTag(empty) => match empty.name {
+                "enum" => {
+                    let token = parse_enum_token_attrs(empty, block_type)
                         .context("could not parse enum token attrs")?;
                     enums.push(token);
                 }
-                b"unused" => {}
-                other => bail!("unexpected empty: {:?}", bytes_to_string(other)),
+                "unused" => {}
+                other => bail!("unexpected empty: {:?}", other),
             },
-            Event::End(end) if end.name().as_ref().eq(b"enums") => break,
-            Event::Text(text) if text.iter().all(|x| (*x as char).is_whitespace()) => {}
-            Event::Comment(_) => {}
-            other => bail!("unexpected event: {other:?}"),
+            xml_iterator::Element::Text(text) if text.chars().all(|c| c.is_whitespace()) => {}
+            xml_iterator::Element::EndTag(end) if end.name == "enums" => break,
+            xml_iterator::Element::Comment(_) => {}
+            other => bail!("unexpected element: {other:?}"),
         }
     }
-    Ok(enums)
+    Ok(())
 }
 
-fn parse_command_proto<R>(reader: &mut Reader<R>, buf: &mut Vec<u8>) -> anyhow::Result<CommandProto>
-where
-    R: io::BufRead,
-{
-    let mut return_ty_parts: Vec<CommandTypePart> = Vec::new();
-    let mut name: Option<String> = None;
-    loop {
-        let event = reader.read_event_into(buf)?;
-        match event {
-            Event::Text(text) => {
-                if !text.iter().all(|x| x.is_ascii_whitespace()) {
-                    return_ty_parts
-                        .push(CommandTypePart::Other(bytes_to_string(text.trim_ascii())));
+fn parse_command_proto<'a>(
+    element_iterator: &mut xml_iterator::ElementIterator<'a>,
+) -> anyhow::Result<CommandProto<'a>> {
+    let mut return_ty_parts: Vec<CommandTypePart<'a>> = Vec::new();
+    let mut name: Option<&'a str> = None;
+    while let Some(element) = element_iterator.next() {
+        match element {
+            xml_iterator::Element::Text(text) => {
+                if !text.chars().all(|c| c.is_whitespace()) {
+                    return_ty_parts.push(CommandTypePart::Other(text.trim()));
                 }
             }
-            Event::Start(start) => match start.name().as_ref() {
-                b"ptype" => {
-                    return_ty_parts.push(CommandTypePart::Defined(text_or_err(
-                        reader.read_event_into(buf)?,
-                    )?));
-                    end_or_err(reader.read_event_into(buf)?)?;
-                }
-                b"name" => {
+            xml_iterator::Element::StartTag(start) => match start.name {
+                "name" => {
                     assert!(name.is_none());
-                    name = Some(text_or_err(reader.read_event_into(buf)?)?);
-                    end_or_err(reader.read_event_into(buf)?)?;
+                    name = Some(expect_text(element_iterator)?);
+                    expect_end_tag(element_iterator)?;
                 }
-                other => bail!("unexpected start: {:?}", bytes_to_string(other)),
+                "ptype" => {
+                    return_ty_parts.push(CommandTypePart::Defined(expect_text(element_iterator)?));
+                    expect_end_tag(element_iterator)?;
+                }
+                other => bail!("unexpected start: {other}"),
             },
-            Event::End(end) if end.name().as_ref().eq(b"proto") => break,
-            other => bail!("unexpected event: {other:?}"),
+            xml_iterator::Element::EndTag(end) if end.name == "proto" => break,
+            other => bail!("unexpected element: {other:?}"),
         }
     }
     Ok(CommandProto {
@@ -270,79 +265,71 @@ where
     })
 }
 
-fn parse_command_param<R>(reader: &mut Reader<R>, buf: &mut Vec<u8>) -> anyhow::Result<CommandParam>
-where
-    R: io::BufRead,
-{
-    let mut ty_parts: Vec<CommandTypePart> = Vec::new();
-    let mut name: Option<String> = None;
-    loop {
-        let event = reader.read_event_into(buf)?;
-        match event {
-            Event::Text(text) => {
-                if !text.iter().all(|x| x.is_ascii_whitespace()) {
-                    ty_parts.push(CommandTypePart::Other(bytes_to_string(text.trim_ascii())));
+fn parse_command_param<'a>(
+    element_iterator: &mut xml_iterator::ElementIterator<'a>,
+) -> anyhow::Result<CommandParam<'a>> {
+    let mut ty_parts: Vec<CommandTypePart<'a>> = Vec::new();
+    let mut name: Option<&'a str> = None;
+    while let Some(element) = element_iterator.next() {
+        match element {
+            xml_iterator::Element::StartTag(start) => match start.name {
+                "ptype" => {
+                    ty_parts.push(CommandTypePart::Defined(expect_text(element_iterator)?));
+                    expect_end_tag(element_iterator)?;
                 }
-            }
-            Event::Start(start) => match start.name().as_ref() {
-                b"ptype" => {
-                    ty_parts.push(CommandTypePart::Defined(text_or_err(
-                        reader.read_event_into(buf)?,
-                    )?));
-                    end_or_err(reader.read_event_into(buf)?)?;
-                }
-                b"name" => {
+                "name" => {
                     assert!(name.is_none());
-                    name = Some(text_or_err(reader.read_event_into(buf)?)?);
-                    end_or_err(reader.read_event_into(buf)?)?;
+                    name = Some(expect_text(element_iterator)?);
+                    expect_end_tag(element_iterator)?;
                 }
-                other => bail!("unexpected start: {:?}", bytes_to_string(other)),
+                other => bail!("unexpected start: {other}"),
             },
-            Event::End(end) if end.name().as_ref().eq(b"param") => {
-                return Ok(CommandParam {
-                    type_parts: ty_parts,
-                    name: name.take().context("param name is missing")?,
-                });
+            xml_iterator::Element::Text(text) => {
+                if !text.chars().all(|c| c.is_whitespace()) {
+                    ty_parts.push(CommandTypePart::Other(text.trim()));
+                }
             }
-            other => bail!("unexpected event: {other:?}"),
+            xml_iterator::Element::EndTag(end) if end.name == "param" => break,
+            other => bail!("unexpected element: {other:?}"),
         }
     }
+    return Ok(CommandParam {
+        type_parts: ty_parts,
+        name: name.take().context("param name is missing")?,
+    });
 }
 
-fn parse_command<R>(reader: &mut Reader<R>, buf: &mut Vec<u8>) -> anyhow::Result<Command>
-where
-    R: io::BufRead,
-{
-    let mut proto: Option<CommandProto> = None;
-    let mut params: Vec<CommandParam> = Vec::new();
-    loop {
-        let event = reader.read_event_into(buf)?;
-        match event {
-            Event::Start(start) => match start.name().as_ref() {
-                b"proto" => {
+fn parse_command<'a>(
+    element_iterator: &mut xml_iterator::ElementIterator<'a>,
+) -> anyhow::Result<Command<'a>> {
+    let mut proto: Option<CommandProto<'a>> = None;
+    let mut params: Vec<CommandParam<'a>> = Vec::new();
+    while let Some(element) = element_iterator.next() {
+        match element {
+            xml_iterator::Element::StartTag(start) => match start.name {
+                "proto" => {
                     assert!(proto.is_none());
                     proto = Some(
-                        parse_command_proto(reader, buf)
+                        parse_command_proto(element_iterator)
                             .context("could not parse command proto")?,
                     );
                 }
-                b"param" => {
+                "param" => {
                     params.push(
-                        parse_command_param(reader, buf)
+                        parse_command_param(element_iterator)
                             .context("could not parse command param")?,
                     );
                 }
-                other => bail!("unexpected start: {:?}", bytes_to_string(other)),
+                other => bail!("unexpected start: {other}"),
             },
-            Event::End(end) => match end.name().as_ref() {
-                b"command" => break,
-                other => bail!("unexpected end: {:?}", bytes_to_string(other)),
+            xml_iterator::Element::EndTag(end) => match end.name {
+                "command" => break,
+                other => bail!("unexpected end: {other}"),
             },
-            Event::Text(text) if text.iter().all(|x| x.is_ascii_whitespace()) => {}
-            Event::Comment(_) => {}
-            Event::Empty(empty)
-                if matches!(empty.name().as_ref(), b"glx" | b"alias" | b"vecequiv") => {}
-            other => bail!("unexpected event: {other:?}"),
+            xml_iterator::Element::Text(text) if text.chars().all(|c| c.is_whitespace()) => {}
+            xml_iterator::Element::EmptyTag(empty)
+                if matches!(empty.name, "glx" | "alias" | "vecequiv") => {}
+            other => bail!("unexpected element: {other:?}"),
         }
     }
     Ok(Command {
@@ -351,55 +338,51 @@ where
     })
 }
 
-fn parse_interface<R>(
-    tag: &[u8],
-    reader: &mut Reader<R>,
-    buf: &mut Vec<u8>,
-) -> anyhow::Result<Interface>
-where
-    R: io::BufRead,
-{
-    let mut enums: Vec<String> = Vec::new();
-    let mut commands: Vec<String> = Vec::new();
-    loop {
-        let event = reader.read_event_into(buf)?;
-        match event {
-            Event::End(end) if end.name().as_ref().eq(tag) => break,
-            Event::Text(text) if text.iter().all(|x| (*x as char).is_whitespace()) => {}
-            Event::Empty(empty) => match empty.name().as_ref() {
-                b"type" => {}
-                b"enum" => {
+fn parse_interface<'a>(
+    tag_name: &str,
+    element_iterator: &mut xml_iterator::ElementIterator<'a>,
+) -> anyhow::Result<Interface<'a>> {
+    let mut enums: Vec<&'a str> = Vec::new();
+    let mut commands: Vec<&'a str> = Vec::new();
+    while let Some(element) = element_iterator.next() {
+        match element {
+            xml_iterator::Element::Text(text) if text.chars().all(|c| c.is_whitespace()) => {}
+            xml_iterator::Element::EmptyTag(empty) => match empty.name {
+                "type" => {}
+                "enum" => {
                     let name = empty
-                        .try_get_attribute(b"name")?
+                        .iter_attrs()
+                        .find(|attr| attr.key == "name")
                         .context("name is missing")?;
-                    enums.push(bytes_to_string(&name.value))
+                    enums.push(name.value);
                 }
-                b"command" => {
+                "command" => {
                     let name = empty
-                        .try_get_attribute(b"name")?
+                        .iter_attrs()
+                        .find(|attr| attr.key == "name")
                         .context("name is missing")?;
-                    commands.push(bytes_to_string(&name.value))
+                    commands.push(name.value);
                 }
-                other => bail!("unexpected empty: {:?}", bytes_to_string(other)),
+                other => bail!("unexpected empty: {other}"),
             },
-            Event::Comment(_) => {}
-            other => bail!("unexpected event: {other:?}"),
+            xml_iterator::Element::EndTag(end) if end.name == tag_name => break,
+            xml_iterator::Element::Comment(_) => {}
+            other => bail!("unexpected element: {other:?}"),
         }
     }
     Ok(Interface { enums, commands })
 }
 
-fn parse_feature_attrs(bytes_start: BytesStart) -> anyhow::Result<Feature> {
-    let mut api: Option<String> = None;
-    let mut name: Option<String> = None;
-    let mut number: Option<String> = None;
-    for attr in bytes_start.attributes() {
-        let attr = attr?;
-        let prev = match attr.key.as_ref() {
-            b"api" => api.replace(bytes_to_string(&attr.value)),
-            b"name" => name.replace(bytes_to_string(&attr.value)),
-            b"number" => number.replace(bytes_to_string(&attr.value)),
-            other => bail!("unexpected attr: {:?}", bytes_to_string(other)),
+fn parse_feature_attrs<'a>(start_tag: xml_iterator::StartTag<'a>) -> anyhow::Result<Feature<'a>> {
+    let mut api: Option<&'a str> = None;
+    let mut name: Option<&'a str> = None;
+    let mut number: Option<&'a str> = None;
+    for attr in start_tag.iter_attrs() {
+        let prev = match attr.key {
+            "api" => api.replace(attr.value),
+            "name" => name.replace(attr.value),
+            "number" => number.replace(attr.value),
+            other => bail!("unexpected attr: {other}"),
         };
         if prev.is_some() {
             bail!("duplicate attr: {prev:?}");
@@ -414,51 +397,47 @@ fn parse_feature_attrs(bytes_start: BytesStart) -> anyhow::Result<Feature> {
     })
 }
 
-fn parse_feature<R>(
-    bytes_start: BytesStart,
-    reader: &mut Reader<R>,
-    buf: &mut Vec<u8>,
-) -> anyhow::Result<Feature>
-where
-    R: io::BufRead,
-{
-    let mut feature = parse_feature_attrs(bytes_start).context("could not parse feature attrs")?;
-    loop {
-        let event = reader.read_event_into(buf)?;
-        match event {
-            Event::End(end) if end.name().as_ref().eq(b"feature") => break,
-            Event::Text(text) if text.iter().all(|x| (*x as char).is_whitespace()) => {}
-            Event::Start(start) => match start.name().as_ref() {
-                b"require" => {
-                    let require = parse_interface(b"require", reader, buf)
-                        .context("could not parse feature requires")?;
+fn parse_feature<'a>(
+    start_tag: xml_iterator::StartTag<'a>,
+    element_iterator: &mut xml_iterator::ElementIterator<'a>,
+) -> anyhow::Result<Feature<'a>> {
+    let mut feature = parse_feature_attrs(start_tag).context("could not parse feature attrs")?;
+    while let Some(element) = element_iterator.next() {
+        match element {
+            xml_iterator::Element::Text(text) if text.chars().all(|c| c.is_whitespace()) => {}
+            xml_iterator::Element::StartTag(start) => match start.name {
+                "require" => {
+                    let require = parse_interface("require", element_iterator)
+                        .context("could not parse feature require")?;
                     feature.requires.push(require);
                 }
-                b"remove" => {
-                    let remove = parse_interface(b"remove", reader, buf)
-                        .context("could not parse feature removes")?;
+                "remove" => {
+                    let remove = parse_interface("remove", element_iterator)
+                        .context("could not parse feature remove")?;
                     feature.removes.push(remove);
                 }
-                other => bail!("unexpected start: {:?}", bytes_to_string(other)),
+                other => bail!("unexpected start: {other}"),
             },
-            Event::Comment(_) => {}
-            Event::Empty(_) => {}
+            xml_iterator::Element::EmptyTag(empty) if empty.name == "require" => {}
+            xml_iterator::Element::Comment(_) => {}
+            xml_iterator::Element::EndTag(end) if end.name == "feature" => break,
             other => bail!("unexpected event: {other:?}"),
         }
     }
     Ok(feature)
 }
 
-fn parse_extension_attrs(bytes_start: BytesStart) -> anyhow::Result<Extension> {
-    let mut name: Option<String> = None;
-    let mut supported: Option<String> = None;
-    for attr in bytes_start.attributes() {
-        let attr = attr?;
-        let prev = match attr.key.as_ref() {
-            b"name" => name.replace(bytes_to_string(&attr.value)),
-            b"supported" => supported.replace(bytes_to_string(&attr.value)),
-            b"comment" => None,
-            other => bail!("unexpected attr: {:?}", bytes_to_string(other)),
+fn parse_extension_attrs<'a>(
+    start_tag: xml_iterator::StartTag<'a>,
+) -> anyhow::Result<Extension<'a>> {
+    let mut name: Option<&'a str> = None;
+    let mut supported: Option<&'a str> = None;
+    for attr in start_tag.iter_attrs() {
+        let prev = match attr.key {
+            "name" => name.replace(attr.value),
+            "supported" => supported.replace(attr.value),
+            "comment" => None,
+            other => bail!("unexpected attr: {other}"),
         };
         if prev.is_some() {
             bail!("duplicate attr: {prev:?}");
@@ -471,73 +450,59 @@ fn parse_extension_attrs(bytes_start: BytesStart) -> anyhow::Result<Extension> {
     })
 }
 
-fn parse_extension<R>(
-    bytes_start: BytesStart,
-    reader: &mut Reader<R>,
-    buf: &mut Vec<u8>,
-) -> anyhow::Result<Extension>
-where
-    R: io::BufRead,
-{
+fn parse_extension<'a>(
+    start_tag: xml_iterator::StartTag<'a>,
+    element_iterator: &mut xml_iterator::ElementIterator<'a>,
+) -> anyhow::Result<Extension<'a>> {
     let mut extension =
-        parse_extension_attrs(bytes_start).context("could not parse extension attrs")?;
-    loop {
-        let event = reader.read_event_into(buf)?;
-        match event {
-            Event::End(end) if end.name().as_ref().eq(b"extension") => break,
-            Event::Text(text) if text.iter().all(|x| (*x as char).is_whitespace()) => {}
-            Event::Start(start) => match start.name().as_ref() {
-                b"require" => {
-                    let require = parse_interface(b"require", reader, buf)
-                        .context("could not parse extension requires")?;
+        parse_extension_attrs(start_tag).context("could not parse extension attrs")?;
+    while let Some(element) = element_iterator.next() {
+        match element {
+            xml_iterator::Element::Text(text) if text.chars().all(|c| c.is_whitespace()) => {}
+            xml_iterator::Element::StartTag(start) => match start.name {
+                "require" => {
+                    let require = parse_interface("require", element_iterator)
+                        .context("could not parse extension requirs")?;
                     extension.requires.push(require);
                 }
-                other => bail!("unexpected start: {:?}", bytes_to_string(other)),
+                other => bail!("unexpected start: {other}"),
             },
-            Event::Comment(_) => {}
-            Event::Empty(_) => {}
+            xml_iterator::Element::EndTag(end) if end.name == "extension" => break,
             other => bail!("unexpected event: {other:?}"),
         }
     }
     Ok(extension)
 }
 
-pub fn parse_registry<R>(reader: R) -> anyhow::Result<Registry>
-where
-    R: io::BufRead,
-{
-    let mut reader = Reader::from_reader(reader);
-
-    let mut buf = Vec::new();
-    let mut buffuckyou = Vec::new();
-
+pub fn parse_registry<'a>(input: &'a str) -> anyhow::Result<Registry<'a>> {
     let mut enums: Vec<Enum> = Vec::new();
     let mut commands: Vec<Command> = Vec::new();
     let mut features: Vec<Feature> = Vec::new();
     let mut extensions: Vec<Extension> = Vec::new();
 
+    let mut element_iterator = xml_iterator::ElementIterator::new(input);
     loop {
-        let event = reader.read_event_into(&mut buf)?;
-        match event {
-            Event::Eof => break,
-            Event::Start(start) => match start.name().as_ref() {
-                b"enums" => {
-                    let e = parse_enum_block(start, &mut reader, &mut buffuckyou)
+        let Some(element) = element_iterator.next() else {
+            break;
+        };
+        match element {
+            xml_iterator::Element::StartTag(start) => match start.name {
+                "enums" => {
+                    parse_enum_block_into(start, &mut element_iterator, &mut enums)
                         .context("could not parse enum block")?;
-                    enums.extend(e);
                 }
-                b"command" => {
-                    let command = parse_command(&mut reader, &mut buffuckyou)
-                        .context("could not parse command")?;
+                "command" => {
+                    let command =
+                        parse_command(&mut element_iterator).context("could not parse command")?;
                     commands.push(command);
                 }
-                b"feature" => {
-                    let feature = parse_feature(start, &mut reader, &mut buffuckyou)
+                "feature" => {
+                    let feature = parse_feature(start, &mut element_iterator)
                         .context("could not parse feature")?;
                     features.push(feature);
                 }
-                b"extension" => {
-                    let extension = parse_extension(start, &mut reader, &mut buffuckyou)
+                "extension" => {
+                    let extension = parse_extension(start, &mut element_iterator)
                         .context("could not parse extension")?;
                     extensions.push(extension);
                 }
@@ -545,8 +510,6 @@ where
             },
             _ => {}
         }
-        buf.clear();
-        buffuckyou.clear();
     }
 
     Ok(Registry {
@@ -607,12 +570,12 @@ fn test_version() {
     assert!(a < b);
 }
 
-pub fn filter_registry(
-    mut registry: Registry,
+pub fn filter_registry<'a>(
+    mut registry: Registry<'a>,
     api: &str,
     version: (u32, u32),
     extensions: &[&str],
-) -> anyhow::Result<Registry> {
+) -> anyhow::Result<Registry<'a>> {
     let version = Version::from_tuple(version);
 
     let mut wanted_enums: HashSet<&str> = HashSet::new();
@@ -633,15 +596,15 @@ pub fn filter_registry(
         }
 
         for require in feat.requires.iter() {
-            wanted_enums.extend(require.enums.iter().map(|string| string.as_str()));
-            wanted_commands.extend(require.commands.iter().map(|string| string.as_str()));
+            wanted_enums.extend(require.enums.iter().map(|string| string));
+            wanted_commands.extend(require.commands.iter().map(|string| string));
         }
         for remove in feat.removes.iter() {
-            for e in remove.enums.iter() {
-                wanted_enums.remove(e.as_str());
+            for it in remove.enums.iter() {
+                wanted_enums.remove(it);
             }
-            for e in remove.commands.iter() {
-                wanted_commands.remove(e.as_str());
+            for it in remove.commands.iter() {
+                wanted_commands.remove(it);
             }
         }
     }
@@ -650,24 +613,22 @@ pub fn filter_registry(
     }
 
     for ext in registry.extensions.iter() {
-        if !extensions.contains(&ext.name.as_str()) {
+        if !extensions.contains(&ext.name) {
             continue;
         }
         if !ext.supported.split("|").any(|part| part == api) {
             bail!("{} is not supported on {api} {version:?}", &ext.name);
         }
         for require in ext.requires.iter() {
-            wanted_enums.extend(require.enums.iter().map(|string| string.as_str()));
-            wanted_commands.extend(require.commands.iter().map(|string| string.as_str()));
+            wanted_enums.extend(require.enums.iter().map(|string| string));
+            wanted_commands.extend(require.commands.iter().map(|string| string));
         }
     }
 
-    registry
-        .enums
-        .retain(|e| wanted_enums.contains(e.name.as_str()));
+    registry.enums.retain(|e| wanted_enums.contains(e.name));
     registry
         .commands
-        .retain(|c| wanted_commands.contains(c.proto.name.as_str()));
+        .retain(|c| wanted_commands.contains(c.proto.name));
 
     Ok(registry)
 }
@@ -691,8 +652,8 @@ fn emit_command_type_parts<W: io::Write>(
 
     match parts.len() {
         0 => unreachable!(),
-        1 => match &parts[0] {
-            Other(other) => match other.as_str() {
+        1 => match parts[0] {
+            Other(other) => match other {
                 "void" => {}
                 "void *" => write!(w, "*mut std::ffi::c_void")?,
                 "const void *" => write!(w, "*const std::ffi::c_void")?,
@@ -706,20 +667,18 @@ fn emit_command_type_parts<W: io::Write>(
             }
         },
         2 => match (&parts[0], &parts[1]) {
-            (Defined(defined), Other(pointer)) if pointer == "*" => {
+            (Defined(defined), Other(pointer)) if *pointer == "*" => {
                 write!(w, "*mut {defined}")?;
             }
             _ => unimplemented!("{parts:?}"),
         },
         3 => match (&parts[0], &parts[1], &parts[2]) {
-            (Other(qualifier), Defined(defined), Other(pointer)) => {
-                match (qualifier.as_str(), defined.as_str(), pointer.as_str()) {
-                    ("const", _, "*") => write!(w, "*const {defined}")?,
-                    ("const", _, "*const*") => write!(w, "*const *const {defined}")?,
-                    ("const", _, "**") => write!(w, "*mut *const {defined}")?,
-                    _ => unimplemented!("{parts:?}"),
-                }
-            }
+            (Other(qualifier), Defined(defined), Other(pointer)) => match (*qualifier, *pointer) {
+                ("const", "*") => write!(w, "*const {defined}")?,
+                ("const", "*const*") => write!(w, "*const *const {defined}")?,
+                ("const", "**") => write!(w, "*mut *const {defined}")?,
+                _ => unimplemented!("{parts:?}"),
+            },
             _ => unimplemented!("{parts:?}"),
         },
         _ => unimplemented!("{parts:?}"),
@@ -746,7 +705,7 @@ fn normalize_command_param_name(name: &str) -> &str {
 fn emit_api_struct<W: io::Write>(mut w: W, commands: &[Command]) -> anyhow::Result<()> {
     write!(w, "pub struct Api {{\n")?;
     for cmd in commands.iter() {
-        let name = normalize_command_name(cmd.proto.name.as_str());
+        let name = normalize_command_name(cmd.proto.name);
         write!(w, "    {name}: FnPtr,\n")?;
     }
     write!(w, "}}\n\n")?;
@@ -772,8 +731,8 @@ fn emit_api_impl<W: io::Write>(mut w: W, commands: &[Command]) -> anyhow::Result
         write!(
             w,
             "            {}: FnPtr::new(get_proc_address(c\"{}\".as_ptr())),\n",
-            normalize_command_name(cmd.proto.name.as_str()),
-            cmd.proto.name.as_str(),
+            normalize_command_name(cmd.proto.name),
+            cmd.proto.name,
         )?;
     }
     write!(w, "        }}\n")?;
@@ -782,13 +741,13 @@ fn emit_api_impl<W: io::Write>(mut w: W, commands: &[Command]) -> anyhow::Result
     for cmd in commands.iter() {
         write!(w, "\n    #[inline]\n")?;
 
-        let name = normalize_command_name(cmd.proto.name.as_str());
+        let name = normalize_command_name(cmd.proto.name);
         write!(w, "    pub unsafe fn {name}(\n")?;
         write!(w, "        &self,\n")?;
 
         if !cmd.params.is_empty() {
             for param in cmd.params.iter() {
-                let name = normalize_command_param_name(param.name.as_str());
+                let name = normalize_command_param_name(param.name);
                 write!(w, "        {name}: ")?;
                 emit_command_type_parts(&mut w, &param.type_parts)?;
                 write!(w, ",\n")?;
@@ -829,7 +788,7 @@ fn emit_api_impl<W: io::Write>(mut w: W, commands: &[Command]) -> anyhow::Result
             .iter()
             .enumerate()
             .try_for_each(|(i, param)| -> anyhow::Result<()> {
-                let name = normalize_command_param_name(param.name.as_str());
+                let name = normalize_command_param_name(param.name);
                 write!(w, "{name}")?;
                 if i < cmd.params.len() - 1 {
                     write!(w, ", ")?;

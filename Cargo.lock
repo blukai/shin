@@ -382,7 +382,7 @@ name = "gl-generator"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "quick-xml 0.37.2",
+ "xml-iterator",
 ]
 
 [[package]]
@@ -1723,6 +1723,10 @@ name = "xkeysym"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
+
+[[package]]
+name = "xml-iterator"
+version = "0.0.0"
 
 [[package]]
 name = "zerocopy"
