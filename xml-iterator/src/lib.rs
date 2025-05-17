@@ -1,3 +1,5 @@
+// quick-xml turned out to be shit. it messes up lifetimes and complicates dealings with strings.
+
 fn split_at_str<'a>(input: &'a str, needle: &str) -> Option<(&'a str, &'a str)> {
     let Some(end) = input.find(needle) else {
         return None;

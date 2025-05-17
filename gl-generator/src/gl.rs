@@ -5,29 +5,9 @@ use std::str::FromStr;
 use anyhow::{Context as _, bail};
 use xml_iterator::{Element, ElementIterator, StartTag};
 
-const BOILERPLATE: &str = r#"
+const PROLOGUE: &str = r#"
 use std::ffi::{c_char, c_double, c_float, c_int, c_short, c_uchar, c_uint, c_ushort, c_void};
 use std::mem::transmute;
-
-#[cold]
-#[inline(never)]
-fn null_fn_ptr_panic() -> ! {
-    panic!("function was not loaded")
-}
-
-struct FnPtr {
-    ptr: *const c_void,
-}
-
-impl FnPtr {
-    fn new(ptr: *const c_void) -> FnPtr {
-        if ptr.is_null() {
-            FnPtr { ptr: null_fn_ptr_panic as *const c_void }
-        } else {
-            FnPtr { ptr }
-        }
-    }
-}  
 
 pub type GLbitfield = c_uint;
 pub type GLboolean = c_uchar;
@@ -48,7 +28,7 @@ pub type GLuint = c_uint;
 pub type GLuint64 = u64;
 pub type GLushort = c_ushort;
 
-pub type GLDEBUGPROC = Option<extern "system" fn(
+pub type GLDEBUGPROC = Option<extern "C" fn(
     source: GLenum,
     type_: GLenum,
     id: GLuint,
@@ -57,6 +37,26 @@ pub type GLDEBUGPROC = Option<extern "system" fn(
     message: *const GLchar,
     userParam: *mut c_void,
 )>;
+
+#[cold]
+#[inline(never)]
+fn null_fn_ptr_panic() -> ! {
+    panic!("function was not loaded")
+}
+
+struct FnPtr {
+    ptr: *const c_void,
+}
+
+impl FnPtr {
+    fn new(ptr: *const c_void) -> FnPtr {
+        if ptr.is_null() {
+            FnPtr { ptr: null_fn_ptr_panic as *const c_void }
+        } else {
+            FnPtr { ptr }
+        }
+    }
+}  
 "#;
 
 // xml spec:
@@ -80,21 +80,15 @@ pub enum CommandTypePart<'a> {
 }
 
 #[derive(Debug)]
-pub struct CommandProto<'a> {
-    pub return_type_parts: Vec<CommandTypePart<'a>>,
-    pub name: &'a str,
-}
-
-#[derive(Debug)]
-pub struct CommandParam<'a> {
+pub struct CommandPart<'a> {
     pub type_parts: Vec<CommandTypePart<'a>>,
     pub name: &'a str,
 }
 
 #[derive(Debug)]
 pub struct Command<'a> {
-    pub proto: CommandProto<'a>,
-    pub params: Vec<CommandParam<'a>>,
+    pub proto: CommandPart<'a>,
+    pub params: Vec<CommandPart<'a>>,
 }
 
 #[derive(Debug)]
@@ -228,16 +222,17 @@ fn parse_enum_block_into<'a>(
     Ok(())
 }
 
-fn parse_command_proto<'a>(
+fn parse_command_part<'a>(
+    tag_name: &str,
     element_iterator: &mut ElementIterator<'a>,
-) -> anyhow::Result<CommandProto<'a>> {
-    let mut return_ty_parts: Vec<CommandTypePart<'a>> = Vec::new();
+) -> anyhow::Result<CommandPart<'a>> {
+    let mut type_parts: Vec<CommandTypePart<'a>> = Vec::new();
     let mut name: Option<&'a str> = None;
     while let Some(element) = element_iterator.next() {
         match element {
             Element::Text(text) => {
                 if !text.chars().all(|c| c.is_whitespace()) {
-                    return_ty_parts.push(CommandTypePart::Other(text.trim()));
+                    type_parts.push(CommandTypePart::Other(text.trim()));
                 }
             }
             Element::StartTag(start) => match start.name {
@@ -247,71 +242,37 @@ fn parse_command_proto<'a>(
                     expect_end_tag(element_iterator)?;
                 }
                 "ptype" => {
-                    return_ty_parts.push(CommandTypePart::Defined(expect_text(element_iterator)?));
+                    type_parts.push(CommandTypePart::Defined(expect_text(element_iterator)?));
                     expect_end_tag(element_iterator)?;
                 }
                 other => bail!("unexpected start: {other}"),
             },
-            Element::EndTag(end) if end.name == "proto" => break,
+            Element::EndTag(end) if end.name == tag_name => break,
             other => bail!("unexpected element: {other:?}"),
         }
     }
-    Ok(CommandProto {
-        return_type_parts: return_ty_parts,
+    Ok(CommandPart {
+        type_parts,
         name: name.context("proto name is missing")?,
     })
 }
 
-fn parse_command_param<'a>(
-    element_iterator: &mut ElementIterator<'a>,
-) -> anyhow::Result<CommandParam<'a>> {
-    let mut ty_parts: Vec<CommandTypePart<'a>> = Vec::new();
-    let mut name: Option<&'a str> = None;
-    while let Some(element) = element_iterator.next() {
-        match element {
-            Element::StartTag(start) => match start.name {
-                "ptype" => {
-                    ty_parts.push(CommandTypePart::Defined(expect_text(element_iterator)?));
-                    expect_end_tag(element_iterator)?;
-                }
-                "name" => {
-                    assert!(name.is_none());
-                    name = Some(expect_text(element_iterator)?);
-                    expect_end_tag(element_iterator)?;
-                }
-                other => bail!("unexpected start: {other}"),
-            },
-            Element::Text(text) => {
-                if !text.chars().all(|c| c.is_whitespace()) {
-                    ty_parts.push(CommandTypePart::Other(text.trim()));
-                }
-            }
-            Element::EndTag(end) if end.name == "param" => break,
-            other => bail!("unexpected element: {other:?}"),
-        }
-    }
-    return Ok(CommandParam {
-        type_parts: ty_parts,
-        name: name.take().context("param name is missing")?,
-    });
-}
-
 fn parse_command<'a>(element_iterator: &mut ElementIterator<'a>) -> anyhow::Result<Command<'a>> {
-    let mut proto: Option<CommandProto<'a>> = None;
-    let mut params: Vec<CommandParam<'a>> = Vec::new();
+    let mut proto: Option<CommandPart<'a>> = None;
+    let mut params: Vec<CommandPart<'a>> = Vec::new();
     while let Some(element) = element_iterator.next() {
         match element {
             Element::StartTag(start) => match start.name {
                 "proto" => {
                     assert!(proto.is_none());
                     proto = Some(
-                        parse_command_proto(element_iterator)
+                        parse_command_part("proto", element_iterator)
                             .context("could not parse command proto")?,
                     );
                 }
                 "param" => {
                     params.push(
-                        parse_command_param(element_iterator)
+                        parse_command_part("param", element_iterator)
                             .context("could not parse command param")?,
                     );
                 }
@@ -748,7 +709,7 @@ fn emit_api_impl<W: io::Write>(mut w: W, commands: &[Command]) -> anyhow::Result
 
         write!(w, "    ) ")?;
 
-        emit_command_type_parts(&mut buf, &cmd.proto.return_type_parts)?;
+        emit_command_type_parts(&mut buf, &cmd.proto.type_parts)?;
         if !buf.is_empty() {
             write!(w, "-> ")?;
             w.write(&buf)?;
@@ -768,7 +729,7 @@ fn emit_api_impl<W: io::Write>(mut w: W, commands: &[Command]) -> anyhow::Result
                 Ok(())
             })?;
         write!(w, ")")?;
-        emit_command_type_parts(&mut buf, &cmd.proto.return_type_parts)?;
+        emit_command_type_parts(&mut buf, &cmd.proto.type_parts)?;
         if !buf.is_empty() {
             write!(w, " -> ")?;
             w.write(&buf)?;
@@ -796,7 +757,7 @@ fn emit_api_impl<W: io::Write>(mut w: W, commands: &[Command]) -> anyhow::Result
 }
 
 pub fn generate_api<W: io::Write>(mut w: W, registry: &Registry) -> anyhow::Result<()> {
-    write!(w, "{}\n\n", BOILERPLATE.trim())?;
+    write!(w, "{}\n\n", PROLOGUE.trim())?;
     emit_enums(&mut w, &registry.enums)?;
     emit_api_struct(&mut w, &registry.commands)?;
     emit_api_impl(&mut w, &registry.commands)?;
