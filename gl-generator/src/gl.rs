@@ -3,6 +3,7 @@ use std::io;
 use std::str::FromStr;
 
 use anyhow::{Context as _, bail};
+use xml_iterator::{Element, ElementIterator, StartTag};
 
 const BOILERPLATE: &str = r#"
 use std::ffi::{c_char, c_double, c_float, c_int, c_short, c_uchar, c_uint, c_ushort, c_void};
@@ -126,31 +127,27 @@ pub struct Registry<'a> {
     pub extensions: Vec<Extension<'a>>,
 }
 
-fn expect_text<'a>(
-    element_iterator: &mut xml_iterator::ElementIterator<'a>,
-) -> anyhow::Result<&'a str> {
+fn expect_text<'a>(element_iterator: &mut ElementIterator<'a>) -> anyhow::Result<&'a str> {
     let Some(element) = element_iterator.next() else {
         bail!("unexpected eof");
     };
-    let xml_iterator::Element::Text(text) = element else {
+    let Element::Text(text) = element else {
         bail!("unexpected element (got {element:?}, want text)");
     };
     Ok(&text)
 }
 
-fn expect_end_tag<'a>(
-    element_iterator: &mut xml_iterator::ElementIterator<'a>,
-) -> anyhow::Result<()> {
+fn expect_end_tag<'a>(element_iterator: &mut ElementIterator<'a>) -> anyhow::Result<()> {
     let Some(element) = element_iterator.next() else {
         bail!("unexpected eof");
     };
-    let xml_iterator::Element::EndTag(_) = element else {
+    let Element::EndTag(_) = element else {
         bail!("unexpected element (got {element:?}, want end)");
     };
     Ok(())
 }
 
-fn get_enum_type<'a>(start_tag: xml_iterator::StartTag<'a>) -> anyhow::Result<&'static str> {
+fn get_enum_type<'a>(start_tag: StartTag<'a>) -> anyhow::Result<&'static str> {
     let ty = start_tag
         .iter_attrs()
         .find(|attr| attr.key == "type")
@@ -163,7 +160,7 @@ fn get_enum_type<'a>(start_tag: xml_iterator::StartTag<'a>) -> anyhow::Result<&'
 }
 
 fn parse_enum_token_attrs<'a>(
-    empty_tag: xml_iterator::EmptyTag<'a>,
+    empty_tag: StartTag<'a>,
     block_type: &'static str,
 ) -> anyhow::Result<Enum<'a>> {
     let mut value: Option<&'a str> = None;
@@ -206,14 +203,14 @@ fn parse_enum_token_attrs<'a>(
 }
 
 fn parse_enum_block_into<'a>(
-    start_tag: xml_iterator::StartTag<'a>,
-    element_iterator: &mut xml_iterator::ElementIterator<'a>,
+    start_tag: StartTag<'a>,
+    element_iterator: &mut ElementIterator<'a>,
     enums: &mut Vec<Enum<'a>>,
 ) -> anyhow::Result<()> {
     let block_type = get_enum_type(start_tag)?;
     while let Some(element) = element_iterator.next() {
         match element {
-            xml_iterator::Element::EmptyTag(empty) => match empty.name {
+            Element::EmptyTag(empty) => match empty.name {
                 "enum" => {
                     let token = parse_enum_token_attrs(empty, block_type)
                         .context("could not parse enum token attrs")?;
@@ -222,9 +219,9 @@ fn parse_enum_block_into<'a>(
                 "unused" => {}
                 other => bail!("unexpected empty: {:?}", other),
             },
-            xml_iterator::Element::Text(text) if text.chars().all(|c| c.is_whitespace()) => {}
-            xml_iterator::Element::EndTag(end) if end.name == "enums" => break,
-            xml_iterator::Element::Comment(_) => {}
+            Element::Text(text) if text.chars().all(|c| c.is_whitespace()) => {}
+            Element::EndTag(end) if end.name == "enums" => break,
+            Element::Comment(_) => {}
             other => bail!("unexpected element: {other:?}"),
         }
     }
@@ -232,18 +229,18 @@ fn parse_enum_block_into<'a>(
 }
 
 fn parse_command_proto<'a>(
-    element_iterator: &mut xml_iterator::ElementIterator<'a>,
+    element_iterator: &mut ElementIterator<'a>,
 ) -> anyhow::Result<CommandProto<'a>> {
     let mut return_ty_parts: Vec<CommandTypePart<'a>> = Vec::new();
     let mut name: Option<&'a str> = None;
     while let Some(element) = element_iterator.next() {
         match element {
-            xml_iterator::Element::Text(text) => {
+            Element::Text(text) => {
                 if !text.chars().all(|c| c.is_whitespace()) {
                     return_ty_parts.push(CommandTypePart::Other(text.trim()));
                 }
             }
-            xml_iterator::Element::StartTag(start) => match start.name {
+            Element::StartTag(start) => match start.name {
                 "name" => {
                     assert!(name.is_none());
                     name = Some(expect_text(element_iterator)?);
@@ -255,7 +252,7 @@ fn parse_command_proto<'a>(
                 }
                 other => bail!("unexpected start: {other}"),
             },
-            xml_iterator::Element::EndTag(end) if end.name == "proto" => break,
+            Element::EndTag(end) if end.name == "proto" => break,
             other => bail!("unexpected element: {other:?}"),
         }
     }
@@ -266,13 +263,13 @@ fn parse_command_proto<'a>(
 }
 
 fn parse_command_param<'a>(
-    element_iterator: &mut xml_iterator::ElementIterator<'a>,
+    element_iterator: &mut ElementIterator<'a>,
 ) -> anyhow::Result<CommandParam<'a>> {
     let mut ty_parts: Vec<CommandTypePart<'a>> = Vec::new();
     let mut name: Option<&'a str> = None;
     while let Some(element) = element_iterator.next() {
         match element {
-            xml_iterator::Element::StartTag(start) => match start.name {
+            Element::StartTag(start) => match start.name {
                 "ptype" => {
                     ty_parts.push(CommandTypePart::Defined(expect_text(element_iterator)?));
                     expect_end_tag(element_iterator)?;
@@ -284,12 +281,12 @@ fn parse_command_param<'a>(
                 }
                 other => bail!("unexpected start: {other}"),
             },
-            xml_iterator::Element::Text(text) => {
+            Element::Text(text) => {
                 if !text.chars().all(|c| c.is_whitespace()) {
                     ty_parts.push(CommandTypePart::Other(text.trim()));
                 }
             }
-            xml_iterator::Element::EndTag(end) if end.name == "param" => break,
+            Element::EndTag(end) if end.name == "param" => break,
             other => bail!("unexpected element: {other:?}"),
         }
     }
@@ -299,14 +296,12 @@ fn parse_command_param<'a>(
     });
 }
 
-fn parse_command<'a>(
-    element_iterator: &mut xml_iterator::ElementIterator<'a>,
-) -> anyhow::Result<Command<'a>> {
+fn parse_command<'a>(element_iterator: &mut ElementIterator<'a>) -> anyhow::Result<Command<'a>> {
     let mut proto: Option<CommandProto<'a>> = None;
     let mut params: Vec<CommandParam<'a>> = Vec::new();
     while let Some(element) = element_iterator.next() {
         match element {
-            xml_iterator::Element::StartTag(start) => match start.name {
+            Element::StartTag(start) => match start.name {
                 "proto" => {
                     assert!(proto.is_none());
                     proto = Some(
@@ -322,13 +317,12 @@ fn parse_command<'a>(
                 }
                 other => bail!("unexpected start: {other}"),
             },
-            xml_iterator::Element::EndTag(end) => match end.name {
+            Element::EndTag(end) => match end.name {
                 "command" => break,
                 other => bail!("unexpected end: {other}"),
             },
-            xml_iterator::Element::Text(text) if text.chars().all(|c| c.is_whitespace()) => {}
-            xml_iterator::Element::EmptyTag(empty)
-                if matches!(empty.name, "glx" | "alias" | "vecequiv") => {}
+            Element::Text(text) if text.chars().all(|c| c.is_whitespace()) => {}
+            Element::EmptyTag(empty) if matches!(empty.name, "glx" | "alias" | "vecequiv") => {}
             other => bail!("unexpected element: {other:?}"),
         }
     }
@@ -340,14 +334,14 @@ fn parse_command<'a>(
 
 fn parse_interface<'a>(
     tag_name: &str,
-    element_iterator: &mut xml_iterator::ElementIterator<'a>,
+    element_iterator: &mut ElementIterator<'a>,
 ) -> anyhow::Result<Interface<'a>> {
     let mut enums: Vec<&'a str> = Vec::new();
     let mut commands: Vec<&'a str> = Vec::new();
     while let Some(element) = element_iterator.next() {
         match element {
-            xml_iterator::Element::Text(text) if text.chars().all(|c| c.is_whitespace()) => {}
-            xml_iterator::Element::EmptyTag(empty) => match empty.name {
+            Element::Text(text) if text.chars().all(|c| c.is_whitespace()) => {}
+            Element::EmptyTag(empty) => match empty.name {
                 "type" => {}
                 "enum" => {
                     let name = empty
@@ -365,15 +359,15 @@ fn parse_interface<'a>(
                 }
                 other => bail!("unexpected empty: {other}"),
             },
-            xml_iterator::Element::EndTag(end) if end.name == tag_name => break,
-            xml_iterator::Element::Comment(_) => {}
+            Element::EndTag(end) if end.name == tag_name => break,
+            Element::Comment(_) => {}
             other => bail!("unexpected element: {other:?}"),
         }
     }
     Ok(Interface { enums, commands })
 }
 
-fn parse_feature_attrs<'a>(start_tag: xml_iterator::StartTag<'a>) -> anyhow::Result<Feature<'a>> {
+fn parse_feature_attrs<'a>(start_tag: StartTag<'a>) -> anyhow::Result<Feature<'a>> {
     let mut api: Option<&'a str> = None;
     let mut name: Option<&'a str> = None;
     let mut number: Option<&'a str> = None;
@@ -398,14 +392,14 @@ fn parse_feature_attrs<'a>(start_tag: xml_iterator::StartTag<'a>) -> anyhow::Res
 }
 
 fn parse_feature<'a>(
-    start_tag: xml_iterator::StartTag<'a>,
-    element_iterator: &mut xml_iterator::ElementIterator<'a>,
+    start_tag: StartTag<'a>,
+    element_iterator: &mut ElementIterator<'a>,
 ) -> anyhow::Result<Feature<'a>> {
     let mut feature = parse_feature_attrs(start_tag).context("could not parse feature attrs")?;
     while let Some(element) = element_iterator.next() {
         match element {
-            xml_iterator::Element::Text(text) if text.chars().all(|c| c.is_whitespace()) => {}
-            xml_iterator::Element::StartTag(start) => match start.name {
+            Element::Text(text) if text.chars().all(|c| c.is_whitespace()) => {}
+            Element::StartTag(start) => match start.name {
                 "require" => {
                     let require = parse_interface("require", element_iterator)
                         .context("could not parse feature require")?;
@@ -418,18 +412,16 @@ fn parse_feature<'a>(
                 }
                 other => bail!("unexpected start: {other}"),
             },
-            xml_iterator::Element::EmptyTag(empty) if empty.name == "require" => {}
-            xml_iterator::Element::Comment(_) => {}
-            xml_iterator::Element::EndTag(end) if end.name == "feature" => break,
+            Element::EmptyTag(empty) if empty.name == "require" => {}
+            Element::Comment(_) => {}
+            Element::EndTag(end) if end.name == "feature" => break,
             other => bail!("unexpected event: {other:?}"),
         }
     }
     Ok(feature)
 }
 
-fn parse_extension_attrs<'a>(
-    start_tag: xml_iterator::StartTag<'a>,
-) -> anyhow::Result<Extension<'a>> {
+fn parse_extension_attrs<'a>(start_tag: StartTag<'a>) -> anyhow::Result<Extension<'a>> {
     let mut name: Option<&'a str> = None;
     let mut supported: Option<&'a str> = None;
     for attr in start_tag.iter_attrs() {
@@ -451,15 +443,15 @@ fn parse_extension_attrs<'a>(
 }
 
 fn parse_extension<'a>(
-    start_tag: xml_iterator::StartTag<'a>,
-    element_iterator: &mut xml_iterator::ElementIterator<'a>,
+    start_tag: StartTag<'a>,
+    element_iterator: &mut ElementIterator<'a>,
 ) -> anyhow::Result<Extension<'a>> {
     let mut extension =
         parse_extension_attrs(start_tag).context("could not parse extension attrs")?;
     while let Some(element) = element_iterator.next() {
         match element {
-            xml_iterator::Element::Text(text) if text.chars().all(|c| c.is_whitespace()) => {}
-            xml_iterator::Element::StartTag(start) => match start.name {
+            Element::Text(text) if text.chars().all(|c| c.is_whitespace()) => {}
+            Element::StartTag(start) => match start.name {
                 "require" => {
                     let require = parse_interface("require", element_iterator)
                         .context("could not parse extension requirs")?;
@@ -467,7 +459,7 @@ fn parse_extension<'a>(
                 }
                 other => bail!("unexpected start: {other}"),
             },
-            xml_iterator::Element::EndTag(end) if end.name == "extension" => break,
+            Element::EndTag(end) if end.name == "extension" => break,
             other => bail!("unexpected event: {other:?}"),
         }
     }
@@ -480,13 +472,13 @@ pub fn parse_registry<'a>(input: &'a str) -> anyhow::Result<Registry<'a>> {
     let mut features: Vec<Feature> = Vec::new();
     let mut extensions: Vec<Extension> = Vec::new();
 
-    let mut element_iterator = xml_iterator::ElementIterator::new(input);
+    let mut element_iterator = ElementIterator::new(input);
     loop {
         let Some(element) = element_iterator.next() else {
             break;
         };
         match element {
-            xml_iterator::Element::StartTag(start) => match start.name {
+            Element::StartTag(start) => match start.name {
                 "enums" => {
                     parse_enum_block_into(start, &mut element_iterator, &mut enums)
                         .context("could not parse enum block")?;

@@ -14,50 +14,50 @@ pub enum ArgType {
 }
 
 #[derive(Debug, Default)]
-pub struct Arg {
-    pub name: String,
+pub struct Arg<'a> {
+    pub name: &'a str,
     pub r#type: ArgType,
-    pub interface: Option<String>,
+    pub interface: Option<&'a str>,
     pub allow_null: bool,
-    pub r#enum: Option<String>,
+    pub r#enum: Option<&'a str>,
 }
 
 #[derive(Debug, Default)]
-pub struct Message {
-    pub name: String,
-    pub r#type: Option<String>,
+pub struct Message<'a> {
+    pub name: &'a str,
+    pub r#type: Option<&'a str>,
     pub since: Option<u32>,
     pub deprecated_since: Option<u32>,
-    pub args: Vec<Arg>,
+    pub args: Vec<Arg<'a>>,
 }
 
 #[derive(Debug, Default)]
-pub struct Entry {
-    pub name: String,
+pub struct Entry<'a> {
+    pub name: &'a str,
     pub value: u32,
     pub since: Option<u32>,
     pub deprecated_since: Option<u32>,
 }
 
 #[derive(Debug, Default)]
-pub struct Enum {
-    pub name: String,
+pub struct Enum<'a> {
+    pub name: &'a str,
     pub since: Option<u32>,
     pub bitfield: bool,
-    pub entries: Vec<Entry>,
+    pub entries: Vec<Entry<'a>>,
 }
 
 #[derive(Debug, Default)]
-pub struct Interface {
-    pub name: String,
+pub struct Interface<'a> {
+    pub name: &'a str,
     pub version: u32,
-    pub requests: Vec<Message>,
-    pub events: Vec<Message>,
-    pub enums: Vec<Enum>,
+    pub requests: Vec<Message<'a>>,
+    pub events: Vec<Message<'a>>,
+    pub enums: Vec<Enum<'a>>,
 }
 
 #[derive(Debug, Default)]
-pub struct Protocol {
-    pub name: String,
-    pub interfaces: Vec<Interface>,
+pub struct Protocol<'a> {
+    pub name: &'a str,
+    pub interfaces: Vec<Interface<'a>>,
 }

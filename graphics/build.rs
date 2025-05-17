@@ -12,8 +12,8 @@ fn generate_gl_native() -> anyhow::Result<()> {
     let out_dir = PathBuf::from(&env::var("OUT_DIR")?);
     let mut out_file = BufWriter::new(File::create(out_dir.join("gl_native.rs"))?);
 
-    let spec = fs::read_to_string("../gl-specs/gl.xml")?;
-    let registry = gl::filter_registry(gl::parse_registry(spec.as_str())?, "gl", (4, 6), &[])?;
+    let input = fs::read_to_string("../gl-specs/gl.xml")?;
+    let registry = gl::filter_registry(gl::parse_registry(input.as_str())?, "gl", (4, 6), &[])?;
     gl::generate_api(&mut out_file, &registry)?;
 
     Ok(())

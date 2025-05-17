@@ -1,23 +1,15 @@
 use anyhow::Context as _;
-use quick_xml::events::Event;
-use quick_xml::reader::Reader;
+use xml_iterator::Element;
 
 use crate::protocol::*;
 
-fn parse_num(bytes: &[u8]) -> anyhow::Result<u32> {
-    let s = std::str::from_utf8(bytes)?;
+fn parse_num(s: &str) -> anyhow::Result<u32> {
     if s.len() < 2 || !s.starts_with("0x") {
         s.parse()
     } else {
         u32::from_str_radix(&s[2..], 16)
     }
-    .with_context(|| {
-        format!(
-            "could not parse num {}",
-            // boo
-            unsafe { std::str::from_utf8_unchecked(bytes) },
-        )
-    })
+    .with_context(|| format!("could not parse num {s}"))
 }
 
 fn parse_arg_type(bytes: &[u8]) -> Option<ArgType> {
@@ -34,13 +26,8 @@ fn parse_arg_type(bytes: &[u8]) -> Option<ArgType> {
     }
 }
 
-pub fn parse_protocol<R>(reader: R) -> anyhow::Result<Protocol>
-where
-    R: std::io::BufRead,
-{
-    let mut reader = Reader::from_reader(reader);
-
-    let mut buf = Vec::new();
+pub fn parse_protocol<'a>(input: &'a str) -> anyhow::Result<Protocol<'a>> {
+    let mut element_iterator = xml_iterator::ElementIterator::new(input);
 
     let mut protocol = Protocol::default();
 
@@ -48,19 +35,16 @@ where
     let mut cur_message: Option<Message> = None;
     let mut cur_enum: Option<Enum> = None;
 
-    loop {
-        let event = reader.read_event_into(&mut buf)?;
-        match event {
-            Event::Eof => break,
-            Event::Start(e) | Event::Empty(e) if e.name().as_ref().eq(b"entry") => {
+    while let Some(element) = element_iterator.next() {
+        match element {
+            Element::StartTag(e) | Element::EmptyTag(e) if e.name == "entry" => {
                 let mut entry = Entry::default();
-                for attr in e.attributes() {
-                    let attr = attr?;
-                    match attr.key.as_ref() {
-                        b"name" => entry.name = String::from_utf8(attr.value.to_vec())?,
-                        b"value" => entry.value = parse_num(&attr.value)?,
-                        b"since" => entry.since = Some(parse_num(&attr.value)?),
-                        b"deprecated-since" => {
+                for attr in e.iter_attrs() {
+                    match attr.key {
+                        "name" => entry.name = attr.value,
+                        "value" => entry.value = parse_num(attr.value)?,
+                        "since" => entry.since = Some(parse_num(attr.value)?),
+                        "deprecated-since" => {
                             entry.deprecated_since = Some(parse_num(&attr.value)?)
                         }
                         _ => {}
@@ -69,100 +53,91 @@ where
                 let r#enum = cur_enum.as_mut().unwrap();
                 r#enum.entries.push(entry);
             }
-            Event::Empty(e) if e.name().as_ref().eq(b"arg") => {
+            Element::EmptyTag(e) if e.name == "arg" => {
                 let mut arg = Arg::default();
-                for attr in e.attributes() {
-                    let attr = attr?;
-                    match attr.key.as_ref() {
-                        b"name" => arg.name = String::from_utf8(attr.value.to_vec())?,
-                        b"type" => {
+                for attr in e.iter_attrs() {
+                    match attr.key {
+                        "name" => arg.name = attr.value,
+                        "type" => {
                             arg.r#type = parse_arg_type(attr.value.as_ref()).with_context(|| {
                                 format!("unknown arg type: {}", unsafe {
                                     std::str::from_utf8_unchecked(attr.value.as_ref())
                                 })
                             })?
                         }
-                        b"interface" => {
-                            arg.interface = Some(String::from_utf8(attr.value.to_vec())?)
-                        }
-                        b"allow_null" => arg.allow_null = attr.value.as_ref().eq(b"true"),
-                        b"enum" => arg.r#enum = Some(String::from_utf8(attr.value.to_vec())?),
+                        "interface" => arg.interface = Some(attr.value),
+                        "allow_null" => arg.allow_null = attr.value == "true",
+                        "enum" => arg.r#enum = Some(attr.value),
                         _ => {}
                     }
                 }
                 let message = cur_message.as_mut().unwrap();
                 message.args.push(arg);
             }
-            Event::Start(e) => match e.name().as_ref() {
-                b"protocol" => {
-                    for attr in e.attributes() {
-                        let attr = attr?;
+            Element::StartTag(e) => match e.name {
+                "protocol" => {
+                    for attr in e.iter_attrs() {
                         #[expect(clippy::single_match)]
-                        match attr.key.as_ref() {
-                            b"name" => protocol.name = String::from_utf8(attr.value.to_vec())?,
+                        match attr.key {
+                            "name" => protocol.name = attr.value,
                             _ => {}
                         }
                     }
                 }
-                b"interface" => {
+                "interface" => {
                     assert!(cur_interface.is_none());
                     let interface = cur_interface.insert(Interface::default());
-                    for attr in e.attributes() {
-                        let attr = attr?;
-                        match attr.key.as_ref() {
-                            b"name" => interface.name = String::from_utf8(attr.value.to_vec())?,
-                            b"version" => interface.version = parse_num(&attr.value)?,
+                    for attr in e.iter_attrs() {
+                        match attr.key {
+                            "name" => interface.name = attr.value,
+                            "version" => interface.version = parse_num(&attr.value)?,
                             _ => {}
                         }
                     }
                 }
-                b"request" | b"event" => {
+                "request" | "event" => {
                     assert!(cur_message.is_none());
                     let message = cur_message.insert(Message::default());
-                    for attr in e.attributes() {
-                        let attr = attr?;
-                        match attr.key.as_ref() {
-                            b"name" => message.name = String::from_utf8(attr.value.to_vec())?,
-                            b"type" => {
-                                message.r#type = Some(String::from_utf8(attr.value.to_vec())?)
-                            }
-                            b"since" => message.since = Some(parse_num(&attr.value)?),
-                            b"deprecated-since" => {
+                    for attr in e.iter_attrs() {
+                        match attr.key {
+                            "name" => message.name = attr.value,
+                            "type" => message.r#type = Some(attr.value),
+                            "since" => message.since = Some(parse_num(&attr.value)?),
+                            "deprecated-since" => {
                                 message.deprecated_since = Some(parse_num(&attr.value)?)
                             }
                             _ => {}
                         }
                     }
                 }
-                b"enum" => {
+                "enum" => {
                     assert!(cur_enum.is_none());
                     let r#enum = cur_enum.insert(Enum::default());
-                    for attr in e.attributes() {
-                        let attr = attr?;
-                        match attr.key.as_ref() {
-                            b"name" => r#enum.name = String::from_utf8(attr.value.to_vec())?,
-                            b"since" => r#enum.since = Some(parse_num(&attr.value)?),
-                            b"bitfield" => r#enum.bitfield = attr.value.as_ref().eq(b"true"),
+                    for attr in e.iter_attrs() {
+                        match attr.key {
+                            "name" => r#enum.name = attr.value,
+                            "since" => r#enum.since = Some(parse_num(&attr.value)?),
+                            "bitfield" => r#enum.bitfield = attr.value == "true",
                             _ => {}
                         }
                     }
                 }
                 _ => {}
             },
-            Event::End(e) => match e.name().as_ref() {
-                b"interface" => {
+            Element::EndTag(e) => match e.name {
+                "interface" => {
                     let interface = cur_interface.take().unwrap();
                     protocol.interfaces.push(interface);
                 }
-                b"request" => {
+                "request" => {
                     let interface = cur_interface.as_mut().unwrap();
                     interface.requests.push(cur_message.take().unwrap());
                 }
-                b"event" => {
+                "event" => {
                     let interface = cur_interface.as_mut().unwrap();
                     interface.events.push(cur_message.take().unwrap());
                 }
-                b"enum" => {
+                "enum" => {
                     let interface = cur_interface.as_mut().unwrap();
                     interface.enums.push(cur_enum.take().unwrap());
                 }

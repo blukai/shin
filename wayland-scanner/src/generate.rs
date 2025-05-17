@@ -52,11 +52,7 @@ fn emit_arg_type<W: io::Write>(w: &mut W, arg: &Arg) -> io::Result<()> {
         ArgType::NewId | ArgType::Uint => write!(w, "u32"),
         ArgType::Fixed => write!(w, "super::wl_fixed"),
         ArgType::String => write!(w, "*const std::ffi::c_char"),
-        ArgType::Object => write!(
-            w,
-            "*mut {}",
-            arg.interface.as_ref().expect("interface name")
-        ),
+        ArgType::Object => write!(w, "*mut {}", arg.interface.expect("interface name")),
         ArgType::Array => write!(w, "*mut super::wl_array"),
     }
 }
@@ -98,11 +94,7 @@ fn emit_structs<W: io::Write>(
             write!(w, "        {}: ", arg.name)?;
             match arg.r#type {
                 ArgType::Object if arg.interface.is_none() => write!(w, "*mut std::ffi::c_void")?,
-                ArgType::NewId => write!(
-                    w,
-                    "*mut {}",
-                    arg.interface.as_ref().expect("interface name")
-                )?,
+                ArgType::NewId => write!(w, "*mut {}", arg.interface.expect("interface name"))?,
                 _ => emit_arg_type(w, arg)?,
             }
             write!(w, ",\n")?;
@@ -153,7 +145,7 @@ fn emit_messages<W: io::Write>(
                         write!(
                             w,
                             "            &{}_interface as *const super::wl_interface,\n",
-                            arg.interface.as_ref().unwrap()
+                            arg.interface.unwrap()
                         )?;
                     }
                     _ => {
@@ -252,7 +244,7 @@ fn emit_stubs<W: io::Write>(w: &mut W, interface: &Interface) -> io::Result<()> 
         // return
 
         if let Some(ret) = ret {
-            if let Some(interface_name) = ret.interface.as_ref() {
+            if let Some(interface_name) = ret.interface {
                 write!(w, ") -> *mut {} {{\n", interface_name)?;
             } else {
                 write!(w, ") -> *mut std::ffi::c_void {{\n")?;
@@ -281,7 +273,7 @@ fn emit_stubs<W: io::Write>(w: &mut W, interface: &Interface) -> io::Result<()> 
         )?;
         // interface: *const wl_interface,
         if let Some(ret) = ret {
-            if let Some(interface_name) = ret.interface.as_ref() {
+            if let Some(interface_name) = ret.interface {
                 write!(w, "            &{}_interface,\n", interface_name)?;
             } else {
                 write!(w, "            interface,\n")?;
@@ -300,7 +292,7 @@ fn emit_stubs<W: io::Write>(w: &mut W, interface: &Interface) -> io::Result<()> 
             )?;
         }
         // flags: u32,
-        if msg.r#type.as_ref().is_some_and(|ty| ty.eq("destructor")) {
+        if msg.r#type.is_some_and(|ty| ty == "destructor") {
             write!(w, "            super::WL_MARSHAL_FLAG_DESTROY,\n")?;
         } else {
             write!(w, "            0,\n")?;

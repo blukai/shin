@@ -84,18 +84,6 @@ fn test_attribute_iterator() {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct EmptyTag<'a> {
-    pub name: &'a str,
-    pub attrs: &'a str,
-}
-
-impl<'a> EmptyTag<'a> {
-    pub fn iter_attrs(&self) -> AttributeIterator<'a> {
-        AttributeIterator::new(self.attrs)
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
 pub struct StartTag<'a> {
     pub name: &'a str,
     pub attrs: &'a str,
@@ -114,7 +102,7 @@ pub struct EndTag<'a> {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Element<'a> {
-    EmptyTag(EmptyTag<'a>),
+    EmptyTag(StartTag<'a>),
     StartTag(StartTag<'a>),
     EndTag(EndTag<'a>),
     Text(&'a str),
@@ -140,7 +128,7 @@ impl<'a> ElementIterator<'a> {
         let (name, attrs) = split_at_str(content, " ").unwrap_or((content, ""));
 
         self.input = rest;
-        Some(Element::EmptyTag(EmptyTag {
+        Some(Element::EmptyTag(StartTag {
             name: &name[1..],
             attrs: attrs.trim(),
         }))
@@ -198,7 +186,7 @@ fn test_next_empty_tag() {
 "#;
     assert_eq!(
         ElementIterator::new(INPUT.trim()).next_empty_tag(),
-        Some(Element::EmptyTag(EmptyTag {
+        Some(Element::EmptyTag(StartTag {
             name: "entry",
             attrs: r#"name="wheel" value="0" summary="a physical wheel rotation""#
         }))
