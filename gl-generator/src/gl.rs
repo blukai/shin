@@ -30,7 +30,7 @@ pub type GLushort = c_ushort;
 
 pub type GLDEBUGPROC = Option<extern "C" fn(
     source: GLenum,
-    type_: GLenum,
+    r#type: GLenum,
     id: GLuint,
     severity: GLenum,
     length: GLsizei,
@@ -67,7 +67,7 @@ pub struct Enum<'a> {
     pub value: &'a str,
     pub name: &'a str,
     pub api: Option<&'a str>,
-    pub ty: &'a str,
+    pub r#type: &'a str,
     pub group: Option<&'a str>,
     pub alias: Option<&'a str>,
     pub comment: Option<&'a str>,
@@ -142,14 +142,14 @@ fn expect_end_tag<'a>(element_iterator: &mut ElementIterator<'a>) -> anyhow::Res
 }
 
 fn get_enum_type<'a>(start_tag: StartTag<'a>) -> anyhow::Result<&'static str> {
-    let ty = start_tag
+    let r#type = start_tag
         .iter_attrs()
         .find(|attr| attr.key == "type")
         .map(|attr| attr.value);
-    match ty {
+    match r#type {
         Some("bitmask") => Ok("GLbitfield"),
         None => Ok("GLenum"),
-        other => bail!("unknown enum block ty: {other:?}"),
+        other => bail!("unknown enum block type: {other:?}"),
     }
 }
 
@@ -160,7 +160,7 @@ fn parse_enum_token_attrs<'a>(
     let mut value: Option<&'a str> = None;
     let mut name: Option<&'a str> = None;
     let mut api: Option<&'a str> = None;
-    let mut ty: Option<&'a str> = None;
+    let mut r#type: Option<&'a str> = None;
     let mut group: Option<&'a str> = None;
     let mut alias: Option<&'a str> = None;
     let mut comment: Option<&'a str> = None;
@@ -169,7 +169,7 @@ fn parse_enum_token_attrs<'a>(
             "value" => value.replace(attr.value),
             "name" => name.replace(attr.value),
             "api" => api.replace(attr.value),
-            "type" => ty.replace(attr.value),
+            "type" => r#type.replace(attr.value),
             "group" => group.replace(attr.value),
             "alias" => alias.replace(attr.value),
             "comment" => comment.replace(attr.value),
@@ -183,11 +183,11 @@ fn parse_enum_token_attrs<'a>(
         value: value.context("value is missing")?,
         name: name.context("name is missing")?,
         api,
-        ty: ty
-            .map(|ty| match ty {
+        r#type: r#type
+            .map(|r#type| match r#type {
                 "u" => "GLuint",
                 "ull" => "GLuint64",
-                _ => ty,
+                _ => r#type,
             })
             .unwrap_or(block_type),
         group,
@@ -590,7 +590,7 @@ fn emit_enums<W: io::Write>(mut w: W, enums: &[Enum]) -> anyhow::Result<()> {
     for e in enums.iter() {
         assert!(e.name.starts_with("GL_"));
         let name = &e.name[3..];
-        write!(w, "pub const {name}: {} = {};\n", e.ty, &e.value)?;
+        write!(w, "pub const {name}: {} = {};\n", e.r#type, &e.value)?;
     }
     write!(w, "\n")?;
 
@@ -649,8 +649,8 @@ fn normalize_command_name(name: &str) -> &str {
 #[inline]
 fn normalize_command_param_name(name: &str) -> &str {
     match name {
-        "type" => "type_",
-        "ref" => "ref_",
+        "type" => "r#type",
+        "ref" => "r#ref",
         ok => ok,
     }
 }

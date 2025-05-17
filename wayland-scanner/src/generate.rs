@@ -292,7 +292,7 @@ fn emit_stubs<W: io::Write>(w: &mut W, interface: &Interface) -> io::Result<()> 
             )?;
         }
         // flags: u32,
-        if msg.r#type.is_some_and(|ty| ty == "destructor") {
+        if msg.r#type.is_some_and(|r#type| r#type == "destructor") {
             write!(w, "            super::WL_MARSHAL_FLAG_DESTROY,\n")?;
         } else {
             write!(w, "            0,\n")?;

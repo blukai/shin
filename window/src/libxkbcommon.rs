@@ -3,7 +3,7 @@
 
 use std::ffi::{c_char, c_int};
 
-use dynlib::{opaque_struct, DynLib};
+use dynlib::{DynLib, opaque_struct};
 
 // *Real* modifiers names are hardcoded in libxkbcommon
 pub const XKB_MOD_NAME_SHIFT: &[u8] = b"Shift\0";
@@ -80,7 +80,7 @@ pub struct Lib {
     pub xkb_state_mod_index_is_active: unsafe extern "C" fn(
         state: *mut xkb_state,
         idx: xkb_mod_index_t,
-        ty: xkb_state_component,
+        r#type: xkb_state_component,
     ) -> c_int,
     pub xkb_state_new: unsafe extern "C" fn(keymap: *mut xkb_keymap) -> *mut xkb_state,
     pub xkb_state_unref: unsafe extern "C" fn(state: *mut xkb_state),
