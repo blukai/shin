@@ -5,12 +5,12 @@ use std::{env, fs};
 
 use gl_generator::gl;
 
-fn generate_gl_native() -> anyhow::Result<()> {
+fn generate_gl() -> anyhow::Result<()> {
     println!("cargo:rerun-if-changed=../gl-generator");
     println!("cargo:rerun-if-changed=../gl-specs");
 
     let out_dir = PathBuf::from(&env::var("OUT_DIR")?);
-    let mut out_file = BufWriter::new(File::create(out_dir.join("gl_native.rs"))?);
+    let mut out_file = BufWriter::new(File::create(out_dir.join("gl_generated.rs"))?);
 
     let input = fs::read_to_string("../gl-specs/gl.xml")?;
     let registry = gl::filter_registry(gl::parse_registry(input.as_str())?, "gl", (4, 6), &[])?;
@@ -22,7 +22,10 @@ fn generate_gl_native() -> anyhow::Result<()> {
 fn main() -> anyhow::Result<()> {
     println!("cargo:rerun-if-changed=build.rs");
 
-    generate_gl_native()?;
+    // TODO: generate api only on native, but not on wasm
+    // env::var("CARGO_CFG_TARGET_ARCH")
+
+    generate_gl()?;
 
     Ok(())
 }

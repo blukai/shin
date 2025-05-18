@@ -6,27 +6,24 @@ use anyhow::{Context as _, bail};
 use xml_iterator::{Element, ElementIterator, StartTag};
 
 const PROLOGUE: &str = r#"
-use std::ffi::{c_char, c_double, c_float, c_int, c_short, c_uchar, c_uint, c_ushort, c_void};
-use std::mem::transmute;
-
-pub type GLbitfield = c_uint;
-pub type GLboolean = c_uchar;
-pub type GLbyte = c_char;
-pub type GLchar = c_char;
-pub type GLdouble = c_double;
-pub type GLenum = c_uint;
-pub type GLfloat = c_float;
-pub type GLint = c_int;
+pub type GLbitfield = std::ffi::c_uint;
+pub type GLboolean = std::ffi::c_uchar;
+pub type GLbyte = std::ffi::c_char;
+pub type GLchar = std::ffi::c_char;
+pub type GLdouble = std::ffi::c_double;
+pub type GLenum = std::ffi::c_uint;
+pub type GLfloat = std::ffi::c_float;
+pub type GLint = std::ffi::c_int;
 pub type GLint64 = i64;
 pub type GLintptr = isize;
-pub type GLshort = c_short;
-pub type GLsizei = c_int;
+pub type GLshort = std::ffi::c_short;
+pub type GLsizei = std::ffi::c_int;
 pub type GLsizeiptr = isize;
-pub type GLsync = *mut c_void;
-pub type GLubyte = c_uchar;
-pub type GLuint = c_uint;
+pub type GLsync = *mut std::ffi::c_void;
+pub type GLubyte = std::ffi::c_uchar;
+pub type GLuint = std::ffi::c_uint;
 pub type GLuint64 = u64;
-pub type GLushort = c_ushort;
+pub type GLushort = std::ffi::c_ushort;
 
 pub type GLDEBUGPROC = Option<extern "C" fn(
     source: GLenum,
@@ -35,7 +32,7 @@ pub type GLDEBUGPROC = Option<extern "C" fn(
     severity: GLenum,
     length: GLsizei,
     message: *const GLchar,
-    userParam: *mut c_void,
+    userParam: *mut std::ffi::c_void,
 )>;
 
 #[cold]
@@ -45,13 +42,13 @@ fn null_fn_ptr_panic() -> ! {
 }
 
 struct FnPtr {
-    ptr: *const c_void,
+    ptr: *const std::ffi::c_void,
 }
 
 impl FnPtr {
-    fn new(ptr: *const c_void) -> FnPtr {
+    fn new(ptr: *const std::ffi::c_void) -> FnPtr {
         if ptr.is_null() {
-            FnPtr { ptr: null_fn_ptr_panic as *const c_void }
+            FnPtr { ptr: null_fn_ptr_panic as *const std::ffi::c_void }
         } else {
             FnPtr { ptr }
         }
@@ -586,23 +583,21 @@ pub fn filter_registry<'a>(
     Ok(registry)
 }
 
-fn emit_enums<W: io::Write>(mut w: W, enums: &[Enum]) -> anyhow::Result<()> {
+fn emit_enums<W: io::Write>(w: &mut W, enums: &[Enum]) -> anyhow::Result<()> {
     for e in enums.iter() {
         assert!(e.name.starts_with("GL_"));
         let name = &e.name[3..];
         write!(w, "pub const {name}: {} = {};\n", e.r#type, &e.value)?;
     }
     write!(w, "\n")?;
-
     Ok(())
 }
 
 fn emit_command_type_parts<W: io::Write>(
-    mut w: W,
+    w: &mut W,
     parts: &[CommandTypePart],
 ) -> anyhow::Result<()> {
     use CommandTypePart::*;
-
     match parts.len() {
         0 => unreachable!(),
         1 => match parts[0] {
@@ -636,7 +631,6 @@ fn emit_command_type_parts<W: io::Write>(
         },
         _ => unimplemented!("{parts:?}"),
     }
-
     Ok(())
 }
 
@@ -655,18 +649,17 @@ fn normalize_command_param_name(name: &str) -> &str {
     }
 }
 
-fn emit_api_struct<W: io::Write>(mut w: W, commands: &[Command]) -> anyhow::Result<()> {
+fn emit_api_struct<W: io::Write>(w: &mut W, commands: &[Command]) -> anyhow::Result<()> {
     write!(w, "pub struct Api {{\n")?;
     for cmd in commands.iter() {
         let name = normalize_command_name(cmd.proto.name);
         write!(w, "    {name}: FnPtr,\n")?;
     }
     write!(w, "}}\n\n")?;
-
     Ok(())
 }
 
-fn emit_api_impl<W: io::Write>(mut w: W, commands: &[Command]) -> anyhow::Result<()> {
+fn emit_api_impl<W: io::Write>(w: &mut W, commands: &[Command]) -> anyhow::Result<()> {
     let mut buf: Vec<u8> = Vec::new();
 
     write!(w, "impl Api {{")?;
@@ -675,7 +668,7 @@ fn emit_api_impl<W: io::Write>(mut w: W, commands: &[Command]) -> anyhow::Result
         r#"
     pub unsafe fn load_with<F>(mut get_proc_address: F) -> Self
     where
-        F: FnMut(*const c_char) -> *mut c_void,
+        F: FnMut(*const std::ffi::c_char) -> *mut std::ffi::c_void,
     {{
         Self {{
 "#
@@ -695,19 +688,13 @@ fn emit_api_impl<W: io::Write>(mut w: W, commands: &[Command]) -> anyhow::Result
         write!(w, "\n    #[inline]\n")?;
 
         let name = normalize_command_name(cmd.proto.name);
-        write!(w, "    pub unsafe fn {name}(\n")?;
-        write!(w, "        &self,\n")?;
-
-        if !cmd.params.is_empty() {
-            for param in cmd.params.iter() {
-                let name = normalize_command_param_name(param.name);
-                write!(w, "        {name}: ")?;
-                emit_command_type_parts(&mut w, &param.type_parts)?;
-                write!(w, ",\n")?;
-            }
+        write!(w, "    pub unsafe fn {name}(&self")?;
+        for param in cmd.params.iter() {
+            let name = normalize_command_param_name(param.name);
+            write!(w, ", {name}: ")?;
+            emit_command_type_parts(w, &param.type_parts)?;
         }
-
-        write!(w, "    ) ")?;
+        write!(w, ") ")?;
 
         emit_command_type_parts(&mut buf, &cmd.proto.type_parts)?;
         if !buf.is_empty() {
@@ -722,7 +709,7 @@ fn emit_api_impl<W: io::Write>(mut w: W, commands: &[Command]) -> anyhow::Result
             .iter()
             .enumerate()
             .try_for_each(|(i, param)| -> anyhow::Result<()> {
-                emit_command_type_parts(&mut w, &param.type_parts)?;
+                emit_command_type_parts(w, &param.type_parts)?;
                 if i < cmd.params.len() - 1 {
                     write!(w, ", ")?;
                 }
@@ -736,7 +723,10 @@ fn emit_api_impl<W: io::Write>(mut w: W, commands: &[Command]) -> anyhow::Result
             buf.clear();
         }
         write!(w, ";\n")?;
-        write!(w, "        unsafe {{ transmute::<_, Dst>(self.{name}.ptr)(")?;
+        write!(
+            w,
+            "        unsafe {{ std::mem::transmute::<_, Dst>(self.{name}.ptr)("
+        )?;
         cmd.params
             .iter()
             .enumerate()
@@ -756,10 +746,10 @@ fn emit_api_impl<W: io::Write>(mut w: W, commands: &[Command]) -> anyhow::Result
     Ok(())
 }
 
-pub fn generate_api<W: io::Write>(mut w: W, registry: &Registry) -> anyhow::Result<()> {
+pub fn generate_api<W: io::Write>(w: &mut W, registry: &Registry) -> anyhow::Result<()> {
     write!(w, "{}\n\n", PROLOGUE.trim())?;
-    emit_enums(&mut w, &registry.enums)?;
-    emit_api_struct(&mut w, &registry.commands)?;
-    emit_api_impl(&mut w, &registry.commands)?;
+    emit_enums(w, &registry.enums)?;
+    emit_api_struct(w, &registry.commands)?;
+    emit_api_impl(w, &registry.commands)?;
     Ok(())
 }

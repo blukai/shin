@@ -1,12 +1,12 @@
 use std::collections::VecDeque;
-use std::ffi::{c_char, c_void, CStr};
-use std::ptr::{null_mut, NonNull};
+use std::ffi::{CStr, c_char, c_void};
+use std::ptr::{NonNull, null_mut};
 
-use anyhow::{anyhow, Context as _};
+use anyhow::{Context as _, anyhow};
 use raw_window_handle as rwh;
 
 use crate::{
-    libwayland_client, libxkbcommon, Window, WindowAttrs, WindowEvent, DEFAULT_LOGICAL_SIZE,
+    DEFAULT_LOGICAL_SIZE, Window, WindowAttrs, WindowEvent, libwayland_client, libxkbcommon,
 };
 
 pub struct WaylandBackend {

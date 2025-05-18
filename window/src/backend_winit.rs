@@ -1,10 +1,10 @@
 use std::collections::VecDeque;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use raw_window_handle as rwh;
 use winit::platform::pump_events::EventLoopExtPumpEvents;
 
-use crate::{Window, WindowAttrs, WindowEvent, DEFAULT_LOGICAL_SIZE};
+use crate::{DEFAULT_LOGICAL_SIZE, Window, WindowAttrs, WindowEvent};
 
 struct App {
     window_attrs: WindowAttrs,

@@ -1,19 +1,15 @@
-use std::{
-    fs::{self},
-    io::{BufWriter, stdout},
-};
+use std::fs;
+use std::io::stdout;
 
-use gl_generator::gl::{filter_registry, parse_registry};
+use gl_generator::gl;
 
-// example driven development  xd
+// example driven development
 
 fn main() -> anyhow::Result<()> {
     let input = fs::read_to_string("gl-specs/gl.xml")?;
-    let registry = parse_registry(input.as_str())?;
-    let registry = filter_registry(registry, "gl", (4, 6), &[])?;
-
-    let mut w = BufWriter::new(stdout());
-    gl_generator::gl::generate_api(&mut w, &registry)?;
-
+    let registry = gl::parse_registry(input.as_str())?;
+    let registry = gl::filter_registry(registry, "gl", (4, 6), &[])?;
+    let mut w = stdout();
+    gl::generate_api(&mut w, &registry)?;
     Ok(())
 }

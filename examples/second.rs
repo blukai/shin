@@ -1,15 +1,15 @@
-use std::ffi::{c_void, CString};
+use std::ffi::{CString, c_void};
 use std::panic;
 
 use anyhow::Context as _;
 use window::{Window, WindowAttrs};
 
-pub fn panic_hook(info: &panic::PanicHookInfo) {
+fn panic_hook(info: &panic::PanicHookInfo) {
     let msg = CString::new(info.to_string()).expect("invalid panic info");
-    unsafe { window::js_bindings::panic(msg.as_ptr()) };
+    unsafe { window::js_sys::panic(msg.as_ptr()) };
 }
 
-pub struct ConsoleLogger;
+struct ConsoleLogger;
 
 impl log::Log for ConsoleLogger {
     fn enabled(&self, metadata: &log::Metadata) -> bool {
@@ -27,20 +27,20 @@ impl log::Log for ConsoleLogger {
             text = record.args(),
         ))
         .expect("invalid console log message");
-        unsafe { window::js_bindings::console_log(msg.as_ptr()) };
+        unsafe { window::js_sys::console_log(msg.as_ptr()) };
     }
 
     fn flush(&self) {}
 }
 
 impl ConsoleLogger {
-    pub fn init() {
+    fn init() {
         log::set_logger(&ConsoleLogger).expect("could not set logger");
         log::set_max_level(log::LevelFilter::Info);
     }
 }
 
-pub struct Context {
+struct Context {
     window: Box<dyn Window>,
     i: usize,
 }
@@ -73,5 +73,5 @@ fn main() {
         return true;
     }
     let ctx_ptr = ctx.as_mut() as *mut Context as *mut c_void;
-    unsafe { window::js_bindings::request_animation_frame_loop(iterate, ctx_ptr) };
+    unsafe { window::js_sys::request_animation_frame_loop(iterate, ctx_ptr) };
 }

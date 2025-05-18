@@ -15,7 +15,7 @@ mod backend_winit;
 #[cfg(target_arch = "wasm32")]
 mod backend_web;
 #[cfg(target_arch = "wasm32")]
-pub use backend_web::js_bindings;
+pub use backend_web::js_sys;
 
 pub const DEFAULT_LOGICAL_SIZE: (u32, u32) = (640, 480);
 

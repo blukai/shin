@@ -4,19 +4,19 @@ use std::ffi::CString;
 use anyhow::anyhow;
 use raw_window_handle as rwh;
 
-use crate::{Window, WindowAttrs, WindowEvent, DEFAULT_LOGICAL_SIZE};
+use crate::{DEFAULT_LOGICAL_SIZE, Window, WindowAttrs, WindowEvent};
 
-pub mod js_bindings {
+pub mod js_sys {
     use std::ffi::{c_char, c_void};
 
     #[derive(Debug, Clone)]
     #[repr(transparent)]
-    pub(super) struct ExternRef {
-        idx: u32,
+    pub struct ExternRef {
+        idx: usize,
     }
 
     impl ExternRef {
-        pub(super) fn is_nil(&self) -> bool {
+        pub fn is_nil(&self) -> bool {
             self.idx == 0
         }
     }
@@ -44,8 +44,8 @@ pub mod js_bindings {
 pub struct WebBackend {
     attrs: WindowAttrs,
 
-    canvas: js_bindings::ExternRef,
-    webgl2_context: js_bindings::ExternRef,
+    canvas: js_sys::ExternRef,
+    webgl2_context: js_sys::ExternRef,
 
     events: VecDeque<WindowEvent>,
 }
@@ -58,15 +58,15 @@ impl WebBackend {
             || CString::new("canvas"),
             |payload| CString::new(payload.as_ref()),
         )?;
-        let canvas = unsafe { js_bindings::canvas_get_by_id(canvas_id.as_ptr()) };
+        let canvas = unsafe { js_sys::canvas_get_by_id(canvas_id.as_ptr()) };
         if canvas.is_nil() {
             return Err(anyhow!("could not get canvas"));
         }
 
         let (width, height) = attrs.logical_size.unwrap_or(DEFAULT_LOGICAL_SIZE);
-        unsafe { js_bindings::canvas_set_size(canvas.clone(), width as i32, height as i32) };
+        unsafe { js_sys::canvas_set_size(canvas.clone(), width as i32, height as i32) };
         let (mut width, mut height) = (0_i32, 0_i32);
-        unsafe { js_bindings::canvas_get_size(canvas.clone(), &mut width, &mut height) };
+        unsafe { js_sys::canvas_get_size(canvas.clone(), &mut width, &mut height) };
         events.push_back(WindowEvent::Configure {
             logical_size: (width as u32, height as u32),
         });
@@ -74,13 +74,13 @@ impl WebBackend {
 
         // TODO: this must noe be happening here. this must be responsibility of graphics crate!
         let webgl2_context =
-            unsafe { js_bindings::canvas_get_context(canvas.clone(), c"webgl2".as_ptr()) };
+            unsafe { js_sys::canvas_get_context(canvas.clone(), c"webgl2".as_ptr()) };
         if webgl2_context.is_nil() {
             return Err(anyhow!("could not get webgl2 context"));
         }
         unsafe {
-            js_bindings::gl_clear_color(webgl2_context.clone(), 1.0, 0.0, 0.0, 1.0);
-            js_bindings::gl_clear(webgl2_context.clone(), 0x00004000);
+            js_sys::gl_clear_color(webgl2_context.clone(), 1.0, 0.0, 0.0, 1.0);
+            js_sys::gl_clear(webgl2_context.clone(), 0x00004000);
         }
 
         let boxed = Box::new(Self {

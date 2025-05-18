@@ -1,6 +1,5 @@
 use graphics::egl::{EglConfig, EglContext, EglSurface};
-use graphics::gl;
-use graphics::libegl;
+use graphics::{gl, libegl};
 use raw_window_handle::{self as rwh, HasDisplayHandle as _, HasWindowHandle as _};
 use window::{Window, WindowAttrs, WindowEvent};
 

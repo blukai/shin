@@ -1,11 +1,37 @@
 async function shinMain() {
     const textDecoder = new TextDecoder();
+
     let wasm;
 
     function assert(truth, msg) {
         if (!truth) {
             throw new Error(`assertion failed${msg ? `: ${msg}` : ""}`);
         }
+    }
+
+    let wasmUint8Array = null;
+    function getWasmUint8Array() {
+        if (!wasmUint8Array || !wasmUint8Array.byteLength) {
+            wasmUint8Array = new Uint8Array(wasm.exports.memory.buffer);
+        }
+        return wasmUint8Array;
+    }
+
+    let wasmDataView = null;
+    function getWasmDataView() {
+        if (!wasmDataView || wasmDataView.buffer !== wasm.exports.memory.buffer) {
+            wasmDataView = new DataView(wasm.exports.memory.buffer);
+        }
+        return wasmDataView;
+    }
+
+    function wasmReadCStr(ptr) {
+        const len = getWasmUint8Array().subarray(ptr).findIndex((b) => !b);
+        return textDecoder.decode(getWasmUint8Array().subarray(ptr, ptr + len));
+    }
+
+    function wasmWriteI32(ptr, value) {
+        getWasmDataView().setInt32(ptr, value);
     }
 
     // NOTE: it does not seem like rust supports exteralref thing. 
@@ -39,25 +65,15 @@ async function shinMain() {
         get: (idx) => externRefGlue.table.get(idx - 1),
     };
 
-    function readCStr(ptr) {
-        let bytes = new Uint8Array(wasm.exports.memory.buffer, ptr);
-        return textDecoder.decode(bytes.slice(0, bytes.findIndex((b) => !b)));
-    }
-
-    function writeI32(ptr, value) {
-        const mem = new Int32Array(wasm.exports.memory.buffer, ptr, 1);
-        mem[0] = value;
-    }
-
     const imports = {
         env: {
             panic: (ptr) => {
                 // TODO: do something more prominent on panic.
-                throw new Error(readCStr(ptr));
+                throw new Error(wasmReadCStr(ptr));
             },
 
             console_log: (ptr) => {
-                console.log(readCStr(ptr));
+                console.log(wasmReadCStr(ptr));
             },
 
             request_animation_frame_loop: (f, ctx) => {
@@ -70,14 +86,14 @@ async function shinMain() {
             },
 
             canvas_get_by_id: (idPtr) => {
-                const id = readCStr(idPtr);
+                const id = wasmReadCStr(idPtr);
                 const el = document.getElementById(id);
                 return (el && externRefGlue.insert(el)) || 0;
             },
             canvas_get_size: (elIdx, widthPtr, heightPtr) => {
                 const el = externRefGlue.get(elIdx);
-                writeI32(widthPtr, el.width);
-                writeI32(heightPtr, el.height);
+                wasmWriteI32(widthPtr, el.width);
+                wasmWriteI32(heightPtr, el.height);
             },
             canvas_set_size: (elIdx, width, height) => {
                 const el = externRefGlue.get(elIdx);
@@ -86,7 +102,7 @@ async function shinMain() {
             },
             canvas_get_context: (elIdx, contextTypePtr) => {
                 const el = externRefGlue.get(elIdx);
-                const contextType = readCStr(contextTypePtr);
+                const contextType = wasmReadCStr(contextTypePtr);
                 const context = el.getContext(contextType);
                 return (context && externRefGlue.insert(context)) || 0;
             },
@@ -104,6 +120,7 @@ async function shinMain() {
 
     const wasmStream = fetch("/target/wasm32-unknown-unknown/debug/examples/second.wasm");
     const wasmMod = await WebAssembly.compileStreaming(wasmStream);
+
     wasm = await WebAssembly.instantiate(wasmMod, imports);
 
     wasm.exports.main();

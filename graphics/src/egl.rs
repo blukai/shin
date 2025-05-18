@@ -1,7 +1,7 @@
 use std::ffi::c_void;
 use std::ptr::{null, null_mut};
 
-use anyhow::{anyhow, Context as _};
+use anyhow::{Context as _, anyhow};
 use raw_window_handle as rwh;
 
 use crate::{libegl, libwayland_egl};

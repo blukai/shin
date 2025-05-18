@@ -1,4 +1,4 @@
-use std::ffi::{c_void, CStr, CString};
+use std::ffi::{CStr, CString, c_void};
 use std::mem::transmute_copy;
 use std::ptr::NonNull;
 
