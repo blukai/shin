@@ -1,4 +1,4 @@
-async function shinMain() {
+async function shinInit(path) {
     const textDecoder = new TextDecoder();
 
     let wasm;
@@ -118,7 +118,7 @@ async function shinMain() {
         },
     };
 
-    const wasmStream = fetch("/target/wasm32-unknown-unknown/debug/examples/second.wasm");
+    const wasmStream = fetch(path);
     const wasmMod = await WebAssembly.compileStreaming(wasmStream);
 
     wasm = await WebAssembly.instantiate(wasmMod, imports);
