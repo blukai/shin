@@ -2,7 +2,8 @@ use std::ffi::{CString, c_void};
 use std::panic;
 
 use anyhow::Context as _;
-use window::{Window, WindowAttrs};
+use graphics::gl::{self, Contexter};
+use window::{Window, WindowAttrs, WindowEvent};
 
 fn panic_hook(info: &panic::PanicHookInfo) {
     let msg = CString::new(info.to_string()).expect("invalid panic info");
@@ -36,12 +37,13 @@ impl log::Log for ConsoleLogger {
 impl ConsoleLogger {
     fn init() {
         log::set_logger(&ConsoleLogger).expect("could not set logger");
-        log::set_max_level(log::LevelFilter::Info);
+        log::set_max_level(log::LevelFilter::Trace);
     }
 }
 
 struct Context {
     window: Box<dyn Window>,
+    gl_context: Option<gl::Context>,
     i: usize,
 }
 
@@ -49,11 +51,38 @@ impl Context {
     fn new() -> anyhow::Result<Self> {
         let window =
             window::create_window(WindowAttrs::default()).context("could not create window")?;
-        Ok(Context { window, i: 0 })
+        Ok(Context {
+            window,
+            gl_context: None,
+            i: 0,
+        })
     }
 
     fn iterate(&mut self) -> anyhow::Result<()> {
         log::info!("iterate {}", self.i);
+
+        while let Some(event) = self.window.pop_event() {
+            log::debug!("event: {event:?}");
+
+            match event {
+                WindowEvent::Configure { logical_size } => {
+                    if self.gl_context.is_none() {
+                        self.gl_context = Some(gl::Context::from_window_handle(
+                            self.window.window_handle()?,
+                        ));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(ctx) = self.gl_context.as_ref() {
+            unsafe {
+                ctx.clear_color(1.0, 0.0, 0.0, 1.0);
+                ctx.clear(gl::COLOR_BUFFER_BIT);
+            }
+        }
+
         self.i += 1;
         Ok(())
     }

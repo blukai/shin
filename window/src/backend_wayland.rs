@@ -292,10 +292,9 @@ impl WaylandBackend {
 
 impl rwh::HasDisplayHandle for WaylandBackend {
     fn display_handle(&self) -> Result<rwh::DisplayHandle<'_>, rwh::HandleError> {
-        let wayland_display_handle = rwh::WaylandDisplayHandle::new(self.wl_display.cast());
-        let raw_display_handle = rwh::RawDisplayHandle::Wayland(wayland_display_handle);
-        let display_handle = unsafe { rwh::DisplayHandle::borrow_raw(raw_display_handle) };
-        Ok(display_handle)
+        let wayland = rwh::WaylandDisplayHandle::new(self.wl_display.cast());
+        let raw = rwh::RawDisplayHandle::Wayland(wayland);
+        Ok(unsafe { rwh::DisplayHandle::borrow_raw(raw) })
     }
 }
 
@@ -304,10 +303,9 @@ impl rwh::HasWindowHandle for WaylandBackend {
         let Some(wl_surface) = NonNull::new(self.wl_surface) else {
             return Err(rwh::HandleError::Unavailable);
         };
-        let wayland_window_handle = rwh::WaylandWindowHandle::new(wl_surface.cast());
-        let raw_window_handle = rwh::RawWindowHandle::Wayland(wayland_window_handle);
-        let window_handle = unsafe { rwh::WindowHandle::borrow_raw(raw_window_handle) };
-        Ok(window_handle)
+        let wayland = rwh::WaylandWindowHandle::new(wl_surface.cast());
+        let raw = rwh::RawWindowHandle::Wayland(wayland);
+        Ok(unsafe { rwh::WindowHandle::borrow_raw(raw) })
     }
 }
 

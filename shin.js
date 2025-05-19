@@ -31,7 +31,7 @@ async function shinMain() {
     }
 
     function wasmWriteI32(ptr, value) {
-        getWasmDataView().setInt32(ptr, value);
+        getWasmDataView().setInt32(ptr, value, true);
     }
 
     // NOTE: it does not seem like rust supports exteralref thing. 

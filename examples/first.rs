@@ -1,4 +1,5 @@
 use graphics::egl::{EglConfig, EglContext, EglSurface};
+use graphics::gl::Contexter;
 use graphics::{gl, libegl};
 use raw_window_handle::{self as rwh, HasDisplayHandle as _, HasWindowHandle as _};
 use window::{Window, WindowAttrs, WindowEvent};
@@ -8,7 +9,7 @@ struct InitializedGraphicsContext {
     egl_context: EglContext,
     egl_surface: EglSurface,
 
-    gl: gl::sys::Api,
+    gl: gl::Context,
 }
 
 impl InitializedGraphicsContext {
@@ -48,7 +49,7 @@ impl GraphicsContext {
         // egl_context.set_swap_interval(&egl, 0)?;
 
         let gl = unsafe {
-            gl::sys::Api::load_with(|procname| (egl.eglGetProcAddress)(procname as _) as _)
+            gl::Context::load_with(|procname| (egl.eglGetProcAddress)(procname as _) as _)
         };
         // log::info!("initialized gl version {:?}", gl.version());
 
@@ -111,8 +112,8 @@ impl Context {
                 igc.egl_context
                     .make_current(&igc.egl, igc.egl_surface.as_ptr())?;
 
-                igc.gl.ClearColor(1.0, 0.0, 0.0, 1.0);
-                igc.gl.Clear(gl::sys::COLOR_BUFFER_BIT);
+                igc.gl.clear_color(1.0, 0.0, 0.0, 1.0);
+                igc.gl.clear(gl::COLOR_BUFFER_BIT);
 
                 igc.egl_context
                     .swap_buffers(&igc.egl, igc.egl_surface.as_ptr())?;

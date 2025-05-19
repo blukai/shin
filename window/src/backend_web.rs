@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
-use std::ffi::CString;
+use std::ffi::{CString, c_void};
+use std::ptr::NonNull;
 
 use anyhow::anyhow;
 use raw_window_handle as rwh;
@@ -11,12 +12,12 @@ pub mod js_sys {
 
     #[derive(Debug, Clone)]
     #[repr(transparent)]
-    pub struct ExternRef {
+    pub(super) struct ExternRef {
         idx: usize,
     }
 
     impl ExternRef {
-        pub fn is_nil(&self) -> bool {
+        pub(super) fn is_nil(&self) -> bool {
             self.idx == 0
         }
     }
@@ -34,10 +35,6 @@ pub mod js_sys {
         pub(super) fn canvas_get_by_id(id: *const c_char) -> ExternRef;
         pub(super) fn canvas_get_size(el: ExternRef, width: *mut i32, height: *mut i32);
         pub(super) fn canvas_set_size(el: ExternRef, width: i32, height: i32);
-        pub(super) fn canvas_get_context(el: ExternRef, context_type: *const c_char) -> ExternRef;
-
-        pub(super) fn gl_clear_color(ctx: ExternRef, r: f32, g: f32, b: f32, a: f32);
-        pub(super) fn gl_clear(ctx: ExternRef, mask: u32);
     }
 }
 
@@ -45,7 +42,6 @@ pub struct WebBackend {
     attrs: WindowAttrs,
 
     canvas: js_sys::ExternRef,
-    webgl2_context: js_sys::ExternRef,
 
     events: VecDeque<WindowEvent>,
 }
@@ -72,22 +68,10 @@ impl WebBackend {
         });
         // TODO: scale factor (/ pixel ratio)
 
-        // TODO: this must noe be happening here. this must be responsibility of graphics crate!
-        let webgl2_context =
-            unsafe { js_sys::canvas_get_context(canvas.clone(), c"webgl2".as_ptr()) };
-        if webgl2_context.is_nil() {
-            return Err(anyhow!("could not get webgl2 context"));
-        }
-        unsafe {
-            js_sys::gl_clear_color(webgl2_context.clone(), 1.0, 0.0, 0.0, 1.0);
-            js_sys::gl_clear(webgl2_context.clone(), 0x00004000);
-        }
-
         let boxed = Box::new(Self {
             attrs,
 
             canvas,
-            webgl2_context,
 
             events,
         });
@@ -98,19 +82,27 @@ impl WebBackend {
 
 impl rwh::HasDisplayHandle for WebBackend {
     fn display_handle(&self) -> Result<rwh::DisplayHandle<'_>, rwh::HandleError> {
-        unimplemented!()
+        let web = rwh::WebDisplayHandle::new();
+        let raw = rwh::RawDisplayHandle::Web(web);
+        Ok(unsafe { rwh::DisplayHandle::borrow_raw(raw) })
     }
 }
 
 impl rwh::HasWindowHandle for WebBackend {
     fn window_handle(&self) -> Result<rwh::WindowHandle<'_>, rwh::HandleError> {
-        unimplemented!()
+        assert!(!self.canvas.is_nil());
+        let web = rwh::WebCanvasWindowHandle::new(unsafe {
+            NonNull::new_unchecked(&self.canvas as *const js_sys::ExternRef as *mut c_void)
+        });
+        let raw = rwh::RawWindowHandle::WebCanvas(web);
+        Ok(unsafe { rwh::WindowHandle::borrow_raw(raw) })
     }
 }
 
 impl Window for WebBackend {
     fn pump_events(&mut self) -> anyhow::Result<()> {
-        unreachable!()
+        // TODO
+        Ok(())
     }
 
     fn pop_event(&mut self) -> Option<WindowEvent> {

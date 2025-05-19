@@ -3,18 +3,30 @@ use std::io::BufWriter;
 use std::path::PathBuf;
 use std::{env, fs};
 
-use gl_generator::gl;
+use gl_generator;
 
 fn generate_gl() -> anyhow::Result<()> {
     println!("cargo:rerun-if-changed=../gl-generator");
     println!("cargo:rerun-if-changed=../gl-specs");
 
     let out_dir = PathBuf::from(&env::var("OUT_DIR")?);
-    let mut out_file = BufWriter::new(File::create(out_dir.join("gl_generated.rs"))?);
 
-    let input = fs::read_to_string("../gl-specs/gl.xml")?;
-    let registry = gl::filter_registry(gl::parse_registry(input.as_str())?, "gl", (4, 6), &[])?;
-    gl::generate_api(&mut out_file, &registry)?;
+    let spec = fs::read_to_string("../gl-specs/gl.xml")?;
+    let registry = gl_generator::filter_registry(
+        gl_generator::parse_registry(spec.as_str())?,
+        "gl",
+        (4, 6),
+        &[],
+    )?;
+
+    let mut types_out = BufWriter::new(File::create(out_dir.join("gl_types.rs"))?);
+    gl_generator::emit_types(&mut types_out)?;
+
+    let mut enums_out = BufWriter::new(File::create(out_dir.join("gl_enums.rs"))?);
+    gl_generator::emit_enums(&mut enums_out, &registry)?;
+
+    let mut api_out = BufWriter::new(File::create(out_dir.join("gl_api.rs"))?);
+    gl_generator::emit_api(&mut api_out, &registry)?;
 
     Ok(())
 }
