@@ -5,7 +5,7 @@ use std::{env, fs};
 
 use gl_generator;
 
-fn generate_gl() -> anyhow::Result<()> {
+fn generate_gl_bindings() -> anyhow::Result<()> {
     println!("cargo:rerun-if-changed=../gl-generator");
     println!("cargo:rerun-if-changed=../gl-specs");
 
@@ -19,14 +19,17 @@ fn generate_gl() -> anyhow::Result<()> {
         &[],
     )?;
 
-    let mut types_out = BufWriter::new(File::create(out_dir.join("gl_types.rs"))?);
+    let mut types_out = BufWriter::new(File::create(out_dir.join("gl_types_generated.rs"))?);
     gl_generator::emit_types(&mut types_out)?;
 
-    let mut enums_out = BufWriter::new(File::create(out_dir.join("gl_enums.rs"))?);
+    let mut enums_out = BufWriter::new(File::create(out_dir.join("gl_enums_generated.rs"))?);
     gl_generator::emit_enums(&mut enums_out, &registry)?;
 
-    let mut api_out = BufWriter::new(File::create(out_dir.join("gl_api.rs"))?);
-    gl_generator::emit_api(&mut api_out, &registry)?;
+    let wasm = env::var("CARGO_CFG_TARGET_FAMILY").is_ok_and(|var| var.as_str() == "wasm");
+    if !wasm {
+        let mut api_out = BufWriter::new(File::create(out_dir.join("gl_api_generated.rs"))?);
+        gl_generator::emit_api(&mut api_out, &registry)?;
+    }
 
     Ok(())
 }
@@ -34,10 +37,7 @@ fn generate_gl() -> anyhow::Result<()> {
 fn main() -> anyhow::Result<()> {
     println!("cargo:rerun-if-changed=build.rs");
 
-    // TODO: generate api only on native, but not on wasm
-    // env::var("CARGO_CFG_TARGET_ARCH")
-
-    generate_gl()?;
+    generate_gl_bindings()?;
 
     Ok(())
 }

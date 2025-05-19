@@ -10,21 +10,21 @@ pub(crate) mod enums {
     include!(concat!(env!("OUT_DIR"), "/gl_enums.rs"));
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 #[path = "gl_native.rs"]
 mod gl_native;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 #[path = "gl_web.rs"]
 mod gl_web;
 
 pub use enums::*;
 pub use types::*;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 pub use gl_native::*;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 pub use gl_web::*;
 
 // NOTE: i couldn't find any specifics on naming conventions in rust, thus i'm going to use what i

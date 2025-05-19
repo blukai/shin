@@ -1,8 +1,8 @@
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 pub mod egl;
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 pub mod libegl;
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 pub mod libwayland_egl;
 
 pub mod gl;

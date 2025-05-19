@@ -8,7 +8,7 @@ anyhow.workspace = true
 log.workspace = true
 raw-window-handle.workspace = true
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
 dynlib.workspace = true
 
 [build-dependencies]

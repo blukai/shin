@@ -9,13 +9,13 @@ log.workspace = true
 raw-window-handle.workspace = true
 winit = { workspace = true, optional = true }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
 dynlib.workspace = true
 
 [build-dependencies]
 anyhow.workspace = true
 
-[target.'cfg(target_os = "linux")'.build-dependencies]
+[target.'cfg(unix)'.build-dependencies]
 wayland-scanner.workspace = true
 
 [features]
