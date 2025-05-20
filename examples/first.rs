@@ -1,4 +1,4 @@
-use graphics::gl::{self, GlContexter};
+use gpu::gl::{self, GlContexter};
 use raw_window_handle::{HasDisplayHandle as _, HasWindowHandle as _};
 use window::{Window, WindowAttrs, WindowEvent};
 
@@ -6,7 +6,7 @@ use window::{Window, WindowAttrs, WindowEvent};
 mod platform {
     use std::ffi::c_void;
 
-    use graphics::{egl, gl};
+    use gpu::{egl, gl};
     use raw_window_handle as rwh;
 
     pub struct Logger;
@@ -39,8 +39,8 @@ mod platform {
     }
 
     pub struct InitializedGraphicsContext {
-        pub context: graphics::egl::Context,
-        pub surface: graphics::egl::Surface,
+        pub context: egl::Context,
+        pub surface: egl::Surface,
         pub gl: gl::Context,
     }
 
@@ -95,7 +95,7 @@ mod platform {
 mod platform {
     use std::{ffi::CString, panic};
 
-    use graphics::{gl, web};
+    use gpu::{gl, web};
     use raw_window_handle as rwh;
 
     pub fn panic_hook(info: &panic::PanicHookInfo) {
@@ -135,7 +135,7 @@ mod platform {
     }
 
     pub struct InitializedGraphicsContext {
-        pub surface: graphics::web::Surface,
+        pub surface: web::Surface,
         pub gl: gl::Context,
     }
 
@@ -172,18 +172,18 @@ mod platform {
 
 struct Context {
     window: Box<dyn Window>,
-    graphics_context: platform::GraphicsContext,
+    gpu_context: platform::GraphicsContext,
     close_requested: bool,
 }
 
 impl Context {
     fn new() -> anyhow::Result<Self> {
         let window = window::create_window(WindowAttrs::default())?;
-        let graphics_context = platform::GraphicsContext::new_uninit();
+        let gpu_context = platform::GraphicsContext::new_uninit();
 
         Ok(Self {
             window,
-            graphics_context,
+            gpu_context,
             close_requested: false,
         })
     }
@@ -195,10 +195,10 @@ impl Context {
             log::debug!("event: {event:?}");
 
             match event {
-                WindowEvent::Configure { logical_size } => match self.graphics_context {
+                WindowEvent::Configure { logical_size } => match self.gpu_context {
                     platform::GraphicsContext::Uninit => {
                         let igc = self
-                            .graphics_context
+                            .gpu_context
                             .init(self.window.display_handle()?, self.window.window_handle()?)?;
 
                         #[cfg(unix)]
@@ -216,7 +216,7 @@ impl Context {
             }
         }
 
-        if let platform::GraphicsContext::Initialized(ref igc) = self.graphics_context {
+        if let platform::GraphicsContext::Initialized(ref igc) = self.gpu_context {
             unsafe {
                 #[cfg(unix)]
                 igc.context.make_current(igc.surface.as_ptr())?;

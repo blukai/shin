@@ -367,7 +367,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "graphics"
+name = "gpu"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -951,7 +951,7 @@ name = "shin"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "graphics",
+ "gpu",
  "log",
  "raw-window-handle",
  "window",

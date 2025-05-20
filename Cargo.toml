@@ -3,7 +3,7 @@ resolver = "2"
 members = [
   "dynlib",
   "gl-generator",
-  "graphics",
+  "gpu",
   "wayland-scanner",
   "window",
   "xml-iterator",
@@ -21,7 +21,7 @@ winit = "0.30"
 # workspace
 dynlib = { path = "dynlib" }
 gl-generator = { path = "gl-generator" }
-graphics = { path = "graphics" }
+gpu = { path = "gpu" }
 wayland-scanner = { path = "wayland-scanner" }
 window = { path = "window" }
 xml-iterator = { path = "xml-iterator" }
@@ -36,7 +36,7 @@ anyhow.workspace = true
 log.workspace = true
 raw-window-handle.workspace = true
 # workspace
-graphics.workspace = true
+gpu.workspace = true
 window.workspace = true
 
 [features]
