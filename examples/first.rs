@@ -9,6 +9,35 @@ mod platform {
     use graphics::{egl, gl};
     use raw_window_handle as rwh;
 
+    pub struct Logger;
+
+    impl log::Log for Logger {
+        fn enabled(&self, metadata: &log::Metadata) -> bool {
+            metadata.level() <= log::max_level()
+        }
+
+        fn log(&self, record: &log::Record) {
+            println!(
+                "{level:<5} {file}:{line} > {text}",
+                level = record.level(),
+                file = record.file().unwrap_or_else(|| record.target()),
+                line = record
+                    .line()
+                    .map_or_else(|| "??".to_string(), |line| line.to_string()),
+                text = record.args(),
+            );
+        }
+
+        fn flush(&self) {}
+    }
+
+    impl Logger {
+        pub fn init() {
+            log::set_logger(&Logger).expect("could not set logger");
+            log::set_max_level(log::LevelFilter::Trace);
+        }
+    }
+
     pub struct InitializedGraphicsContext {
         pub context: graphics::egl::Context,
         pub surface: graphics::egl::Surface,
@@ -74,9 +103,9 @@ mod platform {
         unsafe { window::js_sys::panic(msg.as_ptr()) };
     }
 
-    pub struct ConsoleLogger;
+    pub struct Logger;
 
-    impl log::Log for ConsoleLogger {
+    impl log::Log for Logger {
         fn enabled(&self, metadata: &log::Metadata) -> bool {
             metadata.level() <= log::max_level()
         }
@@ -98,9 +127,9 @@ mod platform {
         fn flush(&self) {}
     }
 
-    impl ConsoleLogger {
+    impl Logger {
         pub fn init() {
-            log::set_logger(&ConsoleLogger).expect("could not set logger");
+            log::set_logger(&Logger).expect("could not set logger");
             log::set_max_level(log::LevelFilter::Trace);
         }
     }
@@ -207,13 +236,13 @@ impl Context {
 fn main() {
     #[cfg(unix)]
     {
-        env_logger::init();
+        platform::Logger::init();
     }
 
     #[cfg(target_family = "wasm")]
     {
         std::panic::set_hook(Box::new(platform::panic_hook));
-        platform::ConsoleLogger::init();
+        platform::Logger::init();
     }
 
     // TODO: figure out wasm-side lifetime of the entire thing
