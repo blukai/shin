@@ -1,80 +1,156 @@
-use graphics::egl::{EglConfig, EglContext, EglSurface};
-use graphics::gl::Contexter;
-use graphics::{gl, libegl};
-use raw_window_handle::{self as rwh, HasDisplayHandle as _, HasWindowHandle as _};
+use graphics::gl::{self, GlContexter};
+use raw_window_handle::{HasDisplayHandle as _, HasWindowHandle as _};
 use window::{Window, WindowAttrs, WindowEvent};
 
-struct InitializedGraphicsContext {
-    egl: libegl::Lib,
-    egl_context: EglContext,
-    egl_surface: EglSurface,
+#[cfg(unix)]
+mod platform {
+    use std::ffi::c_void;
 
-    gl: gl::Context,
-}
+    use graphics::{egl, gl};
+    use raw_window_handle as rwh;
 
-impl InitializedGraphicsContext {
-    #[inline]
-    fn resize(&mut self, logical_size: (u32, u32)) {
-        self.egl_surface.resize(logical_size)
+    pub struct InitializedGraphicsContext {
+        pub context: graphics::egl::Context,
+        pub surface: graphics::egl::Surface,
+        pub gl: gl::Context,
+    }
+
+    pub enum GraphicsContext {
+        Initialized(InitializedGraphicsContext),
+        Uninit,
+    }
+
+    impl GraphicsContext {
+        pub fn new_uninit() -> Self {
+            Self::Uninit
+        }
+
+        pub fn init(
+            &mut self,
+            display_handle: rwh::DisplayHandle,
+            window_handle: rwh::WindowHandle,
+        ) -> anyhow::Result<&mut InitializedGraphicsContext> {
+            assert!(matches!(self, Self::Uninit));
+
+            let context = egl::Context::new(
+                display_handle,
+                egl::Config {
+                    min_swap_interval: Some(0),
+                    ..egl::Config::default()
+                },
+            )?;
+            let surface = egl::Surface::new(&context, window_handle)?;
+
+            // TODO: figure out an okay way to include vsync toggle.
+            // context.make_current(&egl, egl_surface.as_ptr())?;
+            // context.set_swap_interval(&egl, 0)?;
+
+            let gl = unsafe {
+                gl::Context::load_with(|procname| context.get_proc_address(procname) as *mut c_void)
+            };
+
+            *self = Self::Initialized(InitializedGraphicsContext {
+                context,
+                surface,
+                gl,
+            });
+            let Self::Initialized(init) = self else {
+                unreachable!();
+            };
+            Ok(init)
+        }
     }
 }
 
-enum GraphicsContext {
-    Initialized(InitializedGraphicsContext),
-    Uninitialized,
-}
+#[cfg(target_family = "wasm")]
+mod platform {
+    use std::{ffi::CString, panic};
 
-impl GraphicsContext {
-    fn init(
-        &mut self,
-        display_handle: rwh::DisplayHandle,
-        window_handle: rwh::WindowHandle,
-        logical_size: (u32, u32),
-    ) -> anyhow::Result<()> {
-        assert!(matches!(self, Self::Uninitialized));
+    use graphics::{gl, web};
+    use raw_window_handle as rwh;
 
-        let egl = libegl::Lib::load()?;
-        let egl_context = EglContext::new(
-            &egl,
-            display_handle,
-            EglConfig {
-                min_swap_interval: Some(0),
-                ..EglConfig::default()
-            },
-        )?;
-        let egl_surface = EglSurface::new(&egl, &egl_context, window_handle, logical_size)?;
+    pub fn panic_hook(info: &panic::PanicHookInfo) {
+        let msg = CString::new(info.to_string()).expect("invalid panic info");
+        unsafe { window::js_sys::panic(msg.as_ptr()) };
+    }
 
-        // TODO: figure out an okay way to include vsync toggle.
-        // egl_context.make_current(&egl, egl_surface.as_ptr())?;
-        // egl_context.set_swap_interval(&egl, 0)?;
+    pub struct ConsoleLogger;
 
-        let gl = unsafe {
-            gl::Context::load_with(|procname| (egl.eglGetProcAddress)(procname as _) as _)
-        };
-        // log::info!("initialized gl version {:?}", gl.version());
+    impl log::Log for ConsoleLogger {
+        fn enabled(&self, metadata: &log::Metadata) -> bool {
+            metadata.level() <= log::max_level()
+        }
 
-        *self = Self::Initialized(InitializedGraphicsContext {
-            egl,
-            egl_context,
-            egl_surface,
+        fn log(&self, record: &log::Record) {
+            let msg = CString::new(format!(
+                "{level:<5} {file}:{line} > {text}",
+                level = record.level(),
+                file = record.file().unwrap_or_else(|| record.target()),
+                line = record
+                    .line()
+                    .map_or_else(|| "??".to_string(), |line| line.to_string()),
+                text = record.args(),
+            ))
+            .expect("invalid console log message");
+            unsafe { window::js_sys::console_log(msg.as_ptr()) };
+        }
 
-            gl,
-        });
+        fn flush(&self) {}
+    }
 
-        Ok(())
+    impl ConsoleLogger {
+        pub fn init() {
+            log::set_logger(&ConsoleLogger).expect("could not set logger");
+            log::set_max_level(log::LevelFilter::Trace);
+        }
+    }
+
+    pub struct InitializedGraphicsContext {
+        pub surface: graphics::web::Surface,
+        pub gl: gl::Context,
+    }
+
+    pub enum GraphicsContext {
+        Initialized(InitializedGraphicsContext),
+        Uninit,
+    }
+
+    impl GraphicsContext {
+        pub fn new_uninit() -> Self {
+            Self::Uninit
+        }
+
+        pub fn init(
+            &mut self,
+            display_handle: rwh::DisplayHandle,
+            window_handle: rwh::WindowHandle,
+        ) -> anyhow::Result<&mut InitializedGraphicsContext> {
+            assert!(matches!(self, Self::Uninit));
+
+            let surface = web::Surface::new(window_handle);
+
+            let gl = unsafe { gl::Context::from_extern_ref(surface.as_extern_ref()) };
+
+            *self = Self::Initialized(InitializedGraphicsContext { surface, gl });
+
+            let Self::Initialized(init) = self else {
+                unreachable!();
+            };
+            Ok(init)
+        }
     }
 }
 
 struct Context {
     window: Box<dyn Window>,
-    graphics_context: GraphicsContext,
+    graphics_context: platform::GraphicsContext,
     close_requested: bool,
 }
 
 impl Context {
     fn new() -> anyhow::Result<Self> {
         let window = window::create_window(WindowAttrs::default())?;
-        let graphics_context = GraphicsContext::Uninitialized;
+        let graphics_context = platform::GraphicsContext::new_uninit();
 
         Ok(Self {
             window,
@@ -91,13 +167,17 @@ impl Context {
 
             match event {
                 WindowEvent::Configure { logical_size } => match self.graphics_context {
-                    GraphicsContext::Uninitialized => self.graphics_context.init(
-                        self.window.display_handle()?,
-                        self.window.window_handle()?,
-                        logical_size,
-                    )?,
-                    GraphicsContext::Initialized(ref mut igc) => {
-                        igc.resize(logical_size);
+                    platform::GraphicsContext::Uninit => {
+                        let igc = self
+                            .graphics_context
+                            .init(self.window.display_handle()?, self.window.window_handle()?)?;
+
+                        #[cfg(unix)]
+                        igc.surface.resize(logical_size.0, logical_size.1)?;
+                    }
+                    platform::GraphicsContext::Initialized(ref mut igc) => {
+                        #[cfg(unix)]
+                        igc.surface.resize(logical_size.0, logical_size.1)?;
                     }
                 },
                 WindowEvent::CloseRequested => {
@@ -107,16 +187,16 @@ impl Context {
             }
         }
 
-        if let GraphicsContext::Initialized(ref igc) = self.graphics_context {
+        if let platform::GraphicsContext::Initialized(ref igc) = self.graphics_context {
             unsafe {
-                igc.egl_context
-                    .make_current(&igc.egl, igc.egl_surface.as_ptr())?;
+                #[cfg(unix)]
+                igc.context.make_current(igc.surface.as_ptr())?;
 
                 igc.gl.clear_color(1.0, 0.0, 0.0, 1.0);
                 igc.gl.clear(gl::COLOR_BUFFER_BIT);
 
-                igc.egl_context
-                    .swap_buffers(&igc.egl, igc.egl_surface.as_ptr())?;
+                #[cfg(unix)]
+                igc.context.swap_buffers(igc.surface.as_ptr())?;
             }
         }
 
@@ -125,10 +205,36 @@ impl Context {
 }
 
 fn main() {
-    env_logger::init();
-
-    let mut ctx = Context::new().expect("could not create context");
-    while !ctx.close_requested {
-        ctx.iterate().expect("iteration failure");
+    #[cfg(unix)]
+    {
+        env_logger::init();
     }
+
+    #[cfg(target_family = "wasm")]
+    {
+        std::panic::set_hook(Box::new(platform::panic_hook));
+        platform::ConsoleLogger::init();
+    }
+
+    // TODO: figure out wasm-side lifetime of the entire thing
+    let ctx = Box::new(Context::new().expect("could not create context"));
+    let mut ctx = std::mem::ManuallyDrop::new(ctx);
+
+    #[cfg(unix)]
+    {
+        while !ctx.close_requested {
+            ctx.iterate().expect("iteration failure");
+        }
+    }
+
+    #[cfg(target_family = "wasm")]
+    unsafe {
+        unsafe extern "C" fn iterate(ctx: *mut std::ffi::c_void) -> bool {
+            let ctx = unsafe { &mut *(ctx as *mut Context) };
+            ctx.iterate().expect("iteration failure");
+            return true;
+        }
+        let ctx_ptr = ctx.as_mut() as *mut Context as *mut std::ffi::c_void;
+        window::js_sys::request_animation_frame_loop(iterate, ctx_ptr)
+    };
 }

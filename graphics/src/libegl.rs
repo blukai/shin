@@ -276,7 +276,7 @@ pub struct Lib {
     pub eglGetDisplay: unsafe extern "C" fn(display_id: EGLNativeDisplayType) -> EGLDisplay,
     pub eglGetError: unsafe extern "C" fn() -> EGLint,
     pub eglGetProcAddress:
-        unsafe extern "C" fn(procname: *const char) -> __eglMustCastToProperFunctionPointerType,
+        unsafe extern "C" fn(procname: *const c_char) -> __eglMustCastToProperFunctionPointerType,
     pub eglInitialize:
         unsafe extern "C" fn(dpy: EGLDisplay, major: *mut EGLint, minor: *mut EGLint) -> EGLBoolean,
     pub eglMakeCurrent: unsafe extern "C" fn(

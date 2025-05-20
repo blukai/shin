@@ -10,18 +10,6 @@ use crate::{DEFAULT_LOGICAL_SIZE, Window, WindowAttrs, WindowEvent};
 pub mod js_sys {
     use std::ffi::{c_char, c_void};
 
-    #[derive(Debug, Clone)]
-    #[repr(transparent)]
-    pub(super) struct ExternRef {
-        idx: usize,
-    }
-
-    impl ExternRef {
-        pub(super) fn is_nil(&self) -> bool {
-            self.idx == 0
-        }
-    }
-
     unsafe extern "C" {
         pub fn panic(msg: *const c_char);
 
@@ -32,16 +20,16 @@ pub mod js_sys {
             ctx: *mut c_void,
         );
 
-        pub(super) fn canvas_get_by_id(id: *const c_char) -> ExternRef;
-        pub(super) fn canvas_get_size(el: ExternRef, width: *mut i32, height: *mut i32);
-        pub(super) fn canvas_set_size(el: ExternRef, width: i32, height: i32);
+        pub(super) fn canvas_get_by_id(id: *const c_char) -> usize;
+        pub(super) fn canvas_get_size(extern_ref: usize, width: *mut i32, height: *mut i32);
+        pub(super) fn canvas_set_size(extern_ref: usize, width: i32, height: i32);
     }
 }
 
 pub struct WebBackend {
     attrs: WindowAttrs,
 
-    canvas: js_sys::ExternRef,
+    canvas: usize,
 
     events: VecDeque<WindowEvent>,
 }
@@ -55,7 +43,7 @@ impl WebBackend {
             |payload| CString::new(payload.as_ref()),
         )?;
         let canvas = unsafe { js_sys::canvas_get_by_id(canvas_id.as_ptr()) };
-        if canvas.is_nil() {
+        if canvas == 0 {
             return Err(anyhow!("could not get canvas"));
         }
 
@@ -90,9 +78,9 @@ impl rwh::HasDisplayHandle for WebBackend {
 
 impl rwh::HasWindowHandle for WebBackend {
     fn window_handle(&self) -> Result<rwh::WindowHandle<'_>, rwh::HandleError> {
-        assert!(!self.canvas.is_nil());
+        assert!(self.canvas != 0);
         let web = rwh::WebCanvasWindowHandle::new(unsafe {
-            NonNull::new_unchecked(&self.canvas as *const js_sys::ExternRef as *mut c_void)
+            NonNull::new_unchecked(&self.canvas as *const usize as *mut c_void)
         });
         let raw = rwh::RawWindowHandle::WebCanvas(web);
         Ok(unsafe { rwh::WindowHandle::borrow_raw(raw) })

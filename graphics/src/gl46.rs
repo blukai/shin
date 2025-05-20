@@ -1,11 +1,11 @@
-use super::Contexter;
+use super::GlContexter;
 
 #[allow(non_snake_case)]
 #[allow(dead_code)]
 mod api {
     use crate::gl::types::*;
 
-    include!(concat!(env!("OUT_DIR"), "/gl_api.rs"));
+    include!(concat!(env!("OUT_DIR"), "/gl_api_generated.rs"));
 }
 
 pub struct Context {
@@ -23,7 +23,7 @@ impl Context {
     }
 }
 
-impl Contexter for Context {
+impl GlContexter for Context {
     #[inline]
     unsafe fn clear_color(&self, red: f32, green: f32, blue: f32, alpha: f32) {
         unsafe { self.api.ClearColor(red, green, blue, alpha) }

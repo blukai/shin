@@ -1,40 +1,42 @@
-use std::ffi::c_void;
+use std::ffi::{c_char, c_void};
 use std::ptr::{null, null_mut};
 
 use anyhow::{Context as _, anyhow};
 use raw_window_handle as rwh;
 
-use crate::{libegl, libwayland_egl};
+#[path = "libegl.rs"]
+pub mod libegl;
+#[path = "libwayland_egl.rs"]
+pub mod libwayland_egl;
 
-pub fn egl_get_error(egl: &libegl::Lib) -> anyhow::Error {
-    match unsafe { (egl.eglGetError)() } as libegl::EGLenum {
+pub fn egl_get_error(egl_lib: &libegl::Lib) -> anyhow::Error {
+    match unsafe { (egl_lib.eglGetError)() } as libegl::EGLenum {
         libegl::EGL_SUCCESS => unreachable!(),
         code => anyhow!(format!("egl error 0x{:x}", code)),
     }
 }
 
 #[derive(Default)]
-pub struct EglConfig {
+pub struct Config {
     pub min_swap_interval: Option<u16>,
     pub max_swap_interval: Option<u16>,
 }
 
-pub struct EglContext {
+pub struct Context {
+    lib: libegl::Lib,
     config: libegl::EGLConfig,
     context: libegl::EGLContext,
     display: libegl::EGLDisplay,
 }
 
-impl EglContext {
-    pub fn new(
-        egl: &libegl::Lib,
-        display_handle: rwh::DisplayHandle,
-        config: EglConfig,
-    ) -> anyhow::Result<Self> {
+impl Context {
+    pub fn new(display_handle: rwh::DisplayHandle, config: Config) -> anyhow::Result<Self> {
         unsafe {
+            let lib = libegl::Lib::load()?;
+
             // TODO: make api configurable
-            if (egl.eglBindAPI)(libegl::EGL_OPENGL_ES_API) == libegl::EGL_FALSE {
-                return Err(egl_get_error(egl)).context("could not bind api");
+            if (lib.eglBindAPI)(libegl::EGL_OPENGL_API) == libegl::EGL_FALSE {
+                return Err(egl_get_error(&lib)).context("could not bind api");
             }
 
             let display_handle_ptr = match display_handle.as_raw() {
@@ -45,14 +47,14 @@ impl EglContext {
                     )));
                 }
             };
-            let display = (egl.eglGetDisplay)(display_handle_ptr);
+            let display = (lib.eglGetDisplay)(display_handle_ptr);
             if display == libegl::EGL_NO_DISPLAY {
-                return Err(egl_get_error(egl)).context("could not get display");
+                return Err(egl_get_error(&lib)).context("could not get display");
             }
 
             let (mut major, mut minor) = (0, 0);
-            if (egl.eglInitialize)(display, &mut major, &mut minor) == libegl::EGL_FALSE {
-                return Err(egl_get_error(egl)).context("could not initialize");
+            if (lib.eglInitialize)(display, &mut major, &mut minor) == libegl::EGL_FALSE {
+                return Err(egl_get_error(&lib)).context("could not initialize");
             }
             log::info!("initialized egl version {major}.{minor}");
 
@@ -83,11 +85,11 @@ impl EglContext {
             }
 
             let mut num_configs = 0;
-            if (egl.eglGetConfigs)(display, null_mut(), 0, &mut num_configs) == libegl::EGL_FALSE {
-                return Err(egl_get_error(egl)).context("could not get num of available configs");
+            if (lib.eglGetConfigs)(display, null_mut(), 0, &mut num_configs) == libegl::EGL_FALSE {
+                return Err(egl_get_error(&lib)).context("could not get num of available configs");
             }
             let mut configs = vec![std::mem::zeroed(); num_configs as usize];
-            if (egl.eglChooseConfig)(
+            if (lib.eglChooseConfig)(
                 display,
                 config_attrs.as_ptr() as _,
                 configs.as_mut_ptr(),
@@ -95,7 +97,7 @@ impl EglContext {
                 &mut num_configs,
             ) == libegl::EGL_FALSE
             {
-                return Err(egl_get_error(egl)).context("could not choose config");
+                return Err(egl_get_error(&lib)).context("could not choose config");
             }
             configs.set_len(num_configs as usize);
             if configs.is_empty() {
@@ -104,17 +106,18 @@ impl EglContext {
             let config = *configs.first().unwrap();
 
             let context_attrs = &[libegl::EGL_CONTEXT_MAJOR_VERSION, 3, libegl::EGL_NONE];
-            let context = (egl.eglCreateContext)(
+            let context = (lib.eglCreateContext)(
                 display,
                 config,
                 libegl::EGL_NO_CONTEXT,
                 context_attrs.as_ptr() as _,
             );
             if context == libegl::EGL_NO_CONTEXT {
-                return Err(egl_get_error(egl)).context("could not create context");
+                return Err(egl_get_error(&lib)).context("could not create context");
             }
 
-            Ok(EglContext {
+            Ok(Context {
+                lib,
                 display,
                 config,
                 context,
@@ -122,48 +125,43 @@ impl EglContext {
         }
     }
 
-    pub fn make_current(
+    pub fn get_proc_address(
         &self,
-        egl: &libegl::Lib,
-        surface: libegl::EGLSurface,
-    ) -> anyhow::Result<()> {
+        procname: *const c_char,
+    ) -> libegl::__eglMustCastToProperFunctionPointerType {
+        unsafe { (self.lib.eglGetProcAddress)(procname) }
+    }
+
+    pub fn make_current(&self, surface: libegl::EGLSurface) -> anyhow::Result<()> {
         unsafe {
-            if (egl.eglMakeCurrent)(self.display, surface, surface, self.context)
+            if (self.lib.eglMakeCurrent)(self.display, surface, surface, self.context)
                 == libegl::EGL_FALSE
             {
-                Err(egl_get_error(&egl)).context("could not make current")
+                Err(egl_get_error(&self.lib)).context("could not make current")
             } else {
                 Ok(())
             }
         }
     }
 
-    pub fn make_current_surfaceless(&self, egl: &libegl::Lib) -> anyhow::Result<()> {
-        self.make_current(egl, libegl::EGL_NO_SURFACE)
+    pub fn make_current_surfaceless(&self) -> anyhow::Result<()> {
+        self.make_current(libegl::EGL_NO_SURFACE)
     }
 
-    pub fn set_swap_interval(
-        &self,
-        egl: &libegl::Lib,
-        interval: libegl::EGLint,
-    ) -> anyhow::Result<()> {
+    pub fn set_swap_interval(&self, interval: libegl::EGLint) -> anyhow::Result<()> {
         unsafe {
-            if (egl.eglSwapInterval)(self.display, interval) == libegl::EGL_FALSE {
-                Err(egl_get_error(&egl)).context("could not set swap interval")
+            if (self.lib.eglSwapInterval)(self.display, interval) == libegl::EGL_FALSE {
+                Err(egl_get_error(&self.lib)).context("could not set swap interval")
             } else {
                 Ok(())
             }
         }
     }
 
-    pub fn swap_buffers(
-        &self,
-        egl: &libegl::Lib,
-        surface: libegl::EGLSurface,
-    ) -> anyhow::Result<()> {
+    pub fn swap_buffers(&self, surface: libegl::EGLSurface) -> anyhow::Result<()> {
         unsafe {
-            if (egl.eglSwapBuffers)(self.display, surface) == libegl::EGL_FALSE {
-                Err(egl_get_error(egl)).context("could not swap buffers")
+            if (self.lib.eglSwapBuffers)(self.display, surface) == libegl::EGL_FALSE {
+                Err(egl_get_error(&self.lib)).context("could not swap buffers")
             } else {
                 Ok(())
             }
@@ -174,35 +172,36 @@ impl EglContext {
 // NOTE: wsi stands for window system integration; it is somewhat modelled after
 // https://registry.khronos.org/vulkan/specs/latest/html/vkspec.html#wsi
 
-struct EglWaylandWsi {
-    wayland_egl: libwayland_egl::Lib,
+struct WaylandWsi {
+    libwayland_egl_lib: libwayland_egl::Lib,
     wl_egl_window: *mut libwayland_egl::wl_egl_window,
 }
 
-impl EglWaylandWsi {
+impl WaylandWsi {
     fn new(wayland_wh: rwh::WaylandWindowHandle) -> anyhow::Result<Self> {
-        let wayland_egl = libwayland_egl::Lib::load()?;
-        let wl_egl_window =
-            unsafe { (wayland_egl.wl_egl_window_create)(wayland_wh.surface.as_ptr(), 640, 480) };
+        let libwayland_egl_lib = libwayland_egl::Lib::load()?;
+        let wl_egl_window = unsafe {
+            (libwayland_egl_lib.wl_egl_window_create)(wayland_wh.surface.as_ptr(), 640, 480)
+        };
         if wl_egl_window.is_null() {
             return Err(anyhow!("could not create wl egl window"));
         }
         Ok(Self {
-            wayland_egl,
+            libwayland_egl_lib,
             wl_egl_window,
         })
     }
 }
 
-enum EglWsi {
-    Wayland(EglWaylandWsi),
+enum Wsi {
+    Wayland(WaylandWsi),
 }
 
-impl EglWsi {
+impl Wsi {
     fn new(window_handle: rwh::WindowHandle) -> anyhow::Result<Self> {
         match window_handle.as_raw() {
             rwh::RawWindowHandle::Wayland(wayland_wh) => {
-                EglWaylandWsi::new(wayland_wh).map(Self::Wayland)
+                WaylandWsi::new(wayland_wh).map(Self::Wayland)
             }
             _ => {
                 return Err(anyhow!(format!(
@@ -219,66 +218,45 @@ impl EglWsi {
     }
 }
 
-pub struct EglSurface {
-    wsi: EglWsi,
+pub struct Surface {
+    wsi: Wsi,
     surface: libegl::EGLSurface,
 }
 
-impl EglSurface {
-    pub fn new(
-        egl: &libegl::Lib,
-        egl_context: &EglContext,
-        window_handle: rwh::WindowHandle,
-        logical_size: (u32, u32),
-    ) -> anyhow::Result<Self> {
-        let egl_wsi = EglWsi::new(window_handle)?;
-        let egl_surface = unsafe {
-            (egl.eglCreateWindowSurface)(
-                egl_context.display,
-                egl_context.config,
-                egl_wsi.as_ptr() as libegl::EGLNativeWindowType,
+impl Surface {
+    pub fn new(context: &Context, window_handle: rwh::WindowHandle) -> anyhow::Result<Self> {
+        let wsi = Wsi::new(window_handle)?;
+        let surface = unsafe {
+            (context.lib.eglCreateWindowSurface)(
+                context.display,
+                context.config,
+                wsi.as_ptr() as libegl::EGLNativeWindowType,
                 null(),
             )
         };
-        if egl_surface.is_null() {
+        if surface.is_null() {
             return Err(anyhow!("could not create egl surface"));
         }
 
-        egl_context.make_current_surfaceless(egl)?;
-
-        match egl_wsi {
-            EglWsi::Wayland(ref payload) => unsafe {
-                (payload.wayland_egl.wl_egl_window_resize)(
-                    payload.wl_egl_window,
-                    logical_size.0 as i32,
-                    logical_size.1 as i32,
-                    0,
-                    0,
-                );
-            },
-        };
-
-        Ok(Self {
-            wsi: egl_wsi,
-            surface: egl_surface,
-        })
-    }
-
-    pub fn resize(&self, logical_size: (u32, u32)) {
-        match self.wsi {
-            EglWsi::Wayland(ref payload) => unsafe {
-                (payload.wayland_egl.wl_egl_window_resize)(
-                    payload.wl_egl_window,
-                    logical_size.0 as i32,
-                    logical_size.1 as i32,
-                    0,
-                    0,
-                );
-            },
-        }
+        Ok(Self { wsi, surface })
     }
 
     pub fn as_ptr(&self) -> *mut c_void {
         self.surface
+    }
+
+    pub fn resize(&self, width: u32, height: u32) -> anyhow::Result<()> {
+        match self.wsi {
+            Wsi::Wayland(ref payload) => unsafe {
+                (payload.libwayland_egl_lib.wl_egl_window_resize)(
+                    payload.wl_egl_window,
+                    width as i32,
+                    height as i32,
+                    0,
+                    0,
+                );
+            },
+        }
+        Ok(())
     }
 }
