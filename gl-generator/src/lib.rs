@@ -5,6 +5,69 @@ use std::str::FromStr;
 use anyhow::{Context as _, bail};
 use xml_iterator::{Element, ElementIterator, StartTag};
 
+#[derive(Debug)]
+pub enum Api {
+    Gl,
+    Egl,
+}
+
+impl Api {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Gl => "gl",
+            Self::Egl => "egl",
+        }
+    }
+
+    fn enum_prefix(&self) -> &'static str {
+        match self {
+            Self::Gl => "GL_",
+            Self::Egl => "EGL_",
+        }
+    }
+
+    fn command_prefix(&self) -> &'static str {
+        match self {
+            Self::Gl => "gl",
+            Self::Egl => "egl",
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Version(pub u32, pub u32);
+
+impl FromStr for Version {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut parts = s.split('.');
+        let major: u32 = parts.next().context("missing major")?.parse()?;
+        let minor: u32 = parts.next().context("missing minor")?.parse()?;
+        assert!(parts.next().is_none());
+        Ok(Version(major, minor))
+    }
+}
+
+impl PartialEq for Version {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0 && self.1 == other.1
+    }
+}
+
+impl PartialOrd for Version {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.0.cmp(&other.0).then(self.1.cmp(&other.1)))
+    }
+}
+
+#[test]
+fn test_version() {
+    let a = Version(3, 0);
+    let b = Version(4, 6);
+    assert!(a < b);
+}
+
 // xml spec:
 // https://github.com/KhronosGroup/OpenGL-Registry/blob/8e772a3b0c9e8a85ccb6f471b4cdbf94c8bcd71d/xml/readme.pdf
 
@@ -13,7 +76,7 @@ pub struct Enum<'a> {
     pub value: &'a str,
     pub name: &'a str,
     pub api: Option<&'a str>,
-    pub r#type: &'a str,
+    pub r#type: Option<&'a str>,
     pub group: Option<&'a str>,
     pub alias: Option<&'a str>,
     pub comment: Option<&'a str>,
@@ -87,21 +150,9 @@ fn expect_end_tag<'a>(element_iterator: &mut ElementIterator<'a>) -> anyhow::Res
     Ok(())
 }
 
-fn get_enum_type<'a>(start_tag: StartTag<'a>) -> anyhow::Result<&'static str> {
-    let r#type = start_tag
-        .iter_attrs()
-        .find(|attr| attr.key == "type")
-        .map(|attr| attr.value);
-    match r#type {
-        Some("bitmask") => Ok("GLbitfield"),
-        None => Ok("GLenum"),
-        other => bail!("unknown enum block type: {other:?}"),
-    }
-}
-
 fn parse_enum_token_attrs<'a>(
     empty_tag: StartTag<'a>,
-    block_type: &'static str,
+    block_type: Option<&'a str>,
 ) -> anyhow::Result<Enum<'a>> {
     let mut value: Option<&'a str> = None;
     let mut name: Option<&'a str> = None;
@@ -129,13 +180,7 @@ fn parse_enum_token_attrs<'a>(
         value: value.context("value is missing")?,
         name: name.context("name is missing")?,
         api,
-        r#type: r#type
-            .map(|r#type| match r#type {
-                "u" => "GLuint",
-                "ull" => "GLuint64",
-                _ => r#type,
-            })
-            .unwrap_or(block_type),
+        r#type: r#type.or(block_type),
         group,
         alias,
         comment,
@@ -147,7 +192,10 @@ fn parse_enum_block_into<'a>(
     element_iterator: &mut ElementIterator<'a>,
     enums: &mut Vec<Enum<'a>>,
 ) -> anyhow::Result<()> {
-    let block_type = get_enum_type(start_tag)?;
+    let block_type = start_tag
+        .iter_attrs()
+        .find(|attr| attr.key == "type")
+        .map(|attr| attr.value);
     while let Some(element) = element_iterator.next() {
         match element {
             Element::EmptyTag(empty) => match empty.name {
@@ -335,7 +383,7 @@ fn parse_extension_attrs<'a>(start_tag: StartTag<'a>) -> anyhow::Result<Extensio
         let prev = match attr.key {
             "name" => name.replace(attr.value),
             "supported" => supported.replace(attr.value),
-            "comment" => None,
+            "comment" | "protect" => None,
             other => bail!("unexpected attr: {other}"),
         };
         if prev.is_some() {
@@ -419,44 +467,10 @@ pub fn parse_registry<'a>(input: &'a str) -> anyhow::Result<Registry<'a>> {
     })
 }
 
-#[derive(Debug)]
-struct Version(u32, u32);
-
-impl FromStr for Version {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut parts = s.split('.');
-        let major: u32 = parts.next().context("missing major")?.parse()?;
-        let minor: u32 = parts.next().context("missing minor")?.parse()?;
-        assert!(parts.next().is_none());
-        Ok(Version(major, minor))
-    }
-}
-
-impl PartialEq for Version {
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0 && self.1 == other.1
-    }
-}
-
-impl PartialOrd for Version {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.0.cmp(&other.0).then(self.1.cmp(&other.1)))
-    }
-}
-
-#[test]
-fn test_version() {
-    let a = Version(3, 0);
-    let b = Version(4, 6);
-    assert!(a < b);
-}
-
 pub fn filter_registry<'a>(
     mut registry: Registry<'a>,
-    api: &str,
-    version: (u32, u32),
+    api: &Api,
+    version: &Version,
     extensions: &[&str],
 ) -> anyhow::Result<Registry<'a>> {
     let version = Version(version.0, version.1);
@@ -466,7 +480,7 @@ pub fn filter_registry<'a>(
 
     let mut found_feature = false;
     for feat in registry.features.iter() {
-        if feat.api != api {
+        if feat.api != api.as_str() {
             continue;
         }
 
@@ -492,15 +506,15 @@ pub fn filter_registry<'a>(
         }
     }
     if !found_feature {
-        bail!("could not find {api} {version:?}");
+        bail!("could not find {api:?} {version:?}");
     }
 
     for ext in registry.extensions.iter() {
         if !extensions.contains(&ext.name) {
             continue;
         }
-        if !ext.supported.split("|").any(|part| part == api) {
-            bail!("{} is not supported on {api} {version:?}", &ext.name);
+        if !ext.supported.split("|").any(|part| part == api.as_str()) {
+            bail!("{} is not supported on {api:?} {version:?}", &ext.name);
         }
         for require in ext.requires.iter() {
             wanted_enums.extend(require.enums.iter().map(|string| string));
@@ -516,10 +530,7 @@ pub fn filter_registry<'a>(
     Ok(registry)
 }
 
-pub fn emit_types<W: io::Write>(w: &mut W) -> anyhow::Result<()> {
-    write!(
-        w,
-        "pub type GLbitfield = std::ffi::c_uint;
+const GL_TYPES: &str = "pub type GLbitfield = std::ffi::c_uint;
 pub type GLboolean = std::ffi::c_uchar;
 pub type GLbyte = std::ffi::c_char;
 pub type GLchar = std::ffi::c_char;
@@ -547,16 +558,112 @@ pub type GLDEBUGPROC = Option<extern \"C\" fn(
     message: *const GLchar,
     userParam: *mut std::ffi::c_void,
 )>;
-"
-    )
-    .map_err(anyhow::Error::from)
+";
+
+const EGL_TYPES: &str = "pub type khronos_int32_t = i32;
+pub type khronos_utime_nanoseconds_t = u64;
+
+// https://registry.khronos.org/EGL/api/EGL/eglplatform.h
+
+pub type EGLNativeDisplayType = *mut std::ffi::c_void;
+pub type EGLNativePixmapType = *mut std::ffi::c_void;
+pub type EGLNativeWindowType = *mut std::ffi::c_void;
+
+pub type EGLint = khronos_int32_t;
+
+// https://registry.khronos.org/EGL/api/EGL/egl.h
+
+// 1.0
+
+pub type EGLBoolean = std::ffi::c_uint;
+pub type EGLDisplay = *mut std::ffi::c_void;
+
+pub type EGLConfig = *mut std::ffi::c_void;
+pub type EGLSurface = *mut std::ffi::c_void;
+pub type EGLContext = *mut std::ffi::c_void;
+pub type __eglMustCastToProperFunctionPointerType = unsafe extern \"C\" fn();
+
+// 1.2
+
+pub type EGLenum = std::ffi::c_uint;
+pub type EGLClientBuffer = *mut std::ffi::c_void;
+
+// 1.5
+
+pub type EGLSync = *mut std::ffi::c_void;
+pub type EGLAttrib = isize;
+pub type EGLTime = khronos_utime_nanoseconds_t;
+pub type EGLImage = *mut std::ffi::c_void;
+";
+
+pub fn emit_types<W: io::Write>(w: &mut W, api: &Api) -> anyhow::Result<()> {
+    let types = match api {
+        Api::Gl => GL_TYPES,
+        Api::Egl => EGL_TYPES,
+    };
+    w.write(types.as_bytes())?;
+    Ok(())
 }
 
-pub fn emit_enums<W: io::Write>(w: &mut W, registry: &Registry) -> anyhow::Result<()> {
+fn normalize_gl_enum_type(r#type: Option<&str>) -> anyhow::Result<&'static str> {
+    match r#type {
+        Some("u") => Ok("GLuint"),
+        Some("ull") => Ok("GLuint64"),
+        Some("bitmask") => Ok("GLbitfield"),
+        None => Ok("GLenum"),
+        other => bail!("unknown gl enum type {other:?}"),
+    }
+}
+
+fn normalize_egl_enum_type<'a>(
+    r#type: Option<&'a str>,
+    normalized_name: &'a str,
+    value: &'a str,
+) -> anyhow::Result<&'a str> {
+    match r#type {
+        Some("u") => Ok("EGLuint"),
+        Some("ull") => Ok("u64"),
+        Some("bitmask") => Ok("EGLint"),
+        None if value.starts_with("-") => Ok("EGLint"),
+        None if normalized_name == "TRUE" || normalized_name == "FALSE" => Ok("EGLBoolean"),
+        None if value.starts_with("EGL_CAST") => {
+            let comma_position = value.find(",").context("egl cast comma")?;
+            Ok(&value[9..comma_position])
+        }
+        None => Ok("EGLenum"),
+        other => bail!("unknown gl enum type {other:?}"),
+    }
+}
+
+fn emit_egl_enum_value<W: io::Write>(w: &mut W, value: &str) -> anyhow::Result<()> {
+    if !value.starts_with("EGL_CAST") {
+        w.write(value.as_bytes())?;
+        return Ok(());
+    }
+
+    let comma_position = value.find(",").context("egl cast comma")?;
+    let inner_value = &value[comma_position + 1..value.len() - 1];
+    let target_type = &value[9..comma_position];
+    write!(w, "{inner_value} as {target_type}")?;
+
+    Ok(())
+}
+
+pub fn emit_enums<W: io::Write>(w: &mut W, registry: &Registry, api: &Api) -> anyhow::Result<()> {
+    let prefix = api.enum_prefix();
     for e in registry.enums.iter() {
-        assert!(e.name.starts_with("GL_"));
-        let name = &e.name[3..];
-        write!(w, "pub const {name}: {} = {};\n", e.r#type, &e.value)?;
+        assert!(e.name.starts_with(prefix));
+        let name = &e.name[prefix.len()..];
+        let r#type = match api {
+            Api::Gl => normalize_gl_enum_type(e.r#type),
+            Api::Egl => normalize_egl_enum_type(e.r#type, name, e.value),
+        }?;
+        write!(w, "pub const {name}: {type} = ")?;
+        match api {
+            Api::Gl => write!(w, "{}", &e.value)?,
+            Api::Egl => emit_egl_enum_value(w, &e.value)?,
+        };
+        write!(w, ";\n")?;
     }
     write!(w, "\n")?;
     Ok(())
@@ -577,6 +684,7 @@ fn emit_command_type_parts<W: io::Write>(
                 "const void **" => write!(w, "*mut *const std::ffi::c_void")?,
                 "void **" => write!(w, "*mut *mut std::ffi::c_void")?,
                 "const void *const*" => write!(w, "*const *const std::ffi::c_void")?,
+                "const char *" => write!(w, "*const std::ffi::c_char")?,
                 other => unimplemented!("{other:?}"),
             },
             Defined(defined) => {
@@ -604,9 +712,10 @@ fn emit_command_type_parts<W: io::Write>(
 }
 
 #[inline]
-fn normalize_command_name(name: &str) -> &str {
-    assert!(name.starts_with("gl"));
-    &name[2..]
+fn normalize_command_name<'a>(name: &'a str, api: &Api) -> &'a str {
+    let prefix = api.command_prefix();
+    assert!(name.starts_with(prefix));
+    &name[prefix.len()..]
 }
 
 #[inline]
@@ -618,17 +727,17 @@ fn normalize_command_param_name(name: &str) -> &str {
     }
 }
 
-fn emit_api_struct<W: io::Write>(w: &mut W, registry: &Registry) -> anyhow::Result<()> {
+fn emit_api_struct<W: io::Write>(w: &mut W, registry: &Registry, api: &Api) -> anyhow::Result<()> {
     write!(w, "pub struct Api {{\n")?;
     for cmd in registry.commands.iter() {
-        let name = normalize_command_name(cmd.proto.name);
+        let name = normalize_command_name(cmd.proto.name, api);
         write!(w, "    {name}: FnPtr,\n")?;
     }
     write!(w, "}}\n")?;
     Ok(())
 }
 
-fn emit_api_impl<W: io::Write>(w: &mut W, registry: &Registry) -> anyhow::Result<()> {
+fn emit_api_impl<W: io::Write>(w: &mut W, registry: &Registry, api: &Api) -> anyhow::Result<()> {
     let mut command_type_parts_buf: Vec<u8> = Vec::new();
 
     write!(
@@ -666,7 +775,7 @@ impl Api {{
         write!(
             w,
             "            {}: FnPtr::new(get_proc_address(c\"{}\".as_ptr())),\n",
-            normalize_command_name(cmd.proto.name),
+            normalize_command_name(cmd.proto.name, api),
             cmd.proto.name,
         )?;
     }
@@ -677,7 +786,7 @@ impl Api {{
         // signature
 
         write!(w, "\n    #[inline]\n")?;
-        let name = normalize_command_name(cmd.proto.name);
+        let name = normalize_command_name(cmd.proto.name, api);
         write!(w, "    pub unsafe fn {name}(&self")?;
         for param in cmd.params.iter() {
             let name = normalize_command_param_name(param.name);
@@ -690,6 +799,7 @@ impl Api {{
         if !command_type_parts_buf.is_empty() {
             write!(w, "-> ")?;
             w.write(&command_type_parts_buf)?;
+            write!(w, " ")?;
             command_type_parts_buf.clear();
         }
 
@@ -741,8 +851,8 @@ impl Api {{
     Ok(())
 }
 
-pub fn emit_api<W: io::Write>(w: &mut W, registry: &Registry) -> anyhow::Result<()> {
-    emit_api_struct(w, &registry)?;
-    emit_api_impl(w, &registry)?;
+pub fn emit_api<W: io::Write>(w: &mut W, registry: &Registry, api: &Api) -> anyhow::Result<()> {
+    emit_api_struct(w, &registry, api)?;
+    emit_api_impl(w, &registry, api)?;
     Ok(())
 }

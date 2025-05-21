@@ -1,7 +1,8 @@
-use std::ffi::{c_char, c_void};
+use std::ffi::{CStr, c_char, c_void};
 use std::ptr::{null, null_mut};
 
 use anyhow::{Context as _, anyhow};
+use dynlib::DynLib;
 use raw_window_handle as rwh;
 
 #[path = "libegl.rs"]
@@ -9,9 +10,9 @@ pub mod libegl;
 #[path = "libwayland_egl.rs"]
 pub mod libwayland_egl;
 
-pub fn egl_get_error(egl_lib: &libegl::Lib) -> anyhow::Error {
-    match unsafe { (egl_lib.eglGetError)() } as libegl::EGLenum {
-        libegl::EGL_SUCCESS => unreachable!(),
+pub fn egl_get_error(egl_lib: &libegl::Api) -> anyhow::Error {
+    match unsafe { egl_lib.GetError() } as libegl::EGLenum {
+        libegl::SUCCESS => unreachable!(),
         code => anyhow!(format!("egl error 0x{:x}", code)),
     }
 }
@@ -23,7 +24,9 @@ pub struct Config {
 }
 
 pub struct Context {
-    lib: libegl::Lib,
+    // NOTE: dynlib needs to remain open for the lifetime of the program.
+    _dynlib: DynLib,
+    lib: libegl::Api,
     config: libegl::EGLConfig,
     context: libegl::EGLContext,
     display: libegl::EGLDisplay,
@@ -32,10 +35,13 @@ pub struct Context {
 impl Context {
     pub fn new(display_handle: rwh::DisplayHandle, config: Config) -> anyhow::Result<Self> {
         unsafe {
-            let lib = libegl::Lib::load()?;
+            let dynlib = DynLib::open(c"libEGL.so").or_else(|_| DynLib::open(c"libEGL.so.1"))?;
+            let lib = libegl::Api::load_with(|name| {
+                dynlib.lookup(CStr::from_ptr(name)).unwrap_or(null_mut())
+            });
 
             // TODO: make api configurable
-            if (lib.eglBindAPI)(libegl::EGL_OPENGL_API) == libegl::EGL_FALSE {
+            if lib.BindAPI(libegl::OPENGL_API) == libegl::FALSE {
                 return Err(egl_get_error(&lib)).context("could not bind api");
             }
 
@@ -47,55 +53,55 @@ impl Context {
                     )));
                 }
             };
-            let display = (lib.eglGetDisplay)(display_handle_ptr);
-            if display == libegl::EGL_NO_DISPLAY {
+            let display = lib.GetDisplay(display_handle_ptr);
+            if display == libegl::NO_DISPLAY {
                 return Err(egl_get_error(&lib)).context("could not get display");
             }
 
             let (mut major, mut minor) = (0, 0);
-            if (lib.eglInitialize)(display, &mut major, &mut minor) == libegl::EGL_FALSE {
+            if lib.Initialize(display, &mut major, &mut minor) == libegl::FALSE {
                 return Err(egl_get_error(&lib)).context("could not initialize");
             }
             log::info!("initialized egl version {major}.{minor}");
 
             // 64 seems enough?
-            let mut config_attrs = [libegl::EGL_NONE; 64];
+            let mut config_attrs = [libegl::NONE as libegl::EGLint; 64];
             let mut num_config_attrs = 0;
-            let mut push_config_attr = |attr: libegl::EGLenum, value: libegl::EGLenum| {
-                config_attrs[num_config_attrs] = attr;
+            let mut push_config_attr = |attr: libegl::EGLenum, value: libegl::EGLint| {
+                config_attrs[num_config_attrs] = attr as libegl::EGLint;
                 num_config_attrs += 1;
                 config_attrs[num_config_attrs] = value;
                 num_config_attrs += 1;
             };
-            push_config_attr(libegl::EGL_RED_SIZE, 8);
-            push_config_attr(libegl::EGL_GREEN_SIZE, 8);
-            push_config_attr(libegl::EGL_BLUE_SIZE, 8);
+            push_config_attr(libegl::RED_SIZE, 8);
+            push_config_attr(libegl::GREEN_SIZE, 8);
+            push_config_attr(libegl::BLUE_SIZE, 8);
             // NOTE: it is important to set EGL_ALPHA_SIZE, it enables transparency
-            push_config_attr(libegl::EGL_ALPHA_SIZE, 8);
-            push_config_attr(libegl::EGL_CONFORMANT, libegl::EGL_OPENGL_ES3_BIT);
-            push_config_attr(libegl::EGL_RENDERABLE_TYPE, libegl::EGL_OPENGL_ES3_BIT);
+            push_config_attr(libegl::ALPHA_SIZE, 8);
+            push_config_attr(libegl::CONFORMANT, libegl::OPENGL_ES3_BIT);
+            push_config_attr(libegl::RENDERABLE_TYPE, libegl::OPENGL_ES3_BIT);
             // NOTE: EGL_SAMPLE_BUFFERS + EGL_SAMPLES enable some kind of don't care anti aliasing
-            push_config_attr(libegl::EGL_SAMPLE_BUFFERS, 1);
-            push_config_attr(libegl::EGL_SAMPLES, 4);
+            push_config_attr(libegl::SAMPLE_BUFFERS, 1);
+            push_config_attr(libegl::SAMPLES, 4);
             if let Some(min_swap_interval) = config.min_swap_interval {
-                push_config_attr(libegl::EGL_MIN_SWAP_INTERVAL, min_swap_interval as _);
+                push_config_attr(libegl::MIN_SWAP_INTERVAL, min_swap_interval as _);
             }
             if let Some(max_swap_interval) = config.max_swap_interval {
-                push_config_attr(libegl::EGL_MAX_SWAP_INTERVAL, max_swap_interval as _);
+                push_config_attr(libegl::MAX_SWAP_INTERVAL, max_swap_interval as _);
             }
 
             let mut num_configs = 0;
-            if (lib.eglGetConfigs)(display, null_mut(), 0, &mut num_configs) == libegl::EGL_FALSE {
+            if lib.GetConfigs(display, null_mut(), 0, &mut num_configs) == libegl::FALSE {
                 return Err(egl_get_error(&lib)).context("could not get num of available configs");
             }
             let mut configs = vec![std::mem::zeroed(); num_configs as usize];
-            if (lib.eglChooseConfig)(
+            if lib.ChooseConfig(
                 display,
                 config_attrs.as_ptr() as _,
                 configs.as_mut_ptr(),
                 num_configs,
                 &mut num_configs,
-            ) == libegl::EGL_FALSE
+            ) == libegl::FALSE
             {
                 return Err(egl_get_error(&lib)).context("could not choose config");
             }
@@ -105,18 +111,19 @@ impl Context {
             }
             let config = *configs.first().unwrap();
 
-            let context_attrs = &[libegl::EGL_CONTEXT_MAJOR_VERSION, 3, libegl::EGL_NONE];
-            let context = (lib.eglCreateContext)(
+            let context_attrs = &[libegl::CONTEXT_MAJOR_VERSION, 3, libegl::NONE];
+            let context = lib.CreateContext(
                 display,
                 config,
-                libegl::EGL_NO_CONTEXT,
+                libegl::NO_CONTEXT,
                 context_attrs.as_ptr() as _,
             );
-            if context == libegl::EGL_NO_CONTEXT {
+            if context == libegl::NO_CONTEXT {
                 return Err(egl_get_error(&lib)).context("could not create context");
             }
 
             Ok(Context {
+                _dynlib: dynlib,
                 lib,
                 display,
                 config,
@@ -129,13 +136,15 @@ impl Context {
         &self,
         procname: *const c_char,
     ) -> libegl::__eglMustCastToProperFunctionPointerType {
-        unsafe { (self.lib.eglGetProcAddress)(procname) }
+        unsafe { self.lib.GetProcAddress(procname) }
     }
 
     pub fn make_current(&self, surface: libegl::EGLSurface) -> anyhow::Result<()> {
         unsafe {
-            if (self.lib.eglMakeCurrent)(self.display, surface, surface, self.context)
-                == libegl::EGL_FALSE
+            if self
+                .lib
+                .MakeCurrent(self.display, surface, surface, self.context)
+                == libegl::FALSE
             {
                 Err(egl_get_error(&self.lib)).context("could not make current")
             } else {
@@ -145,12 +154,12 @@ impl Context {
     }
 
     pub fn make_current_surfaceless(&self) -> anyhow::Result<()> {
-        self.make_current(libegl::EGL_NO_SURFACE)
+        self.make_current(libegl::NO_SURFACE)
     }
 
     pub fn set_swap_interval(&self, interval: libegl::EGLint) -> anyhow::Result<()> {
         unsafe {
-            if (self.lib.eglSwapInterval)(self.display, interval) == libegl::EGL_FALSE {
+            if self.lib.SwapInterval(self.display, interval) == libegl::FALSE {
                 Err(egl_get_error(&self.lib)).context("could not set swap interval")
             } else {
                 Ok(())
@@ -160,7 +169,7 @@ impl Context {
 
     pub fn swap_buffers(&self, surface: libegl::EGLSurface) -> anyhow::Result<()> {
         unsafe {
-            if (self.lib.eglSwapBuffers)(self.display, surface) == libegl::EGL_FALSE {
+            if self.lib.SwapBuffers(self.display, surface) == libegl::FALSE {
                 Err(egl_get_error(&self.lib)).context("could not swap buffers")
             } else {
                 Ok(())
@@ -227,7 +236,7 @@ impl Surface {
     pub fn new(context: &Context, window_handle: rwh::WindowHandle) -> anyhow::Result<Self> {
         let wsi = Wsi::new(window_handle)?;
         let surface = unsafe {
-            (context.lib.eglCreateWindowSurface)(
+            context.lib.CreateWindowSurface(
                 context.display,
                 context.config,
                 wsi.as_ptr() as libegl::EGLNativeWindowType,
