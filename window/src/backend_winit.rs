@@ -31,9 +31,12 @@ impl winit::application::ApplicationHandler for App {
             .logical_size
             .unwrap_or(DEFAULT_LOGICAL_SIZE);
 
-        let window_attrs = winit::window::WindowAttributes::default().with_inner_size(
-            winit::dpi::LogicalSize::new(logical_size.0 as f64, logical_size.1 as f64),
-        );
+        let window_attrs = winit::window::WindowAttributes::default()
+            .with_inner_size(winit::dpi::LogicalSize::new(
+                logical_size.0 as f64,
+                logical_size.1 as f64,
+            ))
+            .with_resizable(self.window_attrs.resizable);
         match event_loop.create_window(window_attrs) {
             Ok(window) => self.window = Some(window),
             Err(err) => self.window_create_error = Some(err),

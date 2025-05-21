@@ -1,4 +1,5 @@
 use gpu::gl::{self, GlContexter};
+use platform::InitializedGraphicsContext;
 use raw_window_handle::{HasDisplayHandle as _, HasWindowHandle as _};
 use window::{Window, WindowAttrs, WindowEvent};
 
@@ -216,16 +217,22 @@ impl Context {
             }
         }
 
-        if let platform::GraphicsContext::Initialized(ref igc) = self.gpu_context {
+        if let platform::GraphicsContext::Initialized(InitializedGraphicsContext {
+            context,
+            surface,
+            gl,
+            ..
+        }) = &self.gpu_context
+        {
             unsafe {
                 #[cfg(unix)]
-                igc.context.make_current(igc.surface.as_ptr())?;
+                context.make_current(surface.as_ptr())?;
 
-                igc.gl.clear_color(1.0, 0.0, 0.0, 1.0);
-                igc.gl.clear(gl::COLOR_BUFFER_BIT);
+                gl.clear_color(1.0, 0.0, 0.0, 1.0);
+                gl.clear(gl::COLOR_BUFFER_BIT);
 
                 #[cfg(unix)]
-                igc.context.swap_buffers(igc.surface.as_ptr())?;
+                context.swap_buffers(surface.as_ptr())?;
             }
         }
 

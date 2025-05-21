@@ -1,3 +1,5 @@
+use std::env;
+
 use anyhow::anyhow;
 use raw_window_handle as rwh;
 
@@ -23,8 +25,10 @@ pub const DEFAULT_LOGICAL_SIZE: (u32, u32) = (640, 480);
 pub struct WindowAttrs {
     /// defaults to `canvas`.
     #[cfg(target_family = "wasm")]
-    canvas_id: Option<Box<str>>,
-    logical_size: Option<(u32, u32)>,
+    pub canvas_id: Option<Box<str>>,
+    /// if not specified - [DEFAULT_LOGICAL_SIZE] will be used.
+    pub logical_size: Option<(u32, u32)>,
+    pub resizable: bool,
 }
 
 #[derive(Debug)]
@@ -39,6 +43,14 @@ pub trait Window: rwh::HasDisplayHandle + rwh::HasWindowHandle {
 }
 
 pub fn create_window(window_attrs: WindowAttrs) -> anyhow::Result<Box<dyn Window>> {
+    let backend_hint = env::var("SHIN_WINDOW_BACKEND");
+    match backend_hint.as_ref().map(|string| string.as_str()) {
+        Ok("wayland") => return Ok(backend_wayland::WaylandBackend::new_boxed(window_attrs)?),
+        #[cfg(feature = "winit")]
+        Ok("winit") => return Ok(Box::new(backend_winit::WinitBackend::new(window_attrs)?)),
+        _ => {}
+    }
+
     let mut errors: Vec<anyhow::Error> = Vec::new();
 
     #[cfg(unix)]

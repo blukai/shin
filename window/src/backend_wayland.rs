@@ -269,6 +269,24 @@ impl WaylandBackend {
             return Err(anyhow!("could not get xdg toplevel"));
         }
 
+        if !boxed.attrs.resizable {
+            let logical_size = boxed.attrs.logical_size.unwrap_or(DEFAULT_LOGICAL_SIZE);
+            unsafe {
+                libwayland_client::xdg_toplevel_set_min_size(
+                    &boxed.libwayland_client,
+                    boxed.xdg_toplevel,
+                    logical_size.0 as i32,
+                    logical_size.1 as i32,
+                );
+                libwayland_client::xdg_toplevel_set_max_size(
+                    &boxed.libwayland_client,
+                    boxed.xdg_toplevel,
+                    logical_size.0 as i32,
+                    logical_size.1 as i32,
+                )
+            };
+        }
+
         unsafe {
             (boxed.libwayland_client.wl_proxy_add_listener)(
                 boxed.xdg_surface as *mut libwayland_client::wl_proxy,
