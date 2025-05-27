@@ -218,6 +218,7 @@ impl Context {
         }
 
         if let platform::GraphicsContext::Initialized(InitializedGraphicsContext {
+            #[cfg(unix)]
             context,
             surface,
             gl,

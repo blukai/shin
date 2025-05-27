@@ -10,13 +10,16 @@ raw-window-handle.workspace = true
 winit = { workspace = true, optional = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
+# workspace
 dynlib.workspace = true
 
 [build-dependencies]
 anyhow.workspace = true
 
 [target.'cfg(unix)'.build-dependencies]
+# workspace
 wayland-scanner.workspace = true
 
 [features]
+# TODO: rename to backend_winit
 winit = ["dep:winit"]

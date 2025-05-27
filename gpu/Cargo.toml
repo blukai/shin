@@ -9,8 +9,10 @@ log.workspace = true
 raw-window-handle.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
+# workspace
 dynlib.workspace = true
 
 [build-dependencies]
 anyhow.workspace = true
+# workspace
 gl-generator.workspace = true

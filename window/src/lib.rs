@@ -45,6 +45,7 @@ pub trait Window: rwh::HasDisplayHandle + rwh::HasWindowHandle {
 pub fn create_window(window_attrs: WindowAttrs) -> anyhow::Result<Box<dyn Window>> {
     let backend_hint = env::var("SHIN_WINDOW_BACKEND");
     match backend_hint.as_ref().map(|string| string.as_str()) {
+        #[cfg(unix)]
         Ok("wayland") => return Ok(backend_wayland::WaylandBackend::new_boxed(window_attrs)?),
         #[cfg(feature = "winit")]
         Ok("winit") => return Ok(Box::new(backend_winit::WinitBackend::new(window_attrs)?)),

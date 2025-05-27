@@ -605,11 +605,15 @@ pub fn emit_types<W: io::Write>(w: &mut W, api: &Api) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn normalize_gl_enum_type(r#type: Option<&str>) -> anyhow::Result<&'static str> {
+fn normalize_gl_enum_type<'a>(
+    r#type: Option<&'a str>,
+    normalized_name: &'a str,
+) -> anyhow::Result<&'a str> {
     match r#type {
         Some("u") => Ok("GLuint"),
         Some("ull") => Ok("GLuint64"),
         Some("bitmask") => Ok("GLbitfield"),
+        None if normalized_name == "TRUE" || normalized_name == "FALSE" => Ok("GLboolean"),
         None => Ok("GLenum"),
         other => bail!("unknown gl enum type {other:?}"),
     }
@@ -655,7 +659,7 @@ pub fn emit_enums<W: io::Write>(w: &mut W, registry: &Registry, api: &Api) -> an
         assert!(e.name.starts_with(prefix));
         let name = &e.name[prefix.len()..];
         let r#type = match api {
-            Api::Gl => normalize_gl_enum_type(e.r#type),
+            Api::Gl => normalize_gl_enum_type(e.r#type, name),
             Api::Egl => normalize_egl_enum_type(e.r#type, name, e.value),
         }?;
         write!(w, "pub const {name}: {type} = ")?;
