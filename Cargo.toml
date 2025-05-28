@@ -4,6 +4,7 @@ members = [
   "dynlib",
   "gl-generator",
   "gpu",
+  "uhi",
   "wayland-scanner",
   "window",
   "xml-iterator",
@@ -14,14 +15,17 @@ edition = "2024"
 
 [workspace.dependencies]
 anyhow = "1"
+fontdue = { version = "0.9", default-features = false, features = ["simd"] }
+glam = "0.30" # TODO: do i really need glam here?
 libc = "0.2"
 log = "0.4"
-raw-window-handle = { version = "0.6", features = ["std"] }
+raw-window-handle = { version = "0.6", features = ["std"] } # TODO: get rid of rwh
 winit = "0.30"
 # workspace
 dynlib = { path = "dynlib" }
 gl-generator = { path = "gl-generator" }
 gpu = { path = "gpu" }
+uhi = { path = "uhi" }
 wayland-scanner = { path = "wayland-scanner" }
 window = { path = "window" }
 xml-iterator = { path = "xml-iterator" }
@@ -41,3 +45,4 @@ window.workspace = true
 
 [features]
 winit = ["window/winit"]
+
