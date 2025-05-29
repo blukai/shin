@@ -4,12 +4,14 @@ use glam::Vec2;
 
 mod drawbuffer;
 mod fontservice;
+mod fonttexturecache;
 mod renderer;
 mod texturepacker;
 mod textureservice;
 
 pub use drawbuffer::*;
 pub use fontservice::*;
+pub use fonttexturecache::*;
 pub use renderer::*;
 pub use texturepacker::*;
 pub use textureservice::*;
