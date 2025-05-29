@@ -1,6 +1,6 @@
 use glam::Vec2;
 
-use crate::{Fill, LineShape, Rect, RectShape, Stroke, Vertex, renderer::Renderer};
+use crate::{Fill, LineShape, Rect, RectShape, Stroke, TextureKind, Vertex, renderer::Renderer};
 
 /// computes the vertex position offset away the from center caused by line width.
 fn compute_line_width_offset(a: &Vec2, b: &Vec2, width: f32) -> Vec2 {
@@ -28,7 +28,7 @@ fn compute_line_width_offset(a: &Vec2, b: &Vec2, width: f32) -> Vec2 {
 pub struct DrawCommand<R: Renderer> {
     pub start_index: u32,
     pub end_index: u32,
-    pub tex_handle: Option<R::TextureHandle>,
+    pub tex_kind: Option<TextureKind<R>>,
 }
 
 #[derive(Debug)]
@@ -69,14 +69,14 @@ impl<R: Renderer> DrawBuffer<R> {
         self.pending_indices += 3;
     }
 
-    fn commit_primitive(&mut self, tex_handle: Option<R::TextureHandle>) {
+    fn commit_primitive(&mut self, tex_kind: Option<TextureKind<R>>) {
         if self.pending_indices == 0 {
             return;
         }
         self.draw_commands.push(DrawCommand {
             start_index: (self.indices.len() - self.pending_indices) as u32,
             end_index: self.indices.len() as u32,
-            tex_handle,
+            tex_kind,
         });
         self.pending_indices = 0;
     }
@@ -125,8 +125,12 @@ impl<R: Renderer> DrawBuffer<R> {
     fn push_rect_filled(&mut self, coords: Rect, fill: Fill<R>) {
         let idx = self.vertices.len() as u32;
 
-        let (color, tex_handle, tex_coords) = if let Some(tex) = fill.texture {
-            (fill.color, Some(tex.handle), Some(tex.coords))
+        let (color, tex_kind, tex_coords) = if let Some(fill_texture) = fill.texture {
+            (
+                fill.color,
+                Some(fill_texture.kind),
+                Some(fill_texture.coords),
+            )
         } else {
             (fill.color, None, None)
         };
@@ -173,7 +177,7 @@ impl<R: Renderer> DrawBuffer<R> {
         // bottom right -> bottom left -> top left
         self.push_triangle(idx + 2, idx + 3, idx + 0);
 
-        self.commit_primitive(tex_handle);
+        self.commit_primitive(tex_kind);
     }
 
     fn push_rect_stroked(&mut self, coords: Rect, stroke: Stroke) {

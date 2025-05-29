@@ -1,9 +1,9 @@
-use std::{ffi::c_void, mem::offset_of};
+use std::{ffi::c_void, mem::offset_of, ptr::null};
 
-use anyhow::{Context, anyhow};
+use anyhow::{Context as _, anyhow};
 use gpu::gl::{self, GlContexter};
 
-use crate::{Vertex, drawbuffer::DrawBuffer};
+use crate::{TextureKind, TextureService, Vertex, drawbuffer::DrawBuffer};
 
 use super::Renderer;
 
@@ -181,15 +181,99 @@ impl GlRenderer {
         }
     }
 
+    fn handle_textures(
+        &self,
+        ctx: &gl::Context,
+        texture_service: &mut TextureService<Self>,
+    ) -> anyhow::Result<()> {
+        while let Some((ticket, desc)) = texture_service.next_pending_create() {
+            let texture = unsafe {
+                let texture = ctx
+                    .create_texture()
+                    .context("could not create ftc page tex")?;
+
+                ctx.bind_texture(gl::TEXTURE_2D, Some(texture));
+
+                // NOTE: without those params you can't see shit in this mist
+                //
+                // NOTE: to deal with min and mag filters, etc. - you might want to
+                // consider introducing SamplerDescriptor and TextureViewDescriptor
+                ctx.tex_parameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as _);
+                ctx.tex_parameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as _);
+
+                // NOTE: this fixes tilting when rendering bitmaps. see
+                // https://stackoverflow.com/questions/15983607/opengl-texture-tilted.
+                ctx.pixel_storei(gl::UNPACK_ALIGNMENT, 1);
+
+                // TODO: describe_texture_format thing
+
+                // NOTE: this makes so that in the shader colors look like rgba 0 0 0 red,
+                // instead of just red. see
+                // https://www.khronos.org/opengl/wiki/Texture#Swizzle_mask
+                ctx.tex_parameteriv(
+                    gl::TEXTURE_2D,
+                    gl::TEXTURE_SWIZZLE_RGBA,
+                    [
+                        gl::ONE as gl::GLint,
+                        gl::ONE as gl::GLint,
+                        gl::ONE as gl::GLint,
+                        gl::RED as gl::GLint,
+                    ]
+                    .as_ptr(),
+                );
+
+                ctx.tex_image_2d(
+                    gl::TEXTURE_2D,
+                    0,
+                    gl::R8 as gl::GLint,
+                    desc.w as gl::GLint,
+                    desc.h as gl::GLint,
+                    0,
+                    gl::RED,
+                    gl::UNSIGNED_BYTE,
+                    null(),
+                );
+
+                texture
+            };
+            texture_service.commit_create(ticket, texture);
+        }
+
+        while let Some((ticket, update)) = texture_service.next_pending_update() {
+            let texture = texture_service.get(update.handle);
+            unsafe {
+                ctx.bind_texture(gl::TEXTURE_2D, Some(*texture));
+                // TODO: describe_texture_format thing
+                ctx.tex_sub_image_2d(
+                    gl::TEXTURE_2D,
+                    0,
+                    update.region.x as gl::GLint,
+                    update.region.y as gl::GLint,
+                    update.region.w as gl::GLsizei,
+                    update.region.h as gl::GLsizei,
+                    gl::RED,
+                    gl::UNSIGNED_BYTE,
+                    update.data.as_ptr() as *const c_void,
+                );
+            }
+            texture_service.commit_update(ticket);
+        }
+
+        Ok(())
+    }
+
     pub fn render(
         &self,
         ctx: &gl::Context,
         logical_size: (u32, u32),
+        // TODO: make DrawBuffer also mut; it needs to drainable?
         draw_buffer: &DrawBuffer<Self>,
-    ) {
-        unsafe {
-            self.setup_state(ctx);
+        texture_service: &mut TextureService<Self>,
+    ) -> anyhow::Result<()> {
+        self.setup_state(ctx);
+        self.handle_textures(ctx, texture_service)?;
 
+        unsafe {
             ctx.uniform_2f(
                 self.u_view_size_location,
                 logical_size.0 as gl::GLfloat,
@@ -213,7 +297,13 @@ impl GlRenderer {
                 ctx.active_texture(gl::TEXTURE0);
                 ctx.bind_texture(
                     gl::TEXTURE_2D,
-                    Some(draw_command.tex_handle.unwrap_or(self.default_white_tex)),
+                    Some(draw_command.tex_kind.as_ref().map_or_else(
+                        || self.default_white_tex,
+                        |tex_kind| match tex_kind {
+                            TextureKind::Internal(internal) => *texture_service.get(*internal),
+                            TextureKind::External(external) => *external,
+                        },
+                    )),
                 );
 
                 ctx.draw_elements(
@@ -224,6 +314,8 @@ impl GlRenderer {
                 );
             }
         }
+
+        Ok(())
     }
 }
 

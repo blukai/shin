@@ -6,11 +6,7 @@ use gpu::{
     gl::{self, GlContexter},
 };
 use raw_window_handle as rwh;
-use std::{
-    collections::{HashMap, hash_map},
-    ffi::c_void,
-    ptr::null,
-};
+use std::ffi::c_void;
 use window::{Window, WindowAttrs, WindowEvent};
 
 const FONT: &[u8] = include_bytes!("../../fixtures/JetBrainsMono-Regular.ttf");
@@ -46,11 +42,12 @@ impl Logger {
 
 struct InitializedGraphicsContext {
     draw_buffer: uhi::DrawBuffer<uhi::GlRenderer>,
-    ftc: uhi::FontTextureCache,
-    ftc_textures: HashMap<uhi::FontTextureCachePageHandle, gl::Texture>,
-    font_handle: uhi::FontTextureCacheFontHandle,
-    text_layout: TextLayout,
+    texture_service: uhi::TextureService<uhi::GlRenderer>,
+    font_service: uhi::FontService,
     renderer: uhi::GlRenderer,
+
+    font_handle: uhi::FontHandle,
+    text_layout: TextLayout,
 
     context: egl::Context,
     surface: egl::Surface,
@@ -97,25 +94,24 @@ impl GraphicsContext {
         );
 
         let draw_buffer = uhi::DrawBuffer::default();
+        let texture_service = uhi::TextureService::<uhi::GlRenderer>::default();
+        let mut font_service = uhi::FontService::default();
+        let renderer = uhi::GlRenderer::new(&gl)?;
 
-        let mut ftc = uhi::FontTextureCache::default();
-        let ftc_textures = HashMap::default();
-
-        let font_handle = ftc
+        let font_handle = font_service
             .create_font(FONT, 14.0)
             .context("could not create font")?;
         let text_layout =
             fontdue::layout::Layout::new(fontdue::layout::CoordinateSystem::PositiveYDown);
 
-        let renderer = uhi::GlRenderer::new(&gl)?;
-
         *self = Self::Initialized(InitializedGraphicsContext {
             draw_buffer,
-            ftc,
-            ftc_textures,
+            texture_service,
+            font_service,
+            renderer,
+
             font_handle,
             text_layout,
-            renderer,
 
             context,
             surface,
@@ -174,11 +170,12 @@ impl Context {
 
         if let GraphicsContext::Initialized(InitializedGraphicsContext {
             ref mut draw_buffer,
-            ref mut ftc,
-            ref mut ftc_textures,
+            ref mut texture_service,
+            ref mut font_service,
+            ref renderer,
+
             font_handle,
             ref mut text_layout,
-            ref renderer,
 
             ref context,
             ref surface,
@@ -191,90 +188,14 @@ impl Context {
             ));
 
             text_layout.append(
-                &[ftc.get_fontdue_font(font_handle)],
+                &[font_service.get_fontdue_font(font_handle)],
                 &TextStyle::new("hello, sailor!", 14.0, 0),
             );
-            let glyphs = text_layout.glyphs();
-
-            // rasterize glyphs in cache (that were not yet rasterized)
-            for glyph in glyphs.iter() {
-                if !ftc.contains_char(font_handle, glyph.parent) {
-                    ftc.allocate_char(font_handle, glyph.parent);
-                }
-            }
-
-            // create textures (if not yet created) and upload bitmaps (if not yet uploaded)
-            let (tex_width, tex_height) = ftc.get_page_texture_size();
-            for (page_handle, page) in ftc.iter_dirty_pages_mut() {
-                let tex_entry = match ftc_textures.entry(page_handle) {
-                    hash_map::Entry::Occupied(occupied) => occupied,
-                    hash_map::Entry::Vacant(vacant) => vacant.insert_entry(unsafe {
-                        let texture = gl
-                            .create_texture()
-                            .context("could not create ftc page tex")?;
-                        gl.bind_texture(gl::TEXTURE_2D, Some(texture));
-
-                        // NOTE: without those params you can't see shit in this mist
-                        gl.tex_parameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as _);
-                        gl.tex_parameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as _);
-
-                        // NOTE: this fixes tilting when rendering bitmaps. see
-                        // https://stackoverflow.com/questions/15983607/opengl-texture-tilted.
-                        gl.pixel_storei(gl::UNPACK_ALIGNMENT, 1);
-
-                        // NOTE: this makes so that in the shader colors look like rgba 0 0 0 red,
-                        // instead of just red. see
-                        // https://www.khronos.org/opengl/wiki/Texture#Swizzle_mask
-                        gl.tex_parameteriv(
-                            gl::TEXTURE_2D,
-                            gl::TEXTURE_SWIZZLE_RGBA,
-                            [
-                                gl::ONE as gl::GLint,
-                                gl::ONE as gl::GLint,
-                                gl::ONE as gl::GLint,
-                                gl::RED as gl::GLint,
-                            ]
-                            .as_ptr(),
-                        );
-
-                        gl.tex_image_2d(
-                            gl::TEXTURE_2D,
-                            0,
-                            gl::R8 as gl::GLint,
-                            tex_width as gl::GLint,
-                            tex_height as gl::GLint,
-                            0,
-                            gl::RED,
-                            gl::UNSIGNED_BYTE,
-                            null(),
-                        );
-
-                        texture
-                    }),
-                };
-
-                for (rect, bitmap) in page.drain_bitmaps() {
-                    unsafe {
-                        gl.bind_texture(gl::TEXTURE_2D, Some(*tex_entry.get()));
-                        gl.tex_sub_image_2d(
-                            gl::TEXTURE_2D,
-                            0,
-                            rect.min.x as gl::GLint,
-                            rect.min.y as gl::GLint,
-                            rect.width() as gl::GLsizei,
-                            rect.height() as gl::GLsizei,
-                            gl::RED,
-                            gl::UNSIGNED_BYTE,
-                            bitmap.as_ptr() as *const c_void,
-                        );
-                    }
-                }
-            }
 
             // finally ready to put chars on the screen xd
-            for glyph in glyphs.iter() {
-                let (page_handle, tex_coords) = ftc.get_texture_for_char(font_handle, glyph.parent);
-                let tex = ftc_textures.get(&page_handle).expect("page texture");
+            for glyph in text_layout.glyphs() {
+                let (handle, coords) =
+                    font_service.get_texture_for_char(font_handle, glyph.parent, texture_service);
 
                 let min = Vec2::new(glyph.x, glyph.y);
                 let size = Vec2::new(glyph.width as f32, glyph.height as f32);
@@ -283,8 +204,8 @@ impl Context {
                     uhi::Fill::new(
                         uhi::Rgba8::ORANGE,
                         uhi::FillTexture {
-                            handle: *tex,
-                            coords: tex_coords,
+                            kind: uhi::TextureKind::Internal(handle),
+                            coords,
                         },
                     ),
                 ));
@@ -296,7 +217,7 @@ impl Context {
                 gl.clear_color(0.0, 0.0, 0.3, 1.0);
                 gl.clear(gl::COLOR_BUFFER_BIT);
 
-                renderer.render(gl, (800, 600), draw_buffer);
+                renderer.render(gl, (800, 600), draw_buffer, texture_service)?;
 
                 context.swap_buffers(surface.as_ptr())?;
             }

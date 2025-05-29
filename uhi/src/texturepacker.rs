@@ -87,11 +87,6 @@ fn test_insert_child_maybe_after() {
 const DEFAULT_TEXTURE_WIDTH: u32 = 1024;
 const DEFAULT_TEXTURE_HEIGHT: u32 = 1024;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TexturePackerEntryHandle {
-    index: usize,
-}
-
 #[derive(Debug)]
 pub struct TexturePackerEntry {
     pub x: u32,
@@ -253,13 +248,12 @@ impl TexturePacker {
         self.insert_at(width, height, left_child_index)
     }
 
-    pub fn insert(&mut self, width: u32, height: u32) -> Option<TexturePackerEntryHandle> {
+    pub fn insert(&mut self, width: u32, height: u32) -> Option<usize> {
         self.insert_at(width, height, self.tree.root_index)
-            .map(|index| TexturePackerEntryHandle { index })
     }
 
-    pub fn get(&self, entry_handle: TexturePackerEntryHandle) -> &TexturePackerEntry {
-        &self.tree.get_node(entry_handle.index).value
+    pub fn get(&self, index: usize) -> &TexturePackerEntry {
+        &self.tree.get_node(index).value
     }
 
     pub fn get_texture_size(&self) -> (u32, u32) {

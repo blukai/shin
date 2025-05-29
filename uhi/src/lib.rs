@@ -3,14 +3,16 @@ use std::mem;
 use glam::Vec2;
 
 mod drawbuffer;
-mod fonttexturecache;
+mod fontservice;
 mod renderer;
 mod texturepacker;
+mod textureservice;
 
 pub use drawbuffer::*;
-pub use fonttexturecache::*;
+pub use fontservice::*;
 pub use renderer::*;
 pub use texturepacker::*;
+pub use textureservice::*;
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Rect {
@@ -124,7 +126,7 @@ impl Rgba8 {
 
 #[derive(Debug, Clone)]
 pub struct FillTexture<R: Renderer> {
-    pub handle: R::TextureHandle,
+    pub kind: TextureKind<R>,
     pub coords: Rect,
 }
 
@@ -156,7 +158,7 @@ pub struct Stroke {
     pub color: Rgba8,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct RectShape<R: Renderer> {
     pub coords: Rect,
     pub fill: Option<Fill<R>>,
@@ -189,7 +191,7 @@ impl<R: Renderer> RectShape<R> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct LineShape {
     pub points: [Vec2; 2],
     pub stroke: Stroke,
