@@ -92,8 +92,7 @@ impl<R: Renderer> Default for TextureService<R> {
 }
 
 impl<R: Renderer> TextureService<R> {
-    // TODO: rename to enque_create
-    pub fn create_texture(&mut self, desc: TextureDesc) -> TextureHandle {
+    pub fn enque_create(&mut self, desc: TextureDesc) -> TextureHandle {
         let handle = TextureHandle { id: self.id_acc };
         self.id_acc += 1;
         self.pending_creates
@@ -119,8 +118,7 @@ impl<R: Renderer> TextureService<R> {
         assert!(old_materialization.is_none());
     }
 
-    // TODO: rename to enque_update
-    pub fn update_texture(&mut self, handle: TextureHandle, region: TextureRegion, data: Vec<u8>) {
+    pub fn enque_update(&mut self, handle: TextureHandle, region: TextureRegion, data: Vec<u8>) {
         self.pending_updates.insert(
             TextureUpdateTicket {
                 handle,

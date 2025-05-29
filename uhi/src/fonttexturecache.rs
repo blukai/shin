@@ -53,7 +53,7 @@ impl FontTextureCache {
         let old_len = self.texture_pages.len();
         self.texture_pages.push(TexturePage {
             packer: TexturePacker::default(),
-            handle: texture_service.create_texture(TextureDesc {
+            handle: texture_service.enque_create(TextureDesc {
                 format: TextureFormat::R8Unorm,
                 w: DEFAULT_TEXTURE_WIDTH,
                 h: DEFAULT_TEXTURE_HEIGHT,
@@ -99,7 +99,7 @@ impl FontTextureCache {
         let page = &mut self.texture_pages[page_index];
         let packer_entry = page.packer.get(packer_entry_index);
 
-        texture_service.update_texture(
+        texture_service.enque_update(
             page.handle,
             TextureRegion {
                 x: packer_entry.x,
