@@ -1,4 +1,4 @@
-use std::ffi::{CStr, c_char, c_void};
+use std::ffi::{CStr, c_char, c_int, c_void};
 use std::ptr::{null, null_mut};
 
 use anyhow::{Context as _, anyhow};
@@ -187,10 +187,14 @@ struct WaylandWsi {
 }
 
 impl WaylandWsi {
-    fn new(wayland_wh: rwh::WaylandWindowHandle) -> anyhow::Result<Self> {
+    fn new(wayland_wh: rwh::WaylandWindowHandle, width: u32, height: u32) -> anyhow::Result<Self> {
         let libwayland_egl_lib = libwayland_egl::Lib::load()?;
         let wl_egl_window = unsafe {
-            (libwayland_egl_lib.wl_egl_window_create)(wayland_wh.surface.as_ptr(), 640, 480)
+            (libwayland_egl_lib.wl_egl_window_create)(
+                wayland_wh.surface.as_ptr(),
+                width as c_int,
+                height as c_int,
+            )
         };
         if wl_egl_window.is_null() {
             return Err(anyhow!("could not create wl egl window"));
@@ -207,10 +211,10 @@ enum Wsi {
 }
 
 impl Wsi {
-    fn new(window_handle: rwh::WindowHandle) -> anyhow::Result<Self> {
+    fn new(window_handle: rwh::WindowHandle, width: u32, height: u32) -> anyhow::Result<Self> {
         match window_handle.as_raw() {
             rwh::RawWindowHandle::Wayland(wayland_wh) => {
-                WaylandWsi::new(wayland_wh).map(Self::Wayland)
+                WaylandWsi::new(wayland_wh, width, height).map(Self::Wayland)
             }
             _ => {
                 return Err(anyhow!(format!(
@@ -233,8 +237,16 @@ pub struct Surface {
 }
 
 impl Surface {
-    pub fn new(context: &Context, window_handle: rwh::WindowHandle) -> anyhow::Result<Self> {
-        let wsi = Wsi::new(window_handle)?;
+    pub fn new(
+        context: &Context,
+        window_handle: rwh::WindowHandle,
+        width: u32,
+        height: u32,
+    ) -> anyhow::Result<Self> {
+        assert!(width > 0);
+        assert!(height > 0);
+
+        let wsi = Wsi::new(window_handle, width, height)?;
         let surface = unsafe {
             context.lib.CreateWindowSurface(
                 context.display,

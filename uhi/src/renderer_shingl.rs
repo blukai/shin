@@ -265,7 +265,7 @@ impl GlRenderer {
     pub fn render(
         &self,
         ctx: &gl::Context,
-        logical_size: (u32, u32),
+        size: (u32, u32),
         // TODO: make DrawBuffer also mut; it needs to drainable?
         draw_buffer: &DrawBuffer<Self>,
         texture_service: &mut TextureService<Self>,
@@ -274,10 +274,12 @@ impl GlRenderer {
         self.handle_textures(ctx, texture_service)?;
 
         unsafe {
+            ctx.viewport(0, 0, size.0 as gl::GLsizei, size.1 as gl::GLsizei);
+
             ctx.uniform_2f(
                 self.u_view_size_location,
-                logical_size.0 as gl::GLfloat,
-                logical_size.1 as gl::GLfloat,
+                size.0 as gl::GLfloat,
+                size.1 as gl::GLfloat,
             );
 
             ctx.buffer_data(

@@ -68,6 +68,8 @@ impl GraphicsContext {
         &mut self,
         display_handle: rwh::DisplayHandle,
         window_handle: rwh::WindowHandle,
+        width: u32,
+        height: u32,
     ) -> anyhow::Result<&mut InitializedGraphicsContext> {
         assert!(matches!(self, Self::Uninit));
 
@@ -78,7 +80,7 @@ impl GraphicsContext {
                 ..egl::Config::default()
             },
         )?;
-        let surface = egl::Surface::new(&context, window_handle)?;
+        let surface = egl::Surface::new(&context, window_handle, width, height)?;
 
         context.make_current(surface.as_ptr())?;
 
@@ -126,18 +128,20 @@ impl GraphicsContext {
 
 struct Context {
     window: Box<dyn Window>,
-    gpu_context: GraphicsContext,
+    window_size: (u32, u32),
+    graphics_context: GraphicsContext,
     close_requested: bool,
 }
 
 impl Context {
     fn new() -> anyhow::Result<Self> {
         let window = window::create_window(WindowAttrs::default())?;
-        let gpu_context = GraphicsContext::new_uninit();
+        let graphics_context = GraphicsContext::new_uninit();
 
         Ok(Self {
             window,
-            gpu_context,
+            window_size: (0, 0),
+            graphics_context,
             close_requested: false,
         })
     }
@@ -149,18 +153,30 @@ impl Context {
             log::debug!("event: {event:?}");
 
             match event {
-                WindowEvent::Configure { logical_size } => match self.gpu_context {
-                    GraphicsContext::Uninit => {
-                        let igc = self
-                            .gpu_context
-                            .init(self.window.display_handle()?, self.window.window_handle()?)?;
+                WindowEvent::Configure { logical_size } => {
+                    self.window_size = logical_size;
 
-                        igc.surface.resize(logical_size.0, logical_size.1)?;
+                    match self.graphics_context {
+                        GraphicsContext::Uninit => {
+                            self.graphics_context.init(
+                                self.window.display_handle()?,
+                                self.window.window_handle()?,
+                                logical_size.0,
+                                logical_size.1,
+                            )?;
+                        }
+                        GraphicsContext::Initialized(ref mut igc) => {
+                            igc.surface.resize(logical_size.0, logical_size.1)?;
+                        }
                     }
-                    GraphicsContext::Initialized(ref mut igc) => {
-                        igc.surface.resize(logical_size.0, logical_size.1)?;
+                }
+                WindowEvent::Resize { physical_size } => {
+                    self.window_size = physical_size;
+
+                    if let GraphicsContext::Initialized(ref mut igc) = self.graphics_context {
+                        igc.surface.resize(physical_size.0, physical_size.1)?;
                     }
-                },
+                }
                 WindowEvent::CloseRequested => {
                     self.close_requested = true;
                     return Ok(());
@@ -180,10 +196,13 @@ impl Context {
             ref context,
             ref surface,
             ref gl,
-        }) = self.gpu_context
+        }) = self.graphics_context
         {
             draw_buffer.push_rect(uhi::RectShape::with_fill(
-                uhi::Rect::from_center_size(Vec2::new(800.0 / 2.0, 600.0 / 2.0), 100.0),
+                uhi::Rect::from_center_size(
+                    Vec2::new(self.window_size.0 as f32, self.window_size.1 as f32) / 2.0,
+                    100.0,
+                ),
                 uhi::Fill::with_color(uhi::Rgba8::FUCHSIA),
             ));
 
@@ -192,7 +211,6 @@ impl Context {
                 &TextStyle::new("hello, sailor!", 14.0, 0),
             );
 
-            // finally ready to put chars on the screen xd
             for glyph in text_layout.glyphs() {
                 let (handle, coords) =
                     font_service.get_texture_for_char(font_handle, glyph.parent, texture_service);
@@ -217,7 +235,7 @@ impl Context {
                 gl.clear_color(0.0, 0.0, 0.3, 1.0);
                 gl.clear(gl::COLOR_BUFFER_BIT);
 
-                renderer.render(gl, (800, 600), draw_buffer, texture_service)?;
+                renderer.render(gl, self.window_size, draw_buffer, texture_service)?;
 
                 context.swap_buffers(surface.as_ptr())?;
             }

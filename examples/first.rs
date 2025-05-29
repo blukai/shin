@@ -59,6 +59,8 @@ mod platform {
             &mut self,
             display_handle: rwh::DisplayHandle,
             window_handle: rwh::WindowHandle,
+            width: u32,
+            height: u32,
         ) -> anyhow::Result<&mut InitializedGraphicsContext> {
             assert!(matches!(self, Self::Uninit));
 
@@ -69,7 +71,7 @@ mod platform {
                     ..egl::Config::default()
                 },
             )?;
-            let surface = egl::Surface::new(&context, window_handle)?;
+            let surface = egl::Surface::new(&context, window_handle, width, height)?;
 
             // TODO: figure out an okay way to include vsync toggle.
             // context.make_current(&egl, egl_surface.as_ptr())?;
@@ -173,18 +175,20 @@ mod platform {
 
 struct Context {
     window: Box<dyn Window>,
-    gpu_context: platform::GraphicsContext,
+    window_size: (u32, u32),
+    graphics_context: platform::GraphicsContext,
     close_requested: bool,
 }
 
 impl Context {
     fn new() -> anyhow::Result<Self> {
         let window = window::create_window(WindowAttrs::default())?;
-        let gpu_context = platform::GraphicsContext::new_uninit();
+        let graphics_context = platform::GraphicsContext::new_uninit();
 
         Ok(Self {
             window,
-            gpu_context,
+            window_size: (0, 0),
+            graphics_context,
             close_requested: false,
         })
     }
@@ -196,20 +200,39 @@ impl Context {
             log::debug!("event: {event:?}");
 
             match event {
-                WindowEvent::Configure { logical_size } => match self.gpu_context {
-                    platform::GraphicsContext::Uninit => {
-                        let igc = self
-                            .gpu_context
-                            .init(self.window.display_handle()?, self.window.window_handle()?)?;
+                WindowEvent::Configure { logical_size } => {
+                    self.window_size = logical_size;
 
-                        #[cfg(unix)]
-                        igc.surface.resize(logical_size.0, logical_size.1)?;
+                    match self.graphics_context {
+                        platform::GraphicsContext::Uninit => {
+                            self.graphics_context.init(
+                                self.window.display_handle()?,
+                                self.window.window_handle()?,
+                                #[cfg(unix)]
+                                logical_size.0,
+                                #[cfg(unix)]
+                                logical_size.1,
+                            )?;
+                        }
+                        platform::GraphicsContext::Initialized(ref mut igc) => {
+                            #[cfg(unix)]
+                            igc.surface.resize(logical_size.0, logical_size.1)?;
+                        }
                     }
-                    platform::GraphicsContext::Initialized(ref mut igc) => {
-                        #[cfg(unix)]
-                        igc.surface.resize(logical_size.0, logical_size.1)?;
+                }
+                WindowEvent::Resize { physical_size } => {
+                    self.window_size = physical_size;
+
+                    #[cfg(target_family = "wasm")]
+                    unreachable!();
+
+                    #[cfg(unix)]
+                    if let platform::GraphicsContext::Initialized(ref mut igc) =
+                        self.graphics_context
+                    {
+                        igc.surface.resize(physical_size.0, physical_size.1)?;
                     }
-                },
+                }
                 WindowEvent::CloseRequested => {
                     self.close_requested = true;
                     return Ok(());
@@ -223,7 +246,7 @@ impl Context {
             surface,
             gl,
             ..
-        }) = &self.gpu_context
+        }) = &self.graphics_context
         {
             unsafe {
                 #[cfg(unix)]

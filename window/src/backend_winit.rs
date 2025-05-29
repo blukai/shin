@@ -58,12 +58,8 @@ impl winit::application::ApplicationHandler for App {
         assert!(window.id() == window_id);
 
         let maybe_window_event = match window_event {
-            winit::event::WindowEvent::Resized(physical_size) => Some(WindowEvent::Configure {
-                logical_size: {
-                    // TODO: i probably should switch to physical size everywhere
-                    let logical_size = physical_size.to_logical(1.0);
-                    (logical_size.width, logical_size.height)
-                },
+            winit::event::WindowEvent::Resized(physical_size) => Some(WindowEvent::Resize {
+                physical_size: (physical_size.width, physical_size.height),
             }),
             winit::event::WindowEvent::CloseRequested => Some(WindowEvent::CloseRequested),
             window_event => {

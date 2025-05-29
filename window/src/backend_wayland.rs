@@ -19,12 +19,18 @@ pub struct WaylandBackend {
 
     wl_compositor: *mut libwayland_client::wl_compositor,
     wl_seat: *mut libwayland_client::wl_seat,
+    wp_fractional_scale_manager_v1: *mut libwayland_client::wp_fractional_scale_manager_v1,
     wp_viewporter: *mut libwayland_client::wp_viewporter,
     xdg_wm_base: *mut libwayland_client::xdg_wm_base,
 
     wl_surface: *mut libwayland_client::wl_surface,
     xdg_surface: *mut libwayland_client::xdg_surface,
     xdg_toplevel: *mut libwayland_client::xdg_toplevel,
+    wp_fractional_scale_v1: *mut libwayland_client::wp_fractional_scale_v1,
+    wp_viewport: *mut libwayland_client::wp_viewport,
+
+    logical_size: Option<(u32, u32)>,
+    fractional_scale: Option<f64>,
 
     events: VecDeque<WindowEvent>,
 }
@@ -60,6 +66,15 @@ unsafe extern "C" fn handle_wl_registry_global(
                     name,
                     &libwayland_client::wl_seat_interface,
                     9.min(version),
+                ) as _;
+            }
+            "wp_fractional_scale_manager_v1" => {
+                evl.wp_fractional_scale_manager_v1 = libwayland_client::wl_registry_bind(
+                    &evl.libwayland_client,
+                    wl_registry,
+                    name,
+                    &libwayland_client::wp_fractional_scale_manager_v1_interface,
+                    1.min(version),
                 ) as _;
             }
             "wp_viewporter" => {
@@ -98,10 +113,8 @@ unsafe extern "C" fn handle_xdg_wm_base_ping(
     xdg_wm_base: *mut libwayland_client::xdg_wm_base,
     serial: u32,
 ) {
-    unsafe {
-        let evl = &mut *(data as *mut WaylandBackend);
-        libwayland_client::xdg_wm_base_pong(&evl.libwayland_client, xdg_wm_base, serial);
-    }
+    let evl = unsafe { &mut *(data as *mut WaylandBackend) };
+    unsafe { libwayland_client::xdg_wm_base_pong(&evl.libwayland_client, xdg_wm_base, serial) };
 }
 
 const XDG_WM_BASE_LISTENER: libwayland_client::xdg_wm_base_listener =
@@ -114,12 +127,12 @@ unsafe extern "C" fn handle_xdg_surface_configure(
     xdg_surface: *mut libwayland_client::xdg_surface,
     serial: u32,
 ) {
-    unsafe {
-        log::debug!("recv xdg_surface_configure");
+    log::debug!("recv xdg_surface_configure");
 
-        let evl = &mut *(data as *mut WaylandBackend);
-        libwayland_client::xdg_surface_ack_configure(&evl.libwayland_client, xdg_surface, serial);
-    }
+    let evl = unsafe { &mut *(data as *mut WaylandBackend) };
+    unsafe {
+        libwayland_client::xdg_surface_ack_configure(&evl.libwayland_client, xdg_surface, serial)
+    };
 }
 
 const XDG_SURFACE_LISTENER: libwayland_client::xdg_surface_listener =
@@ -134,39 +147,35 @@ unsafe extern "C" fn handle_xdg_toplevel_configure(
     height: i32,
     _states: *mut libwayland_client::wl_array,
 ) {
-    unsafe {
-        log::debug!("recv xdg_toplevel_configure");
+    log::debug!("recv xdg_toplevel_configure");
 
-        let evl = &mut *(data as *mut WaylandBackend);
+    let evl = unsafe { &mut *(data as *mut WaylandBackend) };
 
-        assert!(width >= 0 && height >= 0);
-        // NOTE: if the width or height arguments are zero, it means the client should decide its own
-        // window dimension.
-        let logical_size = if width > 0 || height > 0 {
-            Some((width as u32, height as u32))
-        } else {
-            evl.attrs.logical_size
-        }
-        .unwrap_or(DEFAULT_LOGICAL_SIZE);
-        log::debug!("logical_size: {logical_size:?}");
-
-        let event = WindowEvent::Configure { logical_size };
-        evl.events.push_back(event);
+    assert!(width >= 0 && height >= 0);
+    // NOTE: if the width or height arguments are zero, it means the client should decide its own
+    // window dimension.
+    let logical_size = if width > 0 || height > 0 {
+        Some((width as u32, height as u32))
+    } else {
+        evl.attrs.logical_size
     }
+    .unwrap_or(DEFAULT_LOGICAL_SIZE);
+    log::debug!("logical_size: {logical_size:?}");
+
+    evl.configure(Some(logical_size), None);
+
+    evl.events
+        .push_back(WindowEvent::Configure { logical_size });
 }
 
 unsafe extern "C" fn handle_xdg_toplevel_close(
     data: *mut c_void,
     _xdg_toplevel: *mut libwayland_client::xdg_toplevel,
 ) {
-    unsafe {
-        log::debug!("recv xdg_toplevel_close");
+    log::debug!("recv xdg_toplevel_close");
 
-        let evl = &mut *(data as *mut WaylandBackend);
-
-        let event = WindowEvent::CloseRequested;
-        evl.events.push_back(event);
-    }
+    let evl = unsafe { &mut *(data as *mut WaylandBackend) };
+    evl.events.push_back(WindowEvent::CloseRequested);
 }
 
 const XDG_TOPLEVEL_LISTENER: libwayland_client::xdg_toplevel_listener =
@@ -175,6 +184,36 @@ const XDG_TOPLEVEL_LISTENER: libwayland_client::xdg_toplevel_listener =
         close: handle_xdg_toplevel_close,
         wm_capabilities: libwayland_client::noop_listener!(),
         configure_bounds: libwayland_client::noop_listener!(),
+    };
+
+unsafe extern "C" fn handle_wp_fractional_scale_v1_preferred_scale(
+    data: *mut std::ffi::c_void,
+    _wp_fractional_scale_v1: *mut libwayland_client::wp_fractional_scale_v1,
+    scale: u32,
+) {
+    log::debug!("recv wp_fractional_scale_v1_preferred_scale");
+
+    // > The sent scale is the numerator of a fraction with a denominator of 120.
+    let fractional_scale = scale as f64 / 120.0;
+
+    let evl = unsafe { &mut *(data as *mut WaylandBackend) };
+
+    evl.configure(None, Some(fractional_scale));
+
+    evl.events.push_back(WindowEvent::Resize {
+        physical_size: {
+            let logical_size = evl.logical_size.expect("logical size");
+            (
+                (logical_size.0 as f64 * fractional_scale) as u32,
+                (logical_size.1 as f64 * fractional_scale) as u32,
+            )
+        },
+    });
+}
+
+const WP_FRACTIONAL_SCALE_MANAGER_V1_LISTENER: libwayland_client::wp_fractional_scale_v1_listener =
+    libwayland_client::wp_fractional_scale_v1_listener {
+        preferred_scale: handle_wp_fractional_scale_v1_preferred_scale,
     };
 
 impl WaylandBackend {
@@ -196,12 +235,18 @@ impl WaylandBackend {
 
             wl_compositor: null_mut(),
             wl_seat: null_mut(),
+            wp_fractional_scale_manager_v1: null_mut(),
             wp_viewporter: null_mut(),
             xdg_wm_base: null_mut(),
 
             wl_surface: null_mut(),
             xdg_surface: null_mut(),
             xdg_toplevel: null_mut(),
+            wp_fractional_scale_v1: null_mut(),
+            wp_viewport: null_mut(),
+
+            logical_size: None,
+            fractional_scale: None,
 
             events: VecDeque::new(),
         });
@@ -229,6 +274,8 @@ impl WaylandBackend {
         assert!(!boxed.wl_seat.is_null());
         assert!(!boxed.xdg_wm_base.is_null());
 
+        log::info!("initialized globals");
+
         unsafe {
             (boxed.libwayland_client.wl_proxy_add_listener)(
                 boxed.xdg_wm_base as *mut libwayland_client::wl_proxy,
@@ -236,8 +283,6 @@ impl WaylandBackend {
                 boxed.as_mut() as *mut WaylandBackend as *mut c_void,
             );
         }
-
-        log::info!("initialized globals");
 
         // init window
 
@@ -261,12 +306,26 @@ impl WaylandBackend {
         if boxed.xdg_surface.is_null() {
             return Err(anyhow!("could not create xdg surface"));
         }
+        unsafe {
+            (boxed.libwayland_client.wl_proxy_add_listener)(
+                boxed.xdg_surface as *mut libwayland_client::wl_proxy,
+                &XDG_SURFACE_LISTENER as *const libwayland_client::xdg_surface_listener as _,
+                boxed.as_mut() as *mut WaylandBackend as *mut c_void,
+            );
+        }
 
         boxed.xdg_toplevel = unsafe {
             libwayland_client::xdg_surface_get_toplevel(&boxed.libwayland_client, boxed.xdg_surface)
         };
         if boxed.xdg_toplevel.is_null() {
             return Err(anyhow!("could not get xdg toplevel"));
+        }
+        unsafe {
+            (boxed.libwayland_client.wl_proxy_add_listener)(
+                boxed.xdg_toplevel as *mut libwayland_client::wl_proxy,
+                &XDG_TOPLEVEL_LISTENER as *const libwayland_client::xdg_toplevel_listener as _,
+                boxed.as_mut() as *mut WaylandBackend as *mut c_void,
+            );
         }
 
         if !boxed.attrs.resizable {
@@ -287,17 +346,40 @@ impl WaylandBackend {
             };
         }
 
+        // scale factor
+        if !boxed.wp_fractional_scale_manager_v1.is_null() {
+            boxed.wp_fractional_scale_v1 = unsafe {
+                libwayland_client::wp_fractional_scale_manager_v1_get_fractional_scale(
+                    &boxed.libwayland_client,
+                    boxed.wp_fractional_scale_manager_v1,
+                    boxed.wl_surface,
+                )
+            };
+            if boxed.wp_fractional_scale_v1.is_null() {
+                return Err(anyhow!("could not get fractional scale"));
+            }
+            unsafe {
+                (boxed.libwayland_client.wl_proxy_add_listener)(
+                    boxed.wp_fractional_scale_v1 as *mut libwayland_client::wl_proxy,
+                    &WP_FRACTIONAL_SCALE_MANAGER_V1_LISTENER
+                        as *const libwayland_client::wp_fractional_scale_v1_listener
+                        as _,
+                    boxed.as_mut() as *mut WaylandBackend as *mut c_void,
+                );
+            }
+        }
+
+        if !boxed.wp_viewporter.is_null() {
+            boxed.wp_viewport = unsafe {
+                libwayland_client::wp_viewporter_get_viewport(
+                    &boxed.libwayland_client,
+                    boxed.wp_viewporter,
+                    boxed.wl_surface,
+                )
+            };
+        }
+
         unsafe {
-            (boxed.libwayland_client.wl_proxy_add_listener)(
-                boxed.xdg_surface as *mut libwayland_client::wl_proxy,
-                &XDG_SURFACE_LISTENER as *const libwayland_client::xdg_surface_listener as _,
-                boxed.as_mut() as *mut WaylandBackend as *mut c_void,
-            );
-            (boxed.libwayland_client.wl_proxy_add_listener)(
-                boxed.xdg_toplevel as *mut libwayland_client::wl_proxy,
-                &XDG_TOPLEVEL_LISTENER as *const libwayland_client::xdg_toplevel_listener as _,
-                boxed.as_mut() as *mut WaylandBackend as *mut c_void,
-            );
             libwayland_client::wl_surface_commit(&boxed.libwayland_client, boxed.wl_surface);
             (boxed.libwayland_client.wl_display_roundtrip)(boxed.wl_display.as_ptr());
         }
@@ -305,6 +387,31 @@ impl WaylandBackend {
         log::info!("initialized window");
 
         Ok(boxed)
+    }
+
+    fn configure(&mut self, logical_size: Option<(u32, u32)>, fractional_scale: Option<f64>) {
+        if logical_size.is_some() {
+            self.logical_size = logical_size;
+        }
+        if fractional_scale.is_some() {
+            self.fractional_scale = fractional_scale;
+        }
+
+        if self.wp_viewport.is_null() {
+            return;
+        }
+
+        let logical_size = self.logical_size.expect("logical size");
+        unsafe {
+            libwayland_client::wp_viewport_set_destination(
+                &self.libwayland_client,
+                self.wp_viewport,
+                logical_size.0 as i32,
+                logical_size.1 as i32,
+            );
+            assert!(!self.wl_surface.is_null());
+            libwayland_client::wl_surface_commit(&self.libwayland_client, self.wl_surface);
+        }
     }
 }
 
