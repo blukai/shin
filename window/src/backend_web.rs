@@ -20,16 +20,16 @@ pub mod js_sys {
             ctx: *mut c_void,
         );
 
-        pub(super) fn canvas_get_by_id(id: *const c_char) -> usize;
-        pub(super) fn canvas_get_size(extern_ref: usize, width: *mut i32, height: *mut i32);
-        pub(super) fn canvas_set_size(extern_ref: usize, width: i32, height: i32);
+        pub(super) fn canvas_get_by_id(id: *const c_char) -> u32;
+        pub(super) fn canvas_get_size(extern_ref: u32, width: *mut i32, height: *mut i32);
+        pub(super) fn canvas_set_size(extern_ref: u32, width: i32, height: i32);
     }
 }
 
 pub struct WebBackend {
     attrs: WindowAttrs,
 
-    canvas: usize,
+    canvas: u32,
 
     events: VecDeque<WindowEvent>,
 }
@@ -79,10 +79,8 @@ impl rwh::HasDisplayHandle for WebBackend {
 impl rwh::HasWindowHandle for WebBackend {
     fn window_handle(&self) -> Result<rwh::WindowHandle<'_>, rwh::HandleError> {
         assert!(self.canvas != 0);
-        let web = rwh::WebCanvasWindowHandle::new(unsafe {
-            NonNull::new_unchecked(&self.canvas as *const usize as *mut c_void)
-        });
-        let raw = rwh::RawWindowHandle::WebCanvas(web);
+        let web = rwh::WebWindowHandle::new(self.canvas);
+        let raw = rwh::RawWindowHandle::Web(web);
         Ok(unsafe { rwh::WindowHandle::borrow_raw(raw) })
     }
 }

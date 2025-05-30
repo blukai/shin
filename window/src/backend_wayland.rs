@@ -160,7 +160,6 @@ unsafe extern "C" fn handle_xdg_toplevel_configure(
         evl.attrs.logical_size
     }
     .unwrap_or(DEFAULT_LOGICAL_SIZE);
-    log::debug!("logical_size: {logical_size:?}");
 
     evl.configure(Some(logical_size), None);
 

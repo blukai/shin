@@ -4,25 +4,25 @@ use super::GlContexter;
 use super::types::*;
 
 unsafe extern "C" {
-    fn gl_clear_color(extern_ref: usize, red: f32, green: f32, blue: f32, alpha: f32);
-    fn gl_clear(extern_ref: usize, mask: u32);
+    fn gl_clear_color(extern_ref: u32, red: f32, green: f32, blue: f32, alpha: f32);
+    fn gl_clear(extern_ref: u32, mask: u32);
 }
 
 pub struct Context {
-    extern_ref: usize,
+    extern_ref: u32,
 }
 
 impl Context {
-    pub fn from_extern_ref(extern_ref: usize) -> Self {
+    pub fn from_extern_ref(extern_ref: u32) -> Self {
         Self { extern_ref }
     }
 }
 
 impl GlContexter for Context {
-    type Buffer = usize;
-    type Program = usize;
-    type Shader = usize;
-    type Texture = usize;
+    type Buffer = u32;
+    type Program = u32;
+    type Shader = u32;
+    type Texture = u32;
 
     #[inline]
     unsafe fn active_texture(&self, texture: GLenum) {

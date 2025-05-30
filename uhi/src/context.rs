@@ -6,18 +6,16 @@ use fontdue::layout::{Layout as TextLayout, TextStyle};
 use glam::Vec2;
 
 use crate::{
-    DrawBuffer, Fill, FillTexture, FontHandle, FontService, LineShape, Rect, RectShape, Renderer,
-    Rgba8, TextureKind, TextureService,
+    DrawBuffer, DrawData, Fill, FillTexture, FontHandle, FontService, LineShape, Rect, RectShape,
+    Renderer, Rgba8, TextureKind, TextureService,
 };
 
-// TODO: context must own renderer, but renderer will need its own context (args) or something.
 pub struct Context<R: Renderer> {
-    font_service: FontService,
-    // TODO: unexpose
+    pub font_service: FontService,
     pub texture_service: TextureService<R>,
+
     text_layout: fontdue::layout::Layout,
-    // TODO: unexpose
-    pub draw_buffer: DrawBuffer<R>,
+    draw_buffer: DrawBuffer<R>,
 }
 
 impl<R: Renderer> Context<R> {
@@ -33,13 +31,7 @@ impl<R: Renderer> Context<R> {
         }
     }
 
-    #[inline]
-    pub fn create_font<D>(&mut self, data: D, size: f32) -> anyhow::Result<FontHandle>
-    where
-        D: AsRef<[u8]>,
-    {
-        self.font_service.create_font(data, size)
-    }
+    // draw buffer delegates
 
     #[inline]
     pub fn push_line(&mut self, line: LineShape) {
@@ -50,6 +42,18 @@ impl<R: Renderer> Context<R> {
     pub fn push_rect(&mut self, rect: RectShape<R>) {
         self.draw_buffer.push_rect(rect);
     }
+
+    #[inline]
+    pub fn get_draw_data<'a>(&'a self) -> DrawData<'a, R> {
+        self.draw_buffer.get_draw_data()
+    }
+
+    #[inline]
+    pub fn clear_draw_buffer(&mut self) {
+        self.draw_buffer.clear();
+    }
+
+    // other
 
     pub fn push_text(
         &mut self,

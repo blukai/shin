@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use glam::Vec2;
 
 use crate::{Fill, LineShape, Rect, RectShape, Stroke, TextureKind, Vertex, renderer::Renderer};
@@ -28,20 +30,29 @@ fn compute_line_width_offset(a: &Vec2, b: &Vec2, width: f32) -> Vec2 {
     offset
 }
 
+// TODO: introduce DrawData struct that DrawBuffer would need to expose without exposing its
+// internal vertices, indices and draw commands.
+
 // TODO: do Primitive instead of DrawCommand?
 #[derive(Debug)]
 pub struct DrawCommand<R: Renderer> {
-    pub start_index: u32,
-    pub end_index: u32,
-    pub tex_kind: Option<TextureKind<R>>,
+    pub index_range: Range<u32>,
+    pub texture: Option<TextureKind<R>>,
+}
+
+#[derive(Debug)]
+pub struct DrawData<'a, R: Renderer> {
+    pub indices: &'a [u32],
+    pub vertices: &'a [Vertex],
+    pub commands: &'a [DrawCommand<R>],
 }
 
 #[derive(Debug)]
 pub struct DrawBuffer<R: Renderer> {
-    pub vertices: Vec<Vertex>,
-    pub indices: Vec<u32>,
+    vertices: Vec<Vertex>,
+    indices: Vec<u32>,
     pending_indices: usize,
-    pub draw_commands: Vec<DrawCommand<R>>,
+    draw_commands: Vec<DrawCommand<R>>,
 }
 
 impl<R: Renderer> Default for DrawBuffer<R> {
@@ -74,16 +85,25 @@ impl<R: Renderer> DrawBuffer<R> {
         self.pending_indices += 3;
     }
 
-    fn commit_primitive(&mut self, tex_kind: Option<TextureKind<R>>) {
+    fn commit_primitive(&mut self, texture: Option<TextureKind<R>>) {
         if self.pending_indices == 0 {
             return;
         }
+        let start_index = (self.indices.len() - self.pending_indices) as u32;
+        let end_index = self.indices.len() as u32;
         self.draw_commands.push(DrawCommand {
-            start_index: (self.indices.len() - self.pending_indices) as u32,
-            end_index: self.indices.len() as u32,
-            tex_kind,
+            index_range: start_index..end_index,
+            texture,
         });
         self.pending_indices = 0;
+    }
+
+    pub fn get_draw_data<'a>(&'a self) -> DrawData<'a, R> {
+        DrawData {
+            indices: self.indices.as_slice(),
+            vertices: self.vertices.as_slice(),
+            commands: self.draw_commands.as_slice(),
+        }
     }
 
     pub fn push_line(&mut self, line: LineShape) {
@@ -130,7 +150,7 @@ impl<R: Renderer> DrawBuffer<R> {
     fn push_rect_filled(&mut self, coords: Rect, fill: Fill<R>) {
         let idx = self.vertices.len() as u32;
 
-        let (color, tex_kind, tex_coords) = if let Some(fill_texture) = fill.texture {
+        let (color, texture, tex_coords) = if let Some(fill_texture) = fill.texture {
             (
                 fill.color,
                 Some(fill_texture.kind),
@@ -182,7 +202,7 @@ impl<R: Renderer> DrawBuffer<R> {
         // bottom right -> bottom left -> top left
         self.push_triangle(idx + 2, idx + 3, idx + 0);
 
-        self.commit_primitive(tex_kind);
+        self.commit_primitive(texture);
     }
 
     fn push_rect_stroked(&mut self, coords: Rect, stroke: Stroke) {
