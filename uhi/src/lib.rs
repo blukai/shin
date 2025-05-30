@@ -2,6 +2,7 @@ use std::mem;
 
 use glam::Vec2;
 
+mod context;
 mod drawbuffer;
 mod fontservice;
 mod fonttexturecache;
@@ -9,6 +10,7 @@ mod renderer;
 mod texturepacker;
 mod textureservice;
 
+pub use context::*;
 pub use drawbuffer::*;
 pub use fontservice::*;
 pub use fonttexturecache::*;

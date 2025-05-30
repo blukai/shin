@@ -2,6 +2,11 @@ use glam::Vec2;
 
 use crate::{Fill, LineShape, Rect, RectShape, Stroke, TextureKind, Vertex, renderer::Renderer};
 
+// TODO: instancing (to enable batching (vertices will be able to exist in 0..1 coordinate space
+// (probably) and then they can be translated, scaled, rotated with instance transforms (for
+// example this will allow to render all rects within a single draw call? or am i being
+// delusional?))).
+
 /// computes the vertex position offset away the from center caused by line width.
 fn compute_line_width_offset(a: &Vec2, b: &Vec2, width: f32) -> Vec2 {
     // direction defines how the line is oriented in space. it allows to know
@@ -219,12 +224,12 @@ impl<R: Renderer> DrawBuffer<R> {
         self.commit_primitive(None);
     }
 
-    pub fn push_rect(&mut self, shape: RectShape<R>) {
-        if let Some(fill) = shape.fill {
-            self.push_rect_filled(shape.coords.clone(), fill);
+    pub fn push_rect(&mut self, rect: RectShape<R>) {
+        if let Some(fill) = rect.fill {
+            self.push_rect_filled(rect.coords.clone(), fill);
         }
-        if let Some(stroke) = shape.stroke {
-            self.push_rect_stroked(shape.coords, stroke);
+        if let Some(stroke) = rect.stroke {
+            self.push_rect_stroked(rect.coords, stroke);
         }
     }
 }

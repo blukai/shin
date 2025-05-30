@@ -1,5 +1,4 @@
 use anyhow::Context as _;
-use fontdue::layout::{Layout as TextLayout, TextStyle};
 use glam::Vec2;
 use gpu::{
     egl,
@@ -7,6 +6,7 @@ use gpu::{
 };
 use raw_window_handle as rwh;
 use std::ffi::c_void;
+use uhi::TextLayoutSttings;
 use window::{Window, WindowAttrs, WindowEvent};
 
 const FONT: &[u8] = include_bytes!("../../fixtures/JetBrainsMono-Regular.ttf");
@@ -41,17 +41,15 @@ impl Logger {
 }
 
 struct InitializedGraphicsContext {
-    draw_buffer: uhi::DrawBuffer<uhi::GlRenderer>,
-    texture_service: uhi::TextureService<uhi::GlRenderer>,
-    font_service: uhi::FontService,
-    renderer: uhi::GlRenderer,
+    // TODO: move uhi stuff out of gfx ctx.
+    uhi_context: uhi::Context<uhi::GlRenderer>,
+    uhi_renderer: uhi::GlRenderer,
+    uhi_font_handle: uhi::FontHandle,
 
-    font_handle: uhi::FontHandle,
-    text_layout: TextLayout,
-
-    context: egl::Context,
-    surface: egl::Surface,
-    gl: gl::Context,
+    // TODO: egl_context and gl_context don't need to be here. they can be initialized surfaceless.
+    egl_context: egl::Context,
+    egl_surface: egl::Surface,
+    gl_context: gl::Context,
 }
 
 enum GraphicsContext {
@@ -73,51 +71,44 @@ impl GraphicsContext {
     ) -> anyhow::Result<&mut InitializedGraphicsContext> {
         assert!(matches!(self, Self::Uninit));
 
-        let context = egl::Context::new(
+        let egl_context = egl::Context::new(
             display_handle,
             egl::Config {
                 min_swap_interval: Some(0),
                 ..egl::Config::default()
             },
         )?;
-        let surface = egl::Surface::new(&context, window_handle, width, height)?;
+        let egl_surface = egl::Surface::new(&egl_context, window_handle, width, height)?;
 
-        context.make_current(surface.as_ptr())?;
+        egl_context.make_current(egl_surface.as_ptr())?;
 
-        let gl = unsafe {
-            gl::Context::load_with(|procname| context.get_proc_address(procname) as *mut c_void)
+        let gl_context = unsafe {
+            gl::Context::load_with(|procname| egl_context.get_proc_address(procname) as *mut c_void)
         };
 
-        let version = unsafe { gl.get_string(gl::VERSION) }.context("could not get version")?;
-        let shading_language_version = unsafe { gl.get_string(gl::SHADING_LANGUAGE_VERSION) }
-            .context("could not get shading language version")?;
+        let version =
+            unsafe { gl_context.get_string(gl::VERSION) }.context("could not get version")?;
+        let shading_language_version =
+            unsafe { gl_context.get_string(gl::SHADING_LANGUAGE_VERSION) }
+                .context("could not get shading language version")?;
         log::info!(
             "initialized gl version {version}, shading language version {shading_language_version}"
         );
 
-        let draw_buffer = uhi::DrawBuffer::default();
-        let texture_service = uhi::TextureService::<uhi::GlRenderer>::default();
-        let mut font_service = uhi::FontService::default();
-        let renderer = uhi::GlRenderer::new(&gl)?;
-
-        let font_handle = font_service
-            .create_font(FONT, 14.0)
+        let mut uhi_context = uhi::Context::new(false);
+        let uhi_renderer = uhi::GlRenderer::new(&gl_context)?;
+        let uhi_font_handle = uhi_context
+            .create_font(FONT, 24.0)
             .context("could not create font")?;
-        let text_layout =
-            fontdue::layout::Layout::new(fontdue::layout::CoordinateSystem::PositiveYDown);
 
         *self = Self::Initialized(InitializedGraphicsContext {
-            draw_buffer,
-            texture_service,
-            font_service,
-            renderer,
+            uhi_context,
+            uhi_renderer,
+            uhi_font_handle,
 
-            font_handle,
-            text_layout,
-
-            context,
-            surface,
-            gl,
+            egl_context,
+            egl_surface,
+            gl_context,
         });
         let Self::Initialized(init) = self else {
             unreachable!();
@@ -166,7 +157,7 @@ impl Context {
                             )?;
                         }
                         GraphicsContext::Initialized(ref mut igc) => {
-                            igc.surface.resize(logical_size.0, logical_size.1)?;
+                            igc.egl_surface.resize(logical_size.0, logical_size.1)?;
                         }
                     }
                 }
@@ -174,7 +165,7 @@ impl Context {
                     self.window_size = physical_size;
 
                     if let GraphicsContext::Initialized(ref mut igc) = self.graphics_context {
-                        igc.surface.resize(physical_size.0, physical_size.1)?;
+                        igc.egl_surface.resize(physical_size.0, physical_size.1)?;
                     }
                 }
                 WindowEvent::CloseRequested => {
@@ -185,63 +176,52 @@ impl Context {
         }
 
         if let GraphicsContext::Initialized(InitializedGraphicsContext {
-            ref mut draw_buffer,
-            ref mut texture_service,
-            ref mut font_service,
-            ref renderer,
+            ref mut uhi_context,
+            ref uhi_renderer,
+            uhi_font_handle,
 
-            font_handle,
-            ref mut text_layout,
-
-            ref context,
-            ref surface,
-            ref gl,
+            ref egl_context,
+            ref egl_surface,
+            ref gl_context,
         }) = self.graphics_context
         {
-            draw_buffer.push_rect(uhi::RectShape::with_fill(
+            uhi_context.push_rect(uhi::RectShape::with_fill(
                 uhi::Rect::from_center_size(
                     Vec2::new(self.window_size.0 as f32, self.window_size.1 as f32) / 2.0,
                     100.0,
                 ),
                 uhi::Fill::with_color(uhi::Rgba8::FUCHSIA),
             ));
-
-            text_layout.append(
-                &[font_service.get_fontdue_font(font_handle)],
-                &TextStyle::new("hello, sailor!", 14.0, 0),
+            uhi_context.push_text(
+                uhi_font_handle,
+                "YO, sailor!",
+                uhi::Rgba8::WHITE,
+                Some(&TextLayoutSttings {
+                    max_width: Some(self.window_size.0 as f32),
+                    max_height: Some(self.window_size.1 as f32),
+                    vertical_align: uhi::TextVAlign::Middle,
+                    horizontal_align: uhi::TextHAlign::Center,
+                    ..TextLayoutSttings::default()
+                }),
             );
 
-            for glyph in text_layout.glyphs() {
-                let (handle, coords) =
-                    font_service.get_texture_for_char(font_handle, glyph.parent, texture_service);
-
-                let min = Vec2::new(glyph.x, glyph.y);
-                let size = Vec2::new(glyph.width as f32, glyph.height as f32);
-                draw_buffer.push_rect(uhi::RectShape::with_fill(
-                    uhi::Rect::new(min, min + size),
-                    uhi::Fill::new(
-                        uhi::Rgba8::ORANGE,
-                        uhi::FillTexture {
-                            kind: uhi::TextureKind::Internal(handle),
-                            coords,
-                        },
-                    ),
-                ));
-            }
-
             unsafe {
-                context.make_current(surface.as_ptr())?;
+                egl_context.make_current(egl_surface.as_ptr())?;
 
-                gl.clear_color(0.0, 0.0, 0.3, 1.0);
-                gl.clear(gl::COLOR_BUFFER_BIT);
+                gl_context.clear_color(0.0, 0.0, 0.3, 1.0);
+                gl_context.clear(gl::COLOR_BUFFER_BIT);
 
-                renderer.render(gl, self.window_size, draw_buffer, texture_service)?;
+                uhi_renderer.render(
+                    gl_context,
+                    self.window_size,
+                    &uhi_context.draw_buffer,
+                    &mut uhi_context.texture_service,
+                )?;
 
-                context.swap_buffers(surface.as_ptr())?;
+                egl_context.swap_buffers(egl_surface.as_ptr())?;
             }
 
-            draw_buffer.clear();
-            text_layout.clear();
+            uhi_context.draw_buffer.clear();
         }
 
         Ok(())

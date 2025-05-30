@@ -7,9 +7,9 @@ pub struct FontHandle {
     index: usize,
 }
 
-struct Font {
-    fontdue_font: fontdue::Font,
-    size: f32,
+pub struct Font {
+    pub fontdue_font: fontdue::Font,
+    pub size: f32,
 }
 
 #[derive(Default)]
@@ -47,14 +47,14 @@ impl FontService {
     }
 
     // NOTE: Rect that this method returns is gpu texture coords (in range of 0..1).
-    pub fn get_texture_for_char<R: Renderer>(
+    pub fn get_or_create_texture_for_char<R: Renderer>(
         &mut self,
         font_handle: FontHandle,
         ch: char,
         texture_service: &mut TextureService<R>,
     ) -> (TextureHandle, Rect) {
         let font = &self.fonts[font_handle.index];
-        self.font_texture_cache.get_texture_for_char(
+        self.font_texture_cache.get_or_create_texture_for_char(
             &font.fontdue_font,
             font.size,
             ch,
@@ -62,9 +62,7 @@ impl FontService {
         )
     }
 
-    // TODO: do not expose this. instead extend functionality. font service must be capable of
-    // providing layout computations (possibly cached).
-    pub fn get_fontdue_font(&self, font_handle: FontHandle) -> &fontdue::Font {
-        &self.fonts[font_handle.index].fontdue_font
+    pub fn get_font(&self, font_handle: FontHandle) -> &Font {
+        &self.fonts[font_handle.index]
     }
 }

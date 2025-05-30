@@ -120,7 +120,7 @@ impl FontTextureCache {
     }
 
     // NOTE: Rect that this method returns is gpu texture coords (in range of 0..1).
-    pub fn get_texture_for_char<R: Renderer>(
+    pub fn get_or_create_texture_for_char<R: Renderer>(
         &mut self,
         font: &fontdue::Font,
         font_size: f32,
