@@ -7,7 +7,7 @@ use gpu::{
 use raw_window_handle as rwh;
 use std::ffi::c_void;
 use uhi::TextLayoutSttings;
-use window::{Window, WindowAttrs, WindowEvent};
+use window::{Event, Window, WindowAttrs, WindowEvent};
 
 const FONT: &[u8] = include_bytes!("../../fixtures/JetBrainsMono-Regular.ttf");
 
@@ -140,7 +140,7 @@ impl Context {
             log::debug!("event: {event:?}");
 
             match event {
-                WindowEvent::Configure { logical_size } => {
+                Event::Window(WindowEvent::Configure { logical_size }) => {
                     self.window_size = logical_size;
 
                     match self.graphics_context {
@@ -157,17 +157,18 @@ impl Context {
                         }
                     }
                 }
-                WindowEvent::Resize { physical_size } => {
+                Event::Window(WindowEvent::Resize { physical_size }) => {
                     self.window_size = physical_size;
 
                     if let GraphicsContext::Initialized(ref mut igc) = self.graphics_context {
                         igc.egl_surface.resize(physical_size.0, physical_size.1)?;
                     }
                 }
-                WindowEvent::CloseRequested => {
+                Event::Window(WindowEvent::CloseRequested) => {
                     self.close_requested = true;
                     return Ok(());
                 }
+                _ => {}
             }
         }
 
@@ -228,3 +229,6 @@ fn main() {
         ctx.iterate().expect("iteration failure");
     }
 }
+
+// todo (maybe):
+// https://tchayen.com/how-to-write-a-flexbox-layout-engine

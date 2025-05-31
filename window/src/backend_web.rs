@@ -1,11 +1,10 @@
 use std::collections::VecDeque;
-use std::ffi::{CString, c_void};
-use std::ptr::NonNull;
+use std::ffi::CString;
 
 use anyhow::anyhow;
 use raw_window_handle as rwh;
 
-use crate::{DEFAULT_LOGICAL_SIZE, Window, WindowAttrs, WindowEvent};
+use crate::{DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent};
 
 pub mod js_sys {
     use std::ffi::{c_char, c_void};
@@ -31,7 +30,7 @@ pub struct WebBackend {
 
     canvas: u32,
 
-    events: VecDeque<WindowEvent>,
+    events: VecDeque<Event>,
 }
 
 impl WebBackend {
@@ -51,9 +50,9 @@ impl WebBackend {
         unsafe { js_sys::canvas_set_size(canvas.clone(), width as i32, height as i32) };
         let (mut width, mut height) = (0_i32, 0_i32);
         unsafe { js_sys::canvas_get_size(canvas.clone(), &mut width, &mut height) };
-        events.push_back(WindowEvent::Configure {
+        events.push_back(Event::Window(WindowEvent::Configure {
             logical_size: (width as u32, height as u32),
-        });
+        }));
         // TODO: scale factor (/ pixel ratio)
 
         let boxed = Box::new(Self {
@@ -91,7 +90,7 @@ impl Window for WebBackend {
         Ok(())
     }
 
-    fn pop_event(&mut self) -> Option<WindowEvent> {
+    fn pop_event(&mut self) -> Option<Event> {
         self.events.pop_back()
     }
 }

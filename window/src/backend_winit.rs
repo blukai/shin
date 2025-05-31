@@ -4,7 +4,7 @@ use anyhow::{Context, anyhow};
 use raw_window_handle as rwh;
 use winit::platform::pump_events::EventLoopExtPumpEvents;
 
-use crate::{DEFAULT_LOGICAL_SIZE, Window, WindowAttrs, WindowEvent};
+use crate::{DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent};
 
 struct App {
     window_attrs: WindowAttrs,
@@ -12,7 +12,7 @@ struct App {
     window: Option<winit::window::Window>,
     window_create_error: Option<winit::error::OsError>,
 
-    window_events: VecDeque<WindowEvent>,
+    events: VecDeque<Event>,
 }
 
 pub struct WinitBackend {
@@ -42,8 +42,8 @@ impl winit::application::ApplicationHandler for App {
             Err(err) => self.window_create_error = Some(err),
         }
 
-        let window_event = WindowEvent::Configure { logical_size };
-        self.window_events.push_back(window_event);
+        self.events
+            .push_back(Event::Window(WindowEvent::Configure { logical_size }));
 
         log::info!("created winit window");
     }
@@ -68,7 +68,7 @@ impl winit::application::ApplicationHandler for App {
             }
         };
         if let Some(window_event) = maybe_window_event {
-            self.window_events.push_back(window_event);
+            self.events.push_back(Event::Window(window_event));
         }
     }
 }
@@ -83,7 +83,7 @@ impl WinitBackend {
                 window: None,
                 window_create_error: None,
 
-                window_events: VecDeque::new(),
+                events: VecDeque::new(),
             },
         };
         Ok(this)
@@ -122,7 +122,7 @@ impl Window for WinitBackend {
         ret
     }
 
-    fn pop_event(&mut self) -> Option<WindowEvent> {
-        self.app.window_events.pop_back()
+    fn pop_event(&mut self) -> Option<Event> {
+        self.app.events.pop_back()
     }
 }

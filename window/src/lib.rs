@@ -3,6 +3,9 @@ use std::env;
 use anyhow::anyhow;
 use raw_window_handle as rwh;
 
+mod input;
+pub use input::*;
+
 #[cfg(unix)]
 pub mod libwayland_client;
 #[cfg(unix)]
@@ -38,9 +41,15 @@ pub enum WindowEvent {
     CloseRequested,
 }
 
+#[derive(Debug)]
+pub enum Event {
+    Window(WindowEvent),
+    Pointer(PointerEvent),
+}
+
 pub trait Window: rwh::HasDisplayHandle + rwh::HasWindowHandle {
     fn pump_events(&mut self) -> anyhow::Result<()>;
-    fn pop_event(&mut self) -> Option<WindowEvent>;
+    fn pop_event(&mut self) -> Option<Event>;
 }
 
 pub fn create_window(window_attrs: WindowAttrs) -> anyhow::Result<Box<dyn Window>> {

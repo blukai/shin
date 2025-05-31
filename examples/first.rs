@@ -1,7 +1,7 @@
 use gpu::gl::{self, GlContexter};
 use platform::InitializedGraphicsContext;
 use raw_window_handle::{HasDisplayHandle as _, HasWindowHandle as _};
-use window::{Window, WindowAttrs, WindowEvent};
+use window::{Event, Window, WindowAttrs, WindowEvent};
 
 #[cfg(unix)]
 mod platform {
@@ -200,7 +200,7 @@ impl Context {
             log::debug!("event: {event:?}");
 
             match event {
-                WindowEvent::Configure { logical_size } => {
+                Event::Window(WindowEvent::Configure { logical_size }) => {
                     self.window_size = logical_size;
 
                     match self.graphics_context {
@@ -220,7 +220,7 @@ impl Context {
                         }
                     }
                 }
-                WindowEvent::Resize { physical_size } => {
+                Event::Window(WindowEvent::Resize { physical_size }) => {
                     self.window_size = physical_size;
 
                     #[cfg(target_family = "wasm")]
@@ -233,10 +233,11 @@ impl Context {
                         igc.surface.resize(physical_size.0, physical_size.1)?;
                     }
                 }
-                WindowEvent::CloseRequested => {
+                Event::Window(WindowEvent::CloseRequested) => {
                     self.close_requested = true;
                     return Ok(());
                 }
+                _ => {}
             }
         }
 

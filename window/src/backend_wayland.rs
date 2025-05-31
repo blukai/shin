@@ -6,7 +6,8 @@ use anyhow::{Context as _, anyhow};
 use raw_window_handle as rwh;
 
 use crate::{
-    DEFAULT_LOGICAL_SIZE, Window, WindowAttrs, WindowEvent, libwayland_client, libxkbcommon,
+    DEFAULT_LOGICAL_SIZE, Event, PointerButton, PointerButtons, PointerEvent, PointerEventKind,
+    Window, WindowAttrs, WindowEvent, libwayland_client, libxkbcommon,
 };
 
 pub struct WaylandBackend {
@@ -23,16 +24,27 @@ pub struct WaylandBackend {
     wp_viewporter: *mut libwayland_client::wp_viewporter,
     xdg_wm_base: *mut libwayland_client::xdg_wm_base,
 
+    // no window without those
     wl_surface: *mut libwayland_client::wl_surface,
     xdg_surface: *mut libwayland_client::xdg_surface,
     xdg_toplevel: *mut libwayland_client::xdg_toplevel,
+
+    // dpi
     wp_fractional_scale_v1: *mut libwayland_client::wp_fractional_scale_v1,
     wp_viewport: *mut libwayland_client::wp_viewport,
-
     logical_size: Option<(u32, u32)>,
-    fractional_scale: Option<f64>,
+    fractional_scale: Option<f32>,
 
-    events: VecDeque<WindowEvent>,
+    // input
+    wl_pointer: *mut libwayland_client::wl_pointer,
+    pointer_position: (f32, f32),
+    pointer_buttons: PointerButtons,
+    // NOTE: currently i care only about movement and button press/release events. but other kinds
+    // of events will most likely require to store different kind of frame data that PointerEvent
+    // would not be capable of describing?
+    pointer_frame_events: VecDeque<PointerEvent>,
+
+    events: VecDeque<Event>,
 }
 
 unsafe extern "C" fn handle_wl_registry_global(
@@ -164,7 +176,7 @@ unsafe extern "C" fn handle_xdg_toplevel_configure(
     evl.configure(Some(logical_size), None);
 
     evl.events
-        .push_back(WindowEvent::Configure { logical_size });
+        .push_back(Event::Window(WindowEvent::Configure { logical_size }));
 }
 
 unsafe extern "C" fn handle_xdg_toplevel_close(
@@ -174,7 +186,8 @@ unsafe extern "C" fn handle_xdg_toplevel_close(
     log::debug!("recv xdg_toplevel_close");
 
     let evl = unsafe { &mut *(data as *mut WaylandBackend) };
-    evl.events.push_back(WindowEvent::CloseRequested);
+    evl.events
+        .push_back(Event::Window(WindowEvent::CloseRequested));
 }
 
 const XDG_TOPLEVEL_LISTENER: libwayland_client::xdg_toplevel_listener =
@@ -193,26 +206,117 @@ unsafe extern "C" fn handle_wp_fractional_scale_v1_preferred_scale(
     log::debug!("recv wp_fractional_scale_v1_preferred_scale");
 
     // > The sent scale is the numerator of a fraction with a denominator of 120.
-    let fractional_scale = scale as f64 / 120.0;
+    let fractional_scale = scale as f32 / 120.0;
 
     let evl = unsafe { &mut *(data as *mut WaylandBackend) };
 
     evl.configure(None, Some(fractional_scale));
 
-    evl.events.push_back(WindowEvent::Resize {
+    evl.events.push_back(Event::Window(WindowEvent::Resize {
         physical_size: {
             let logical_size = evl.logical_size.expect("logical size");
             (
-                (logical_size.0 as f64 * fractional_scale) as u32,
-                (logical_size.1 as f64 * fractional_scale) as u32,
+                (logical_size.0 as f32 * fractional_scale) as u32,
+                (logical_size.1 as f32 * fractional_scale) as u32,
             )
         },
-    });
+    }));
 }
 
 const WP_FRACTIONAL_SCALE_MANAGER_V1_LISTENER: libwayland_client::wp_fractional_scale_v1_listener =
     libwayland_client::wp_fractional_scale_v1_listener {
         preferred_scale: handle_wp_fractional_scale_v1_preferred_scale,
+    };
+
+unsafe extern "C" fn handle_wl_pointer_motion(
+    data: *mut std::ffi::c_void,
+    _wl_pointer: *mut libwayland_client::wl_pointer,
+    _time: u32,
+    surface_x: libwayland_client::wl_fixed,
+    surface_y: libwayland_client::wl_fixed,
+) {
+    let evl = unsafe { &mut *(data as *mut WaylandBackend) };
+
+    let prev_pos = evl.pointer_position;
+    let next_pos = (
+        libwayland_client::wl_fixed_to_f32(surface_x),
+        libwayland_client::wl_fixed_to_f32(surface_y),
+    );
+    let delta = (next_pos.0 - prev_pos.0, next_pos.1 - prev_pos.1);
+
+    evl.pointer_position = next_pos;
+    evl.pointer_frame_events.push_back(PointerEvent {
+        kind: PointerEventKind::Motion { delta },
+        position: next_pos,
+        buttons: evl.pointer_buttons,
+    });
+}
+
+// https://github.com/torvalds/linux/blob/231825b2e1ff6ba799c5eaf396d3ab2354e37c6b/include/uapi/linux/input-event-codes.h#L356
+const BTN_LEFT: u32 = 0x110;
+const BTN_RIGHT: u32 = 0x111;
+const BTN_MIDDLE: u32 = 0x112;
+
+#[inline]
+fn map_pointer_button(button: u32) -> Option<PointerButton> {
+    match button {
+        BTN_LEFT => Some(PointerButton::Primary),
+        BTN_RIGHT => Some(PointerButton::Secondary),
+        BTN_MIDDLE => Some(PointerButton::Tertiary),
+        _ => None,
+    }
+}
+
+unsafe extern "C" fn handle_wl_pointer_button(
+    data: *mut std::ffi::c_void,
+    _wl_pointer: *mut libwayland_client::wl_pointer,
+    _serial: u32,
+    _time: u32,
+    button: u32,
+    state: u32,
+) {
+    let Some(button) = map_pointer_button(button) else {
+        log::debug!("unidentified pointer button: {button}");
+        return;
+    };
+
+    let evl = unsafe { &mut *(data as *mut WaylandBackend) };
+
+    let pressed = state == libwayland_client::WL_POINTER_BUTTON_STATE_PRESSED;
+    evl.pointer_buttons.set(button, pressed);
+    evl.pointer_frame_events.push_back(PointerEvent {
+        kind: if pressed {
+            PointerEventKind::Press { button }
+        } else {
+            PointerEventKind::Release { button }
+        },
+        position: evl.pointer_position,
+        buttons: evl.pointer_buttons,
+    });
+}
+
+unsafe extern "C" fn handle_wl_pointer_frame(
+    data: *mut std::ffi::c_void,
+    _wl_pointer: *mut libwayland_client::wl_pointer,
+) {
+    let evl = unsafe { &mut *(data as *mut WaylandBackend) };
+    evl.events
+        .extend(evl.pointer_frame_events.drain(..).map(Event::Pointer));
+}
+
+const WL_POINTER_LISTENER: libwayland_client::wl_pointer_listener =
+    libwayland_client::wl_pointer_listener {
+        enter: libwayland_client::noop_listener!(),
+        leave: libwayland_client::noop_listener!(),
+        motion: handle_wl_pointer_motion,
+        button: handle_wl_pointer_button,
+        frame: handle_wl_pointer_frame,
+        axis: libwayland_client::noop_listener!(),
+        axis_source: libwayland_client::noop_listener!(),
+        axis_stop: libwayland_client::noop_listener!(),
+        axis_discrete: libwayland_client::noop_listener!(),
+        axis_value120: libwayland_client::noop_listener!(),
+        axis_relative_direction: libwayland_client::noop_listener!(),
     };
 
 impl WaylandBackend {
@@ -241,11 +345,16 @@ impl WaylandBackend {
             wl_surface: null_mut(),
             xdg_surface: null_mut(),
             xdg_toplevel: null_mut(),
+
             wp_fractional_scale_v1: null_mut(),
             wp_viewport: null_mut(),
-
             logical_size: None,
             fractional_scale: None,
+
+            wl_pointer: null_mut(),
+            pointer_position: (0.0, 0.0),
+            pointer_buttons: PointerButtons::default(),
+            pointer_frame_events: VecDeque::new(),
 
             events: VecDeque::new(),
         });
@@ -269,6 +378,7 @@ impl WaylandBackend {
             );
             (boxed.libwayland_client.wl_display_roundtrip)(boxed.wl_display.as_ptr());
         }
+
         assert!(!boxed.wl_compositor.is_null());
         assert!(!boxed.wl_seat.is_null());
         assert!(!boxed.xdg_wm_base.is_null());
@@ -280,8 +390,8 @@ impl WaylandBackend {
                 boxed.xdg_wm_base as *mut libwayland_client::wl_proxy,
                 &XDG_WM_BASE_LISTENER as *const libwayland_client::xdg_wm_base_listener as _,
                 boxed.as_mut() as *mut WaylandBackend as *mut c_void,
-            );
-        }
+            )
+        };
 
         // init window
 
@@ -310,8 +420,8 @@ impl WaylandBackend {
                 boxed.xdg_surface as *mut libwayland_client::wl_proxy,
                 &XDG_SURFACE_LISTENER as *const libwayland_client::xdg_surface_listener as _,
                 boxed.as_mut() as *mut WaylandBackend as *mut c_void,
-            );
-        }
+            )
+        };
 
         boxed.xdg_toplevel = unsafe {
             libwayland_client::xdg_surface_get_toplevel(&boxed.libwayland_client, boxed.xdg_surface)
@@ -324,8 +434,8 @@ impl WaylandBackend {
                 boxed.xdg_toplevel as *mut libwayland_client::wl_proxy,
                 &XDG_TOPLEVEL_LISTENER as *const libwayland_client::xdg_toplevel_listener as _,
                 boxed.as_mut() as *mut WaylandBackend as *mut c_void,
-            );
-        }
+            )
+        };
 
         if !boxed.attrs.resizable {
             let logical_size = boxed.attrs.logical_size.unwrap_or(DEFAULT_LOGICAL_SIZE);
@@ -345,7 +455,8 @@ impl WaylandBackend {
             };
         }
 
-        // scale factor
+        // dpi
+
         if !boxed.wp_fractional_scale_manager_v1.is_null() {
             boxed.wp_fractional_scale_v1 = unsafe {
                 libwayland_client::wp_fractional_scale_manager_v1_get_fractional_scale(
@@ -364,8 +475,8 @@ impl WaylandBackend {
                         as *const libwayland_client::wp_fractional_scale_v1_listener
                         as _,
                     boxed.as_mut() as *mut WaylandBackend as *mut c_void,
-                );
-            }
+                )
+            };
         }
 
         if !boxed.wp_viewporter.is_null() {
@@ -374,6 +485,24 @@ impl WaylandBackend {
                     &boxed.libwayland_client,
                     boxed.wp_viewporter,
                     boxed.wl_surface,
+                )
+            };
+        }
+
+        // input
+
+        if !boxed.wl_seat.is_null() {
+            boxed.wl_pointer = unsafe {
+                libwayland_client::wl_seat_get_pointer(&boxed.libwayland_client, boxed.wl_seat)
+            };
+            if boxed.wl_pointer.is_null() {
+                return Err(anyhow!("could not get pointer"));
+            }
+            unsafe {
+                (boxed.libwayland_client.wl_proxy_add_listener)(
+                    boxed.wl_pointer as *mut libwayland_client::wl_proxy,
+                    &WL_POINTER_LISTENER as *const libwayland_client::wl_pointer_listener as _,
+                    boxed.as_mut() as *mut WaylandBackend as *mut c_void,
                 )
             };
         }
@@ -388,7 +517,7 @@ impl WaylandBackend {
         Ok(boxed)
     }
 
-    fn configure(&mut self, logical_size: Option<(u32, u32)>, fractional_scale: Option<f64>) {
+    fn configure(&mut self, logical_size: Option<(u32, u32)>, fractional_scale: Option<f32>) {
         if logical_size.is_some() {
             self.logical_size = logical_size;
         }
@@ -444,7 +573,7 @@ impl Window for WaylandBackend {
         Ok(())
     }
 
-    fn pop_event(&mut self) -> Option<WindowEvent> {
+    fn pop_event(&mut self) -> Option<Event> {
         self.events.pop_back()
     }
 }
