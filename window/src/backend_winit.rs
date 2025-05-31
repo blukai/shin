@@ -4,13 +4,30 @@ use anyhow::{Context, anyhow};
 use raw_window_handle as rwh;
 use winit::platform::pump_events::EventLoopExtPumpEvents;
 
-use crate::{DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent};
+use crate::{
+    DEFAULT_LOGICAL_SIZE, Event, PointerButton, PointerButtons, PointerEvent, PointerEventKind,
+    Window, WindowAttrs, WindowEvent,
+};
+
+#[inline]
+fn map_pointer_button(button: winit::event::MouseButton) -> Option<PointerButton> {
+    use winit::event::MouseButton;
+    match button {
+        MouseButton::Left => Some(PointerButton::Primary),
+        MouseButton::Right => Some(PointerButton::Secondary),
+        MouseButton::Middle => Some(PointerButton::Tertiary),
+        _ => None,
+    }
+}
 
 struct App {
     window_attrs: WindowAttrs,
 
     window: Option<winit::window::Window>,
     window_create_error: Option<winit::error::OsError>,
+
+    pointer_position: (f32, f32),
+    pointer_buttons: PointerButtons,
 
     events: VecDeque<Event>,
 }
@@ -57,18 +74,50 @@ impl winit::application::ApplicationHandler for App {
         let window = self.window.as_ref().unwrap();
         assert!(window.id() == window_id);
 
-        let maybe_window_event = match window_event {
-            winit::event::WindowEvent::Resized(physical_size) => Some(WindowEvent::Resize {
+        use winit::event::WindowEvent::*;
+        let maybe_event = match window_event {
+            Resized(physical_size) => Some(Event::Window(WindowEvent::Resize {
                 physical_size: (physical_size.width, physical_size.height),
-            }),
-            winit::event::WindowEvent::CloseRequested => Some(WindowEvent::CloseRequested),
-            window_event => {
-                log::debug!("unused window event: {window_event:?}");
+            })),
+            CursorMoved { position, .. } => {
+                let prev_pos = self.pointer_position;
+                let next_pos = (position.x as f32, position.y as f32);
+                let delta = (next_pos.0 - prev_pos.0, next_pos.1 - prev_pos.1);
+
+                self.pointer_position = next_pos;
+                Some(Event::Pointer(PointerEvent {
+                    kind: PointerEventKind::Motion { delta },
+                    position: next_pos,
+                    buttons: self.pointer_buttons,
+                }))
+            }
+            MouseInput { state, button, .. } => {
+                if let Some(button) = map_pointer_button(button) {
+                    let pressed = state.is_pressed();
+
+                    self.pointer_buttons.set(button, pressed);
+                    Some(Event::Pointer(PointerEvent {
+                        kind: if pressed {
+                            PointerEventKind::Press { button }
+                        } else {
+                            PointerEventKind::Release { button }
+                        },
+                        position: self.pointer_position,
+                        buttons: self.pointer_buttons,
+                    }))
+                } else {
+                    None
+                }
+            }
+
+            CloseRequested => Some(Event::Window(WindowEvent::CloseRequested)),
+            other => {
+                log::debug!("unused window event: {other:?}");
                 None
             }
         };
-        if let Some(window_event) = maybe_window_event {
-            self.events.push_back(Event::Window(window_event));
+        if let Some(event) = maybe_event {
+            self.events.push_back(event);
         }
     }
 }
@@ -82,6 +131,9 @@ impl WinitBackend {
 
                 window: None,
                 window_create_error: None,
+
+                pointer_position: (0.0, 0.0),
+                pointer_buttons: PointerButtons::default(),
 
                 events: VecDeque::new(),
             },

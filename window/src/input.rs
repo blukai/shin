@@ -6,9 +6,9 @@ pub enum PointerButton {
     /// equivalent to left mouse button
     Primary = 1,
     /// equivalent to right mouse button
-    Secondary = 1 << 2,
+    Secondary = 1 << 1,
     /// equivalent to middle mouse button
-    Tertiary = 1 << 3,
+    Tertiary = 1 << 2,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
