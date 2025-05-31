@@ -137,7 +137,9 @@ impl Context {
         self.window.pump_events()?;
 
         while let Some(event) = self.window.pop_event() {
-            log::debug!("event: {event:?}");
+            if !matches!(event, Event::Pointer(_)) {
+                log::debug!("event: {event:?}");
+            }
 
             match event {
                 Event::Window(WindowEvent::Configure { logical_size }) => {

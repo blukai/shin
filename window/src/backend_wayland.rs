@@ -28,6 +28,7 @@ pub struct WaylandBackend {
     wl_surface: *mut libwayland_client::wl_surface,
     xdg_surface: *mut libwayland_client::xdg_surface,
     xdg_toplevel: *mut libwayland_client::xdg_toplevel,
+    acked_first_xdg_surface_ack_configure: bool,
 
     // dpi
     wp_fractional_scale_v1: *mut libwayland_client::wp_fractional_scale_v1,
@@ -145,6 +146,7 @@ unsafe extern "C" fn handle_xdg_surface_configure(
     unsafe {
         libwayland_client::xdg_surface_ack_configure(&evl.libwayland_client, xdg_surface, serial)
     };
+    evl.acked_first_xdg_surface_ack_configure = true;
 }
 
 const XDG_SURFACE_LISTENER: libwayland_client::xdg_surface_listener =
@@ -163,20 +165,15 @@ unsafe extern "C" fn handle_xdg_toplevel_configure(
 
     let evl = unsafe { &mut *(data as *mut WaylandBackend) };
 
-    assert!(width >= 0 && height >= 0);
     // NOTE: if the width or height arguments are zero, it means the client should decide its own
     // window dimension.
-    let logical_size = if width > 0 || height > 0 {
-        Some((width as u32, height as u32))
-    } else {
-        evl.attrs.logical_size
-    }
-    .unwrap_or(DEFAULT_LOGICAL_SIZE);
+    assert!(width >= 0 && height >= 0);
+    let logical_size = (width > 0 || height > 0)
+        .then_some((width as u32, height as u32))
+        .or(evl.logical_size)
+        .unwrap_or(DEFAULT_LOGICAL_SIZE);
 
-    evl.configure(Some(logical_size), None);
-
-    evl.events
-        .push_back(Event::Window(WindowEvent::Configure { logical_size }));
+    evl.maybe_resize(Some(logical_size), None);
 }
 
 unsafe extern "C" fn handle_xdg_toplevel_close(
@@ -209,18 +206,7 @@ unsafe extern "C" fn handle_wp_fractional_scale_v1_preferred_scale(
     let fractional_scale = scale as f32 / 120.0;
 
     let evl = unsafe { &mut *(data as *mut WaylandBackend) };
-
-    evl.configure(None, Some(fractional_scale));
-
-    evl.events.push_back(Event::Window(WindowEvent::Resize {
-        physical_size: {
-            let logical_size = evl.logical_size.expect("logical size");
-            (
-                (logical_size.0 as f32 * fractional_scale) as u32,
-                (logical_size.1 as f32 * fractional_scale) as u32,
-            )
-        },
-    }));
+    evl.maybe_resize(None, Some(fractional_scale));
 }
 
 const WP_FRACTIONAL_SCALE_MANAGER_V1_LISTENER: libwayland_client::wp_fractional_scale_v1_listener =
@@ -345,6 +331,7 @@ impl WaylandBackend {
             wl_surface: null_mut(),
             xdg_surface: null_mut(),
             xdg_toplevel: null_mut(),
+            acked_first_xdg_surface_ack_configure: false,
 
             wp_fractional_scale_v1: null_mut(),
             wp_viewport: null_mut(),
@@ -507,39 +494,69 @@ impl WaylandBackend {
             };
         }
 
-        unsafe {
-            libwayland_client::wl_surface_commit(&boxed.libwayland_client, boxed.wl_surface);
-            (boxed.libwayland_client.wl_display_roundtrip)(boxed.wl_display.as_ptr());
-        }
+        // finalize
+
+        unsafe { libwayland_client::wl_surface_commit(&boxed.libwayland_client, boxed.wl_surface) };
+        unsafe { (boxed.libwayland_client.wl_display_roundtrip)(boxed.wl_display.as_ptr()) };
+        assert!(boxed.acked_first_xdg_surface_ack_configure);
+        boxed
+            .events
+            .push_back(Event::Window(WindowEvent::Configure {
+                logical_size: boxed.logical_size.expect("configured logical size"),
+            }));
 
         log::info!("initialized window");
 
         Ok(boxed)
     }
 
-    fn configure(&mut self, logical_size: Option<(u32, u32)>, fractional_scale: Option<f32>) {
-        if logical_size.is_some() {
-            self.logical_size = logical_size;
-        }
-        if fractional_scale.is_some() {
-            self.fractional_scale = fractional_scale;
+    fn maybe_resize(&mut self, logical_size: Option<(u32, u32)>, fractional_scale: Option<f32>) {
+        assert!(logical_size.is_some() || fractional_scale.is_some());
+
+        let mut logical_size_changed = false;
+        if let Some(logical_size) = logical_size {
+            logical_size_changed = self.logical_size != Some(logical_size);
+            if logical_size_changed {
+                self.logical_size = Some(logical_size);
+
+                if !self.wp_viewport.is_null() {
+                    unsafe {
+                        libwayland_client::wp_viewport_set_destination(
+                            &self.libwayland_client,
+                            self.wp_viewport,
+                            logical_size.0 as i32,
+                            logical_size.1 as i32,
+                        );
+                        assert!(!self.wl_surface.is_null());
+                        libwayland_client::wl_surface_commit(
+                            &self.libwayland_client,
+                            self.wl_surface,
+                        );
+                    }
+                }
+            }
         }
 
-        if self.wp_viewport.is_null() {
+        let mut fractional_scale_changed = false;
+        if let Some(fractional_scale) = fractional_scale {
+            fractional_scale_changed = self.fractional_scale != Some(fractional_scale);
+            if fractional_scale_changed {
+                self.fractional_scale = Some(fractional_scale);
+            }
+        }
+
+        if !logical_size_changed && !fractional_scale_changed {
             return;
         }
 
         let logical_size = self.logical_size.expect("logical size");
-        unsafe {
-            libwayland_client::wp_viewport_set_destination(
-                &self.libwayland_client,
-                self.wp_viewport,
-                logical_size.0 as i32,
-                logical_size.1 as i32,
-            );
-            assert!(!self.wl_surface.is_null());
-            libwayland_client::wl_surface_commit(&self.libwayland_client, self.wl_surface);
-        }
+        let fractional_scale = self.fractional_scale.unwrap_or(1.0);
+        let physical_size = (
+            (logical_size.0 as f32 * fractional_scale) as u32,
+            (logical_size.1 as f32 * fractional_scale) as u32,
+        );
+        self.events
+            .push_back(Event::Window(WindowEvent::Resize { physical_size }));
     }
 }
 
