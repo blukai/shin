@@ -24,12 +24,12 @@ pub struct Config {
 }
 
 pub struct Context {
-    // NOTE: dynlib needs to remain open for the lifetime of the program.
-    _dynlib: DynLib,
     lib: libegl::Api,
     config: libegl::EGLConfig,
     context: libegl::EGLContext,
     display: libegl::EGLDisplay,
+
+    _dynlib: DynLib,
 }
 
 impl Context {
@@ -123,11 +123,12 @@ impl Context {
             }
 
             Ok(Context {
-                _dynlib: dynlib,
                 lib,
                 display,
                 config,
                 context,
+
+                _dynlib: dynlib,
             })
         }
     }

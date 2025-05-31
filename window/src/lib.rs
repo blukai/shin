@@ -9,6 +9,8 @@ pub use input::*;
 #[cfg(unix)]
 pub mod libwayland_client;
 #[cfg(unix)]
+pub mod libwayland_cursor;
+#[cfg(unix)]
 pub mod libxkbcommon;
 
 #[cfg(unix)]

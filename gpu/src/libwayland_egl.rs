@@ -21,7 +21,7 @@ pub struct Lib {
         dy: c_int,
     ),
 
-    _lib: DynLib,
+    _dynlib: DynLib,
 }
 
 unsafe impl Sync for Lib {}
@@ -29,15 +29,15 @@ unsafe impl Send for Lib {}
 
 impl Lib {
     pub fn load() -> anyhow::Result<Self> {
-        let lib =
+        let dynlib =
             DynLib::open(c"libwayland-egl.so").or_else(|_| DynLib::open(c"libwayland-egl.so.1"))?;
 
         Ok(Self {
-            wl_egl_window_create: lib.lookup(c"wl_egl_window_create")?,
-            wl_egl_window_destroy: lib.lookup(c"wl_egl_window_destroy")?,
-            wl_egl_window_resize: lib.lookup(c"wl_egl_window_resize")?,
+            wl_egl_window_create: dynlib.lookup(c"wl_egl_window_create")?,
+            wl_egl_window_destroy: dynlib.lookup(c"wl_egl_window_destroy")?,
+            wl_egl_window_resize: dynlib.lookup(c"wl_egl_window_resize")?,
 
-            _lib: lib,
+            _dynlib: dynlib,
         })
     }
 }

@@ -141,7 +141,6 @@ pub fn parse_protocol<'a>(input: &'a str) -> anyhow::Result<Protocol<'a>> {
             Element::StartTag(e) => match e.name {
                 "protocol" => {
                     for attr in e.iter_attrs() {
-                        #[expect(clippy::single_match)]
                         match attr.key {
                             "name" => protocol.name = attr.value,
                             _ => {}

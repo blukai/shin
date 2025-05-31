@@ -11,20 +11,20 @@ use crate::{
 };
 
 pub struct WaylandBackend {
-    attrs: WindowAttrs,
-
     libwayland_client: libwayland_client::Lib,
     libxkbcommon: libxkbcommon::Lib,
 
     wl_display: NonNull<libwayland_client::wl_display>,
 
+    // interfaces
     wl_compositor: *mut libwayland_client::wl_compositor,
     wl_seat: *mut libwayland_client::wl_seat,
     wp_fractional_scale_manager_v1: *mut libwayland_client::wp_fractional_scale_manager_v1,
     wp_viewporter: *mut libwayland_client::wp_viewporter,
     xdg_wm_base: *mut libwayland_client::xdg_wm_base,
 
-    // no window without those
+    // window
+    attrs: WindowAttrs,
     wl_surface: *mut libwayland_client::wl_surface,
     xdg_surface: *mut libwayland_client::xdg_surface,
     xdg_toplevel: *mut libwayland_client::xdg_toplevel,
@@ -315,8 +315,6 @@ impl WaylandBackend {
                 .context("could not connect to wayland display")?;
 
         let mut boxed = Box::new(WaylandBackend {
-            attrs,
-
             libwayland_client,
             libxkbcommon,
 
@@ -328,6 +326,7 @@ impl WaylandBackend {
             wp_viewporter: null_mut(),
             xdg_wm_base: null_mut(),
 
+            attrs,
             wl_surface: null_mut(),
             xdg_surface: null_mut(),
             xdg_toplevel: null_mut(),

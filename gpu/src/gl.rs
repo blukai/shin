@@ -5,7 +5,6 @@ pub(crate) mod types {
 }
 
 #[allow(non_upper_case_globals)]
-#[allow(dead_code)]
 pub(crate) mod enums {
     use super::types::*;
 

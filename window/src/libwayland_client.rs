@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 #![allow(non_camel_case_types)]
 
 use std::ffi::{c_char, c_int, c_void};
@@ -73,39 +72,34 @@ pub struct Lib {
         ...
     ) -> *mut wl_proxy,
 
-    _dl: DynLib,
+    _dynlib: DynLib,
 }
 
 impl Lib {
     pub fn load() -> anyhow::Result<Self> {
-        let dl = DynLib::open(c"libwayland-client.so")
+        let dynlib = DynLib::open(c"libwayland-client.so")
             .or_else(|_| DynLib::open(c"libwayland-client.so.0"))?;
 
         Ok(Self {
-            wl_display_connect: dl.lookup(c"wl_display_connect")?,
-            wl_display_disconnect: dl.lookup(c"wl_display_disconnect")?,
-            wl_display_dispatch: dl.lookup(c"wl_display_dispatch")?,
-            wl_display_dispatch_pending: dl.lookup(c"wl_display_dispatch_pending")?,
-            wl_display_roundtrip: dl.lookup(c"wl_display_roundtrip")?,
-            wl_display_flush: dl.lookup(c"wl_display_flush")?,
+            wl_display_connect: dynlib.lookup(c"wl_display_connect")?,
+            wl_display_disconnect: dynlib.lookup(c"wl_display_disconnect")?,
+            wl_display_dispatch: dynlib.lookup(c"wl_display_dispatch")?,
+            wl_display_dispatch_pending: dynlib.lookup(c"wl_display_dispatch_pending")?,
+            wl_display_roundtrip: dynlib.lookup(c"wl_display_roundtrip")?,
+            wl_display_flush: dynlib.lookup(c"wl_display_flush")?,
 
-            wl_proxy_add_listener: dl.lookup(c"wl_proxy_add_listener")?,
-            wl_proxy_destroy: dl.lookup(c"wl_proxy_destroy")?,
-            wl_proxy_get_version: dl.lookup(c"wl_proxy_get_version")?,
-            wl_proxy_marshal_flags: dl.lookup(c"wl_proxy_marshal_flags")?,
+            wl_proxy_add_listener: dynlib.lookup(c"wl_proxy_add_listener")?,
+            wl_proxy_destroy: dynlib.lookup(c"wl_proxy_destroy")?,
+            wl_proxy_get_version: dynlib.lookup(c"wl_proxy_get_version")?,
+            wl_proxy_marshal_flags: dynlib.lookup(c"wl_proxy_marshal_flags")?,
 
-            _dl: dl,
+            _dynlib: dynlib,
         })
     }
 }
 
+#[allow(non_upper_case_globals)]
 mod generated {
-    #![allow(clippy::missing_safety_doc)]
-    #![allow(clippy::too_many_arguments)]
-    #![allow(dead_code)]
-    #![allow(non_camel_case_types)]
-    #![allow(non_upper_case_globals)]
-
     include!(concat!(env!("OUT_DIR"), "/wayland_generated.rs"));
 }
 pub use generated::*;

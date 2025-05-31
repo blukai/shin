@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 #![allow(non_camel_case_types)]
 
 use std::ffi::{c_char, c_int};
@@ -94,29 +93,29 @@ pub struct Lib {
         locked_group: xkb_layout_index_t,
     ) -> c_int, // xkb_state_component
 
-    _dl: DynLib,
+    _dynlib: DynLib,
 }
 
 impl Lib {
     pub fn load() -> anyhow::Result<Self> {
-        let dl = DynLib::open(c"libxkbcommon.so")
+        let dynlib = DynLib::open(c"libxkbcommon.so")
             .or_else(|_| DynLib::open(c"libxkbcommon.so.0"))
             .or_else(|_| DynLib::open(c"libxkbcommon.so.0.0.0"))?;
 
         Ok(Self {
-            xkb_context_new: dl.lookup(c"xkb_context_new")?,
-            xkb_context_unref: dl.lookup(c"xkb_context_unref")?,
+            xkb_context_new: dynlib.lookup(c"xkb_context_new")?,
+            xkb_context_unref: dynlib.lookup(c"xkb_context_unref")?,
 
-            xkb_keymap_mod_get_index: dl.lookup(c"xkb_keymap_mod_get_index")?,
-            xkb_keymap_new_from_string: dl.lookup(c"xkb_keymap_new_from_string")?,
-            xkb_keymap_unref: dl.lookup(c"xkb_keymap_unref")?,
+            xkb_keymap_mod_get_index: dynlib.lookup(c"xkb_keymap_mod_get_index")?,
+            xkb_keymap_new_from_string: dynlib.lookup(c"xkb_keymap_new_from_string")?,
+            xkb_keymap_unref: dynlib.lookup(c"xkb_keymap_unref")?,
 
-            xkb_state_mod_index_is_active: dl.lookup(c"xkb_state_mod_index_is_active")?,
-            xkb_state_new: dl.lookup(c"xkb_state_new")?,
-            xkb_state_unref: dl.lookup(c"xkb_state_unref")?,
-            xkb_state_update_mask: dl.lookup(c"xkb_state_update_mask")?,
+            xkb_state_mod_index_is_active: dynlib.lookup(c"xkb_state_mod_index_is_active")?,
+            xkb_state_new: dynlib.lookup(c"xkb_state_new")?,
+            xkb_state_unref: dynlib.lookup(c"xkb_state_unref")?,
+            xkb_state_update_mask: dynlib.lookup(c"xkb_state_update_mask")?,
 
-            _dl: dl,
+            _dynlib: dynlib,
         })
     }
 }
