@@ -64,11 +64,23 @@ impl<R: Renderer> Context<R> {
     ) {
         let font = self.font_service.get_font(font_handle);
 
-        if let Some(settings) = maybe_settings {
-            self.text_layout.reset(settings);
-        } else {
-            self.text_layout.clear();
-        }
+        self.text_layout.reset(maybe_settings.unwrap_or(
+            const {
+                // NOTE: Default trait is not const, this is copypasta from TextLayoutSttings
+                // Default impl. so stupid.
+                &TextLayoutSttings {
+                    x: 0.0,
+                    y: 0.0,
+                    max_width: None,
+                    max_height: None,
+                    horizontal_align: TextHAlign::Left,
+                    vertical_align: TextVAlign::Top,
+                    line_height: 1.0,
+                    wrap_style: TextWrapStyle::Word,
+                    wrap_hard_breaks: true,
+                }
+            },
+        ));
 
         self.text_layout
             .append(&[&font.fontdue_font], &TextStyle::new(text, font.size, 0));
