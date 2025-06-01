@@ -52,6 +52,7 @@ pub enum Event {
 pub trait Window: rwh::HasDisplayHandle + rwh::HasWindowHandle {
     fn pump_events(&mut self) -> anyhow::Result<()>;
     fn pop_event(&mut self) -> Option<Event>;
+    fn set_cursor_shape(&mut self, cursor_shape: CursorShape) -> anyhow::Result<()>;
 }
 
 pub fn create_window(window_attrs: WindowAttrs) -> anyhow::Result<Box<dyn Window>> {

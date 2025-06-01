@@ -5,8 +5,8 @@ use raw_window_handle as rwh;
 use winit::platform::pump_events::EventLoopExtPumpEvents;
 
 use crate::{
-    DEFAULT_LOGICAL_SIZE, Event, PointerButton, PointerButtons, PointerEvent, PointerEventKind,
-    Window, WindowAttrs, WindowEvent,
+    CursorShape, DEFAULT_LOGICAL_SIZE, Event, PointerButton, PointerButtons, PointerEvent,
+    PointerEventKind, Window, WindowAttrs, WindowEvent,
 };
 
 #[inline]
@@ -18,6 +18,15 @@ fn map_pointer_button(button: winit::event::MouseButton) -> Option<PointerButton
         MouseButton::Middle => Some(PointerButton::Tertiary),
         _ => None,
     }
+}
+
+#[inline]
+fn map_cursor_shape(cursor_shape: CursorShape) -> winit::window::Cursor {
+    use winit::window::{Cursor, CursorIcon};
+    Cursor::Icon(match cursor_shape {
+        CursorShape::Default => CursorIcon::Default,
+        CursorShape::Pointer => CursorIcon::Pointer,
+    })
 }
 
 struct App {
@@ -176,5 +185,12 @@ impl Window for WinitBackend {
 
     fn pop_event(&mut self) -> Option<Event> {
         self.app.events.pop_back()
+    }
+
+    fn set_cursor_shape(&mut self, cursor_shape: CursorShape) -> anyhow::Result<()> {
+        if let Some(ref mut window) = self.app.window {
+            window.set_cursor(map_cursor_shape(cursor_shape));
+        }
+        Ok(())
     }
 }

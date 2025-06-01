@@ -4,7 +4,7 @@ use std::ffi::CString;
 use anyhow::anyhow;
 use raw_window_handle as rwh;
 
-use crate::{DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent};
+use crate::{CursorShape, DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent};
 
 pub mod js_sys {
     use std::ffi::{c_char, c_void};
@@ -92,5 +92,9 @@ impl Window for WebBackend {
 
     fn pop_event(&mut self) -> Option<Event> {
         self.events.pop_back()
+    }
+
+    fn set_cursor_shape(&mut self, cursor_shape: CursorShape) -> anyhow::Result<()> {
+        unimplemented!()
     }
 }

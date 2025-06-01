@@ -1,5 +1,11 @@
 use std::hash::Hash;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CursorShape {
+    Default,
+    Pointer,
+}
+
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PointerButton {
