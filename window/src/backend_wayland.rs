@@ -7,9 +7,9 @@ use anyhow::{Context as _, anyhow};
 use raw_window_handle as rwh;
 
 use crate::{
-    CursorShape, DEFAULT_LOGICAL_SIZE, Event, PointerButton, PointerButtons, PointerEvent,
-    PointerEventKind, Window, WindowAttrs, WindowEvent, libwayland_client, libwayland_cursor,
-    libxkbcommon,
+    CursorShape, DEFAULT_LOGICAL_SIZE, Event, KeyboardEvent, KeyboardEventKind, PointerButton,
+    PointerButtons, PointerEvent, PointerEventKind, Scancode, Window, WindowAttrs, WindowEvent,
+    libwayland_client, libwayland_cursor, libxkbcommon,
 };
 
 // https://github.com/torvalds/linux/blob/231825b2e1ff6ba799c5eaf396d3ab2354e37c6b/include/uapi/linux/input-event-codes.h#L356
@@ -58,9 +58,30 @@ fn map_cursor_shape(cursor_shape: CursorShape) -> &'static CStr {
     }
 }
 
+// https://github.com/torvalds/linux/blob/231825b2e1ff6ba799c5eaf396d3ab2354e37c6b/include/uapi/linux/input-event-codes.h#L76
+
+const KEY_ESC: u32 = 1;
+const KEY_W: u32 = 17;
+const KEY_A: u32 = 30;
+const KEY_S: u32 = 31;
+const KEY_D: u32 = 32;
+
+#[inline]
+fn map_keyboard_key(key: u32) -> Option<Scancode> {
+    match key {
+        KEY_ESC => Some(Scancode::Esc),
+        KEY_W => Some(Scancode::W),
+        KEY_A => Some(Scancode::A),
+        KEY_S => Some(Scancode::S),
+        KEY_D => Some(Scancode::D),
+        _ => None,
+    }
+}
+
 #[derive(PartialEq, Eq, Hash)]
 enum SerialType {
     PointerEnter,
+    KeyboardEnter,
 }
 
 #[derive(Default)]
@@ -121,6 +142,9 @@ pub struct WaylandBackend {
     wl_pointer: *mut libwayland_client::wl_pointer,
     cursor_theme: *mut libwayland_cursor::wl_cursor_theme,
     cursor_surface: *mut libwayland_client::wl_surface,
+
+    // keyboard
+    wl_keyboard: *mut libwayland_client::wl_keyboard,
 
     serial_tracker: SerialTracker,
     events: VecDeque<Event>,
@@ -283,7 +307,7 @@ const XDG_TOPLEVEL_LISTENER: libwayland_client::xdg_toplevel_listener =
     };
 
 unsafe extern "C" fn handle_wp_fractional_scale_v1_preferred_scale(
-    data: *mut std::ffi::c_void,
+    data: *mut c_void,
     _wp_fractional_scale_v1: *mut libwayland_client::wp_fractional_scale_v1,
     scale: u32,
 ) {
@@ -302,7 +326,7 @@ const WP_FRACTIONAL_SCALE_MANAGER_V1_LISTENER: libwayland_client::wp_fractional_
     };
 
 unsafe extern "C" fn handle_wl_pointer_motion(
-    data: *mut std::ffi::c_void,
+    data: *mut c_void,
     _wl_pointer: *mut libwayland_client::wl_pointer,
     _time: u32,
     surface_x: libwayland_client::wl_fixed,
@@ -326,7 +350,7 @@ unsafe extern "C" fn handle_wl_pointer_motion(
 }
 
 unsafe extern "C" fn handle_wl_pointer_enter(
-    data: *mut std::ffi::c_void,
+    data: *mut c_void,
     _wl_pointer: *mut libwayland_client::wl_pointer,
     serial: u32,
     _surface: *mut libwayland_client::wl_surface,
@@ -344,18 +368,20 @@ unsafe extern "C" fn handle_wl_pointer_enter(
 }
 
 unsafe extern "C" fn handle_wl_pointer_leave(
-    data: *mut std::ffi::c_void,
+    data: *mut c_void,
     _wl_pointer: *mut libwayland_client::wl_pointer,
     _serial: u32,
     _surface: *mut libwayland_client::wl_surface,
 ) {
+    log::debug!("recv wl_pointer_leave");
+
     let evl = unsafe { &mut *(data as *mut WaylandBackend) };
     evl.serial_tracker.reset_serial(SerialType::PointerEnter);
     evl.cursor_shape = None;
 }
 
 unsafe extern "C" fn handle_wl_pointer_button(
-    data: *mut std::ffi::c_void,
+    data: *mut c_void,
     _wl_pointer: *mut libwayland_client::wl_pointer,
     _serial: u32,
     _time: u32,
@@ -383,7 +409,7 @@ unsafe extern "C" fn handle_wl_pointer_button(
 }
 
 unsafe extern "C" fn handle_wl_pointer_frame(
-    data: *mut std::ffi::c_void,
+    data: *mut c_void,
     _wl_pointer: *mut libwayland_client::wl_pointer,
 ) {
     let evl = unsafe { &mut *(data as *mut WaylandBackend) };
@@ -404,6 +430,78 @@ const WL_POINTER_LISTENER: libwayland_client::wl_pointer_listener =
         axis_discrete: libwayland_client::noop_listener!(),
         axis_value120: libwayland_client::noop_listener!(),
         axis_relative_direction: libwayland_client::noop_listener!(),
+    };
+
+// TODO: will need this to be able to map scancodes to keycodes with libxkbcommon.
+unsafe extern "C" fn handle_wl_keyboard_keymap(
+    _data: *mut c_void,
+    _wl_keyboard: *mut libwayland_client::wl_keyboard,
+    _format: u32,
+    _fd: i32,
+    _size: u32,
+) {
+    log::debug!("recv wl_keyboard_keymap");
+}
+
+unsafe extern "C" fn handle_wl_keyboard_enter(
+    data: *mut c_void,
+    _wl_keyboard: *mut libwayland_client::wl_keyboard,
+    serial: u32,
+    _surface: *mut libwayland_client::wl_surface,
+    _keys: *mut libwayland_client::wl_array,
+) {
+    log::debug!("recv wl_keyboard_enter");
+
+    let evl = unsafe { &mut *(data as *mut WaylandBackend) };
+    evl.serial_tracker
+        .update_serial(SerialType::KeyboardEnter, serial);
+}
+
+unsafe extern "C" fn handle_wl_keyboard_leave(
+    data: *mut c_void,
+    _wl_keyboard: *mut libwayland_client::wl_keyboard,
+    _serial: u32,
+    _surface: *mut libwayland_client::wl_surface,
+) {
+    log::debug!("recv wl_keyboard_leave");
+
+    let evl = unsafe { &mut *(data as *mut WaylandBackend) };
+    evl.serial_tracker.reset_serial(SerialType::KeyboardEnter);
+}
+
+unsafe extern "C" fn handle_wl_keyboard_key(
+    data: *mut c_void,
+    _wl_keyboard: *mut libwayland_client::wl_keyboard,
+    _serial: u32,
+    _time: u32,
+    key: u32,
+    state: u32,
+) {
+    let Some(scancode) = map_keyboard_key(key) else {
+        log::debug!("unidentified keyboard key: {key}");
+        return;
+    };
+
+    let evl = unsafe { &mut *(data as *mut WaylandBackend) };
+
+    let pressed = state == libwayland_client::WL_KEYBOARD_KEY_STATE_PRESSED;
+    evl.events.push_back(Event::Keyboard(KeyboardEvent {
+        kind: if pressed {
+            KeyboardEventKind::Press { scancode }
+        } else {
+            KeyboardEventKind::Release { scancode }
+        },
+    }));
+}
+
+const WL_KEYBOARD_LISTENER: libwayland_client::wl_keyboard_listener =
+    libwayland_client::wl_keyboard_listener {
+        keymap: handle_wl_keyboard_keymap,
+        enter: handle_wl_keyboard_enter,
+        leave: handle_wl_keyboard_leave,
+        key: handle_wl_keyboard_key,
+        modifiers: libwayland_client::noop_listener!(),
+        repeat_info: libwayland_client::noop_listener!(),
     };
 
 impl WaylandBackend {
@@ -448,6 +546,8 @@ impl WaylandBackend {
             wl_pointer: null_mut(),
             cursor_theme: null_mut(),
             cursor_surface: null_mut(),
+
+            wl_keyboard: null_mut(),
 
             serial_tracker: SerialTracker::default(),
             events: VecDeque::new(),
@@ -609,6 +709,22 @@ impl WaylandBackend {
         assert!(!boxed.cursor_surface.is_null());
         assert!(boxed.fractional_scale.is_none());
         boxed.load_cursor_theme_for_scale(1.0);
+
+        // keyboard
+
+        boxed.wl_keyboard = unsafe {
+            libwayland_client::wl_seat_get_keyboard(&boxed.libwayland_client, boxed.wl_seat)
+        };
+        if boxed.wl_keyboard.is_null() {
+            return Err(anyhow!("could not get keyboard"));
+        }
+        unsafe {
+            (boxed.libwayland_client.wl_proxy_add_listener)(
+                boxed.wl_keyboard as *mut libwayland_client::wl_proxy,
+                &WL_KEYBOARD_LISTENER as *const libwayland_client::wl_keyboard_listener as _,
+                boxed.as_mut() as *mut WaylandBackend as *mut c_void,
+            )
+        };
 
         // finalize
 

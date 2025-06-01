@@ -5,8 +5,8 @@ use raw_window_handle as rwh;
 use winit::platform::pump_events::EventLoopExtPumpEvents;
 
 use crate::{
-    CursorShape, DEFAULT_LOGICAL_SIZE, Event, PointerButton, PointerButtons, PointerEvent,
-    PointerEventKind, Window, WindowAttrs, WindowEvent,
+    CursorShape, DEFAULT_LOGICAL_SIZE, Event, KeyboardEvent, KeyboardEventKind, PointerButton,
+    PointerButtons, PointerEvent, PointerEventKind, Scancode, Window, WindowAttrs, WindowEvent,
 };
 
 #[inline]
@@ -27,6 +27,19 @@ fn map_cursor_shape(cursor_shape: CursorShape) -> winit::window::Cursor {
         CursorShape::Default => CursorIcon::Default,
         CursorShape::Pointer => CursorIcon::Pointer,
     })
+}
+
+#[inline]
+fn map_keyboard_physical_key(physical_key: winit::keyboard::PhysicalKey) -> Option<Scancode> {
+    use winit::keyboard::{KeyCode, PhysicalKey};
+    match physical_key {
+        PhysicalKey::Code(KeyCode::Escape) => Some(Scancode::Esc),
+        PhysicalKey::Code(KeyCode::KeyW) => Some(Scancode::W),
+        PhysicalKey::Code(KeyCode::KeyA) => Some(Scancode::A),
+        PhysicalKey::Code(KeyCode::KeyS) => Some(Scancode::S),
+        PhysicalKey::Code(KeyCode::KeyD) => Some(Scancode::D),
+        _ => None,
+    }
 }
 
 struct App {
@@ -100,10 +113,9 @@ impl winit::application::ApplicationHandler for App {
                     buttons: self.pointer_buttons,
                 }))
             }
-            MouseInput { state, button, .. } => {
+            MouseInput { button, state, .. } => {
                 if let Some(button) = map_pointer_button(button) {
                     let pressed = state.is_pressed();
-
                     self.pointer_buttons.set(button, pressed);
                     Some(Event::Pointer(PointerEvent {
                         kind: if pressed {
@@ -118,7 +130,20 @@ impl winit::application::ApplicationHandler for App {
                     None
                 }
             }
-
+            KeyboardInput { event, .. } => {
+                if let Some(scancode) = map_keyboard_physical_key(event.physical_key) {
+                    let pressed = event.state.is_pressed();
+                    Some(Event::Keyboard(KeyboardEvent {
+                        kind: if pressed {
+                            KeyboardEventKind::Press { scancode }
+                        } else {
+                            KeyboardEventKind::Release { scancode }
+                        },
+                    }))
+                } else {
+                    None
+                }
+            }
             CloseRequested => Some(Event::Window(WindowEvent::CloseRequested)),
             other => {
                 log::debug!("unused window event: {other:?}");

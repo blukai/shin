@@ -24,11 +24,11 @@ pub struct Config {
 }
 
 pub struct Context {
-    lib: libegl::Api,
     config: libegl::EGLConfig,
     context: libegl::EGLContext,
     display: libegl::EGLDisplay,
 
+    lib: libegl::Api,
     _dynlib: DynLib,
 }
 
@@ -123,11 +123,11 @@ impl Context {
             }
 
             Ok(Context {
-                lib,
                 display,
                 config,
                 context,
 
+                lib,
                 _dynlib: dynlib,
             })
         }

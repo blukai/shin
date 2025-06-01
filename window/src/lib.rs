@@ -14,6 +14,9 @@ pub mod libwayland_cursor;
 pub mod libxkbcommon;
 
 #[cfg(unix)]
+pub mod xkb;
+
+#[cfg(unix)]
 mod backend_wayland;
 
 #[cfg(feature = "winit")]
@@ -47,6 +50,7 @@ pub enum WindowEvent {
 pub enum Event {
     Window(WindowEvent),
     Pointer(PointerEvent),
+    Keyboard(KeyboardEvent),
 }
 
 pub trait Window: rwh::HasDisplayHandle + rwh::HasWindowHandle {
