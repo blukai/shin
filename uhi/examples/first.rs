@@ -6,7 +6,6 @@ use gpu::{
 };
 use raw_window_handle as rwh;
 use std::ffi::c_void;
-use uhi::TextLayoutSttings;
 use window::{Event, Window, WindowAttrs, WindowEvent};
 
 const FONT: &[u8] = include_bytes!("../../fixtures/JetBrainsMono-Regular.ttf");
@@ -90,7 +89,7 @@ impl GraphicsContext {
             "initialized gl version {version}, shading language version {shading_language_version}"
         );
 
-        let mut uhi = uhi::Context::new(false);
+        let mut uhi = uhi::Context::default();
         let uhi_renderer = uhi::GlRenderer::new(&gl)?;
         let font_handle = uhi
             .font_service
@@ -184,25 +183,28 @@ impl Context {
             ref gl,
         }) = self.graphics_context
         {
-            uhi.push_rect(uhi::RectShape::with_fill(
-                uhi::Rect::from_center_size(
-                    Vec2::new(self.window_size.0 as f32, self.window_size.1 as f32) / 2.0,
-                    100.0,
-                ),
+            let window_size = Vec2::new(self.window_size.0 as f32, self.window_size.1 as f32);
+
+            uhi.draw_rect(uhi::RectShape::with_fill(
+                uhi::Rect::from_center_size(window_size / 2.0, 100.0),
                 uhi::Fill::with_color(uhi::Rgba8::FUCHSIA),
             ));
-            uhi.push_text(
-                font_handle,
-                "YO, sailor!",
-                uhi::Rgba8::WHITE,
-                Some(&TextLayoutSttings {
-                    max_width: Some(self.window_size.0 as f32),
-                    max_height: Some(self.window_size.1 as f32),
-                    vertical_align: uhi::TextVAlign::Middle,
-                    horizontal_align: uhi::TextHAlign::Center,
-                    ..TextLayoutSttings::default()
-                }),
-            );
+
+            let text = "YO, sailor!";
+
+            let text_width =
+                uhi.font_service
+                    .get_text_width(text, font_handle, &mut uhi.texture_service);
+            let font_line_height = uhi.font_service.get_font_line_height(font_handle);
+            let text_size = Vec2::new(text_width, font_line_height);
+            let text_position = window_size / 2.0 - text_size / 2.0;
+
+            uhi.draw_rect(uhi::RectShape::with_fill(
+                uhi::Rect::new(text_position, text_position + text_size),
+                uhi::Fill::with_color(uhi::Rgba8::WHITE),
+            ));
+
+            uhi.draw_text(text, font_handle, text_position, uhi::Rgba8::BLACK);
 
             unsafe {
                 egl_context.make_current(egl_surface.as_ptr())?;

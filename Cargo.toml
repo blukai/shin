@@ -4,6 +4,7 @@ members = [
   "dynlib",
   "gl-generator",
   "gpu",
+  "nohash",
   "uhi",
   "wayland-scanner",
   "window",
@@ -25,6 +26,7 @@ winit = "0.30"
 dynlib = { path = "dynlib" }
 gl-generator = { path = "gl-generator" }
 gpu = { path = "gpu" }
+nohash = { path = "nohash" }
 uhi = { path = "uhi" }
 wayland-scanner = { path = "wayland-scanner" }
 window = { path = "window" }

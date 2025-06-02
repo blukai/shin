@@ -383,7 +383,7 @@ checksum = "6b46b9ca4690308844c644e7c634d68792467260e051c8543e0c7871662b3ba7"
 
 [[package]]
 name = "gpu"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "dynlib",
@@ -538,6 +538,10 @@ checksum = "ee6cda3051665f1fb8d9e08fc35c96d5a244fb1be711a03b71118828afc9a873"
 dependencies = [
  "jni-sys",
 ]
+
+[[package]]
+name = "nohash"
+version = "0.0.0"
 
 [[package]]
 name = "num_enum"
@@ -1143,6 +1147,7 @@ dependencies = [
  "glam",
  "gpu",
  "log",
+ "nohash",
  "raw-window-handle",
  "window",
 ]

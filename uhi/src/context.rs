@@ -1,8 +1,7 @@
 pub use fontdue::layout::{
-    HorizontalAlign as TextHAlign, LayoutSettings as TextLayoutSttings,
+    GlyphPosition, HorizontalAlign as TextHAlign, LayoutSettings as TextLayoutSttings,
     VerticalAlign as TextVAlign, WrapStyle as TextWrapStyle,
 };
-use fontdue::layout::{Layout as TextLayout, TextStyle};
 use glam::Vec2;
 
 use crate::{
@@ -14,32 +13,29 @@ pub struct Context<R: Renderer> {
     pub font_service: FontService,
     pub texture_service: TextureService<R>,
 
-    text_layout: fontdue::layout::Layout,
     draw_buffer: DrawBuffer<R>,
 }
 
-impl<R: Renderer> Context<R> {
-    pub fn new(yup: bool) -> Self {
+impl<R: Renderer> Default for Context<R> {
+    fn default() -> Self {
         Self {
             draw_buffer: DrawBuffer::default(),
             texture_service: TextureService::default(),
             font_service: FontService::default(),
-            text_layout: TextLayout::new({
-                use fontdue::layout::CoordinateSystem::*;
-                if yup { PositiveYUp } else { PositiveYDown }
-            }),
         }
     }
+}
 
+impl<R: Renderer> Context<R> {
     // draw buffer delegates
 
     #[inline]
-    pub fn push_line(&mut self, line: LineShape) {
+    pub fn draw_line(&mut self, line: LineShape) {
         self.draw_buffer.push_line(line);
     }
 
     #[inline]
-    pub fn push_rect(&mut self, rect: RectShape<R>) {
+    pub fn draw_rect(&mut self, rect: RectShape<R>) {
         self.draw_buffer.push_rect(rect);
     }
 
@@ -53,59 +49,33 @@ impl<R: Renderer> Context<R> {
         self.draw_buffer.clear();
     }
 
-    // other
+    // text
 
-    pub fn push_text(
-        &mut self,
-        font_handle: FontHandle,
-        text: &str,
-        color: Rgba8,
-        maybe_settings: Option<&TextLayoutSttings>,
-    ) {
-        let font = self.font_service.get_font(font_handle);
+    pub fn draw_text(&mut self, text: &str, font_handle: FontHandle, position: Vec2, color: Rgba8) {
+        let mut x = position.x;
+        for ch in text.chars() {
+            let ch =
+                self.font_service
+                    .get_or_allocate_char(ch, font_handle, &mut self.texture_service);
 
-        self.text_layout.reset(maybe_settings.unwrap_or(
-            const {
-                // NOTE: Default trait is not const, this is copypasta from TextLayoutSttings
-                // Default impl. so stupid.
-                &TextLayoutSttings {
-                    x: 0.0,
-                    y: 0.0,
-                    max_width: None,
-                    max_height: None,
-                    horizontal_align: TextHAlign::Left,
-                    vertical_align: TextVAlign::Top,
-                    line_height: 1.0,
-                    wrap_style: TextWrapStyle::Word,
-                    wrap_hard_breaks: true,
-                }
-            },
-        ));
+            let metrics = ch.metrics();
+            let size = Vec2::new(metrics.width as f32, metrics.height as f32);
+            let min = Vec2::new(
+                x + metrics.bounds.xmin,
+                position.y + ch.font_ascent() - (metrics.bounds.ymin + metrics.bounds.height),
+            );
+            let max = min + size;
+            x += metrics.advance_width;
 
-        self.text_layout
-            .append(&[&font.fontdue_font], &TextStyle::new(text, font.size, 0));
-        for glyph in self.text_layout.glyphs() {
             self.draw_buffer.push_rect(RectShape::with_fill(
-                {
-                    let min = Vec2::new(glyph.x, glyph.y);
-                    let size = Vec2::new(glyph.width as f32, glyph.height as f32);
-                    Rect::new(min, min + size)
-                },
-                {
-                    let (tex_handle, tex_coords) =
-                        self.font_service.get_or_create_texture_for_char(
-                            font_handle,
-                            glyph.parent,
-                            &mut self.texture_service,
-                        );
-                    Fill::new(
-                        color,
-                        FillTexture {
-                            kind: TextureKind::Internal(tex_handle),
-                            coords: tex_coords,
-                        },
-                    )
-                },
+                Rect::new(min, max),
+                Fill::new(
+                    color,
+                    FillTexture {
+                        kind: TextureKind::Internal(ch.tex_handle()),
+                        coords: ch.tex_coords(),
+                    },
+                ),
             ));
         }
     }

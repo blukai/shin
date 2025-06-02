@@ -11,15 +11,17 @@ log.workspace = true
 # workspace
 # gpu = { workspace = true, optional = true }
 gpu.workspace = true
+nohash.workspace = true
 
 [dev-dependencies]
 raw-window-handle.workspace = true
+# workspace
 window.workspace = true
 
 [features]
-# renderer_shingl = ["dep:gpu"]
-renderer_shingl = []
+# renderer_gl = ["dep:gpu"]
+renderer_gl = []
 
 [[example]]
 name = "first"
-features = ["renderer_shingl"]
+features = ["renderer_gl"]
