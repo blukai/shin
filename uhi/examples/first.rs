@@ -136,7 +136,7 @@ impl Context {
         self.window.pump_events()?;
 
         while let Some(event) = self.window.pop_event() {
-            if !matches!(event, Event::Pointer(_)) {
+            if !matches!(event, Event::Pointer(window::PointerEvent::Motion { .. })) {
                 log::debug!("event: {event:?}");
             }
 

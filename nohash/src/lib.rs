@@ -3,23 +3,23 @@ use std::{
     marker::PhantomData,
 };
 
-trait NoHashable {}
+pub trait NoHash {}
 
-impl NoHashable for u8 {}
-impl NoHashable for u16 {}
-impl NoHashable for u32 {}
-impl NoHashable for u64 {}
-impl NoHashable for usize {}
-impl NoHashable for i8 {}
-impl NoHashable for i16 {}
-impl NoHashable for i32 {}
-impl NoHashable for i64 {}
-impl NoHashable for isize {}
+impl NoHash for u8 {}
+impl NoHash for u16 {}
+impl NoHash for u32 {}
+impl NoHash for u64 {}
+impl NoHash for usize {}
+impl NoHash for i8 {}
+impl NoHash for i16 {}
+impl NoHash for i32 {}
+impl NoHash for i64 {}
+impl NoHash for isize {}
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NoHashHasher<T>(u64, PhantomData<T>);
 
-impl<T: NoHashable> Hasher for NoHashHasher<T> {
+impl<T: NoHash> Hasher for NoHashHasher<T> {
     fn write(&mut self, _bytes: &[u8]) {
         unreachable!();
     }

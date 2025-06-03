@@ -7,9 +7,8 @@ use anyhow::{Context as _, anyhow};
 use raw_window_handle as rwh;
 
 use crate::{
-    CursorShape, DEFAULT_LOGICAL_SIZE, Event, KeyboardEvent, KeyboardEventKind, PointerButton,
-    PointerButtons, PointerEvent, PointerEventKind, Scancode, Window, WindowAttrs, WindowEvent,
-    libwayland_client, libwayland_cursor, libxkbcommon,
+    CursorShape, DEFAULT_LOGICAL_SIZE, Event, KeyboardEvent, Keycode, PointerButton, PointerEvent,
+    Scancode, Window, WindowAttrs, WindowEvent, libwayland_client, libwayland_cursor, xkb,
 };
 
 // https://github.com/torvalds/linux/blob/231825b2e1ff6ba799c5eaf396d3ab2354e37c6b/include/uapi/linux/input-event-codes.h#L356
@@ -78,6 +77,12 @@ fn map_keyboard_key(key: u32) -> Option<Scancode> {
     }
 }
 
+/// > Offset between evdev keycodes (where KEY_ESCAPE is 1), and the evdev XKB keycode set (where
+/// ESC is 9). */
+/// - https://github.com/xkbcommon/libxkbcommon/pull/359
+/// - https://github.com/xkbcommon/libxkbcommon/blob/eb0a1457f4ada160d03f6d938fa31f6b049cb403/doc/keymap-format-text-v1.md
+const EVDEV_OFFSET: u32 = 8;
+
 #[derive(PartialEq, Eq, Hash)]
 enum SerialType {
     PointerEnter,
@@ -106,7 +111,6 @@ impl SerialTracker {
 pub struct WaylandBackend {
     libwayland_client: libwayland_client::Lib,
     libwayland_cursor: libwayland_cursor::Lib,
-    libxkbcommon: libxkbcommon::Lib,
 
     wl_display: NonNull<libwayland_client::wl_display>,
 
@@ -132,8 +136,6 @@ pub struct WaylandBackend {
     fractional_scale: Option<f32>,
 
     // pointer
-    pointer_position: (f32, f32),
-    pointer_buttons: PointerButtons,
     cursor_shape: Option<CursorShape>,
     // NOTE: currently i care only about movement and button press/release events. but other kinds
     // of events will most likely require to store different kind of frame data that PointerEvent
@@ -145,6 +147,7 @@ pub struct WaylandBackend {
 
     // keyboard
     wl_keyboard: *mut libwayland_client::wl_keyboard,
+    xkb_context: Option<xkb::Context>,
 
     serial_tracker: SerialTracker,
     events: VecDeque<Event>,
@@ -334,19 +337,12 @@ unsafe extern "C" fn handle_wl_pointer_motion(
 ) {
     let evl = unsafe { &mut *(data as *mut WaylandBackend) };
 
-    let prev_pos = evl.pointer_position;
-    let next_pos = (
-        libwayland_client::wl_fixed_to_f32(surface_x),
-        libwayland_client::wl_fixed_to_f32(surface_y),
+    let position = (
+        libwayland_client::wl_fixed_to_f64(surface_x),
+        libwayland_client::wl_fixed_to_f64(surface_y),
     );
-    let delta = (next_pos.0 - prev_pos.0, next_pos.1 - prev_pos.1);
-
-    evl.pointer_position = next_pos;
-    evl.pointer_frame_events.push_back(PointerEvent {
-        kind: PointerEventKind::Motion { delta },
-        position: next_pos,
-        buttons: evl.pointer_buttons,
-    });
+    evl.pointer_frame_events
+        .push_back(PointerEvent::Motion { position });
 }
 
 unsafe extern "C" fn handle_wl_pointer_enter(
@@ -396,15 +392,10 @@ unsafe extern "C" fn handle_wl_pointer_button(
     let evl = unsafe { &mut *(data as *mut WaylandBackend) };
 
     let pressed = state == libwayland_client::WL_POINTER_BUTTON_STATE_PRESSED;
-    evl.pointer_buttons.set(button, pressed);
-    evl.pointer_frame_events.push_back(PointerEvent {
-        kind: if pressed {
-            PointerEventKind::Press { button }
-        } else {
-            PointerEventKind::Release { button }
-        },
-        position: evl.pointer_position,
-        buttons: evl.pointer_buttons,
+    evl.pointer_frame_events.push_back(if pressed {
+        PointerEvent::Press { button }
+    } else {
+        PointerEvent::Release { button }
     });
 }
 
@@ -434,13 +425,28 @@ const WL_POINTER_LISTENER: libwayland_client::wl_pointer_listener =
 
 // TODO: will need this to be able to map scancodes to keycodes with libxkbcommon.
 unsafe extern "C" fn handle_wl_keyboard_keymap(
-    _data: *mut c_void,
+    data: *mut c_void,
     _wl_keyboard: *mut libwayland_client::wl_keyboard,
-    _format: u32,
-    _fd: i32,
-    _size: u32,
+    format: u32,
+    fd: i32,
+    size: u32,
 ) {
     log::debug!("recv wl_keyboard_keymap");
+
+    let evl = unsafe { &mut *(data as *mut WaylandBackend) };
+
+    match format {
+        libwayland_client::WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1 => {
+            assert!(evl.xkb_context.is_none());
+            let xkb_context =
+                unsafe { xkb::Context::from_fd(fd, size) }.expect("could not create xkb context");
+            evl.xkb_context = Some(xkb_context);
+            log::info!("created xkb context");
+        }
+        other => unreachable!("unknown keymap format: {other}"),
+    }
+
+    unsafe { libc::close(fd) };
 }
 
 unsafe extern "C" fn handle_wl_keyboard_enter(
@@ -483,15 +489,50 @@ unsafe extern "C" fn handle_wl_keyboard_key(
     };
 
     let evl = unsafe { &mut *(data as *mut WaylandBackend) };
+    let xkb_context = evl
+        .xkb_context
+        .as_ref()
+        .expect("xkb contex has not been created");
+
+    let sym = unsafe {
+        (xkb_context.lib.xkb_state_key_get_one_sym)(xkb_context.state, key + EVDEV_OFFSET)
+    };
+    let utf32 = unsafe { (xkb_context.lib.xkb_keysym_to_utf32)(sym) };
+    let keycode = char::from_u32(utf32).map_or_else(|| Keycode::Unhandled, Keycode::Char);
 
     let pressed = state == libwayland_client::WL_KEYBOARD_KEY_STATE_PRESSED;
-    evl.events.push_back(Event::Keyboard(KeyboardEvent {
-        kind: if pressed {
-            KeyboardEventKind::Press { scancode }
-        } else {
-            KeyboardEventKind::Release { scancode }
-        },
+    evl.events.push_back(Event::Keyboard(if pressed {
+        KeyboardEvent::Press { scancode, keycode }
+    } else {
+        KeyboardEvent::Release { scancode, keycode }
     }));
+}
+
+unsafe extern "C" fn handle_wl_keyboard_modifiers(
+    data: *mut c_void,
+    _wl_keyboard: *mut libwayland_client::wl_keyboard,
+    _serial: u32,
+    mods_depressed: u32,
+    mods_latched: u32,
+    mods_locked: u32,
+    group: u32,
+) {
+    let evl = unsafe { &mut *(data as *mut WaylandBackend) };
+    let xkb_context = evl
+        .xkb_context
+        .as_ref()
+        .expect("xkb contex has not been created");
+    unsafe {
+        (xkb_context.lib.xkb_state_update_mask)(
+            xkb_context.state,
+            mods_depressed,
+            mods_latched,
+            mods_locked,
+            0,
+            0,
+            group,
+        )
+    };
 }
 
 const WL_KEYBOARD_LISTENER: libwayland_client::wl_keyboard_listener =
@@ -500,7 +541,7 @@ const WL_KEYBOARD_LISTENER: libwayland_client::wl_keyboard_listener =
         enter: handle_wl_keyboard_enter,
         leave: handle_wl_keyboard_leave,
         key: handle_wl_keyboard_key,
-        modifiers: libwayland_client::noop_listener!(),
+        modifiers: handle_wl_keyboard_modifiers,
         repeat_info: libwayland_client::noop_listener!(),
     };
 
@@ -508,7 +549,6 @@ impl WaylandBackend {
     pub fn new_boxed(attrs: WindowAttrs) -> anyhow::Result<Box<Self>> {
         let libwayland_client = libwayland_client::Lib::load()?;
         let libwayland_cursor = libwayland_cursor::Lib::load()?;
-        let libxkbcommon = libxkbcommon::Lib::load()?;
 
         let wl_display =
             NonNull::new(unsafe { (libwayland_client.wl_display_connect)(null_mut()) })
@@ -517,7 +557,6 @@ impl WaylandBackend {
         let mut boxed = Box::new(WaylandBackend {
             libwayland_client,
             libwayland_cursor,
-            libxkbcommon,
 
             wl_display,
 
@@ -539,8 +578,6 @@ impl WaylandBackend {
             logical_size: None,
             fractional_scale: None,
 
-            pointer_position: (0.0, 0.0),
-            pointer_buttons: PointerButtons::default(),
             cursor_shape: None,
             pointer_frame_events: VecDeque::new(),
             wl_pointer: null_mut(),
@@ -548,6 +585,7 @@ impl WaylandBackend {
             cursor_surface: null_mut(),
 
             wl_keyboard: null_mut(),
+            xkb_context: None,
 
             serial_tracker: SerialTracker::default(),
             events: VecDeque::new(),

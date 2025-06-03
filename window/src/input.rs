@@ -10,48 +10,22 @@ pub enum CursorShape {
 
 // pointer
 
-// TODO: get rid of PointerButtons
-
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PointerButton {
     /// equivalent to left mouse button
-    Primary = 1,
+    Primary,
     /// equivalent to right mouse button
-    Secondary = 1 << 1,
+    Secondary,
     /// equivalent to middle mouse button
-    Tertiary = 1 << 2,
-}
-
-#[derive(Debug, Default, Clone, Copy)]
-pub struct PointerButtons(u8);
-
-impl PointerButtons {
-    pub fn contains(&self, which: PointerButton) -> bool {
-        self.0 & which as u8 == which as u8
-    }
-
-    pub(crate) fn set(&mut self, which: PointerButton, value: bool) {
-        if value {
-            self.0 |= which as u8
-        } else {
-            self.0 &= !(which as u8);
-        }
-    }
+    Tertiary,
 }
 
 #[derive(Debug)]
-pub enum PointerEventKind {
-    Motion { delta: (f32, f32) },
+pub enum PointerEvent {
+    Motion { position: (f64, f64) },
     Press { button: PointerButton },
     Release { button: PointerButton },
-}
-
-#[derive(Debug)]
-pub struct PointerEvent {
-    pub kind: PointerEventKind,
-    pub position: (f32, f32),
-    pub buttons: PointerButtons,
 }
 
 // keyboard
@@ -63,6 +37,7 @@ pub struct PointerEvent {
 /// generate the same scancode even if the keyboard layout is AZERTY or Dvorak
 ///
 /// (c) ai
+#[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Scancode {
     Esc,
@@ -72,8 +47,6 @@ pub enum Scancode {
     D,
 }
 
-/// TODO: make use of keycodes
-///
 /// Keycode is a code assigned by the operating system or software that represents the symbol or
 /// character mapped to the key pressed, taking into account the current keyboard layout. For
 /// example, pressing the same physical key might generate a different keycode on an AZERTY
@@ -81,15 +54,19 @@ pub enum Scancode {
 ///
 /// (c) ai
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Keycode {}
-
-#[derive(Debug, PartialEq)]
-pub enum KeyboardEventKind {
-    Press { scancode: Scancode },
-    Release { scancode: Scancode },
+pub enum Keycode {
+    Char(char),
+    Unhandled,
 }
 
-#[derive(Debug)]
-pub struct KeyboardEvent {
-    pub kind: KeyboardEventKind,
+#[derive(Debug, PartialEq)]
+pub enum KeyboardEvent {
+    Press {
+        scancode: Scancode,
+        keycode: Keycode,
+    },
+    Release {
+        scancode: Scancode,
+        keycode: Keycode,
+    },
 }

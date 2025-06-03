@@ -44,8 +44,8 @@ pub struct wl_array {
 pub type wl_fixed = i32;
 
 #[inline]
-pub fn wl_fixed_to_f32(f: wl_fixed) -> f32 {
-    (f as f32) / 256.0
+pub fn wl_fixed_to_f64(f: wl_fixed) -> f64 {
+    (f as f64) / 256.0
 }
 
 pub struct Lib {

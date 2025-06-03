@@ -26,6 +26,8 @@ opaque_struct!(xkb_state);
 pub type xkb_layout_index_t = u32;
 pub type xkb_mod_index_t = u32;
 pub type xkb_mod_mask_t = u32;
+pub type xkb_keycode_t = u32;
+pub type xkb_keysym_t = u32;
 
 #[repr(C)]
 #[derive(Debug, Clone)]
@@ -92,6 +94,10 @@ pub struct Lib {
         latched_group: xkb_layout_index_t,
         locked_group: xkb_layout_index_t,
     ) -> c_int, // xkb_state_component
+    pub xkb_state_key_get_one_sym:
+        unsafe extern "C" fn(state: *mut xkb_state, key: xkb_keycode_t) -> xkb_keysym_t,
+
+    pub xkb_keysym_to_utf32: unsafe extern "C" fn(keysym: xkb_keysym_t) -> u32,
 
     _dynlib: DynLib,
 }
@@ -114,6 +120,9 @@ impl Lib {
             xkb_state_new: dynlib.lookup(c"xkb_state_new")?,
             xkb_state_unref: dynlib.lookup(c"xkb_state_unref")?,
             xkb_state_update_mask: dynlib.lookup(c"xkb_state_update_mask")?,
+            xkb_state_key_get_one_sym: dynlib.lookup(c"xkb_state_key_get_one_sym")?,
+
+            xkb_keysym_to_utf32: dynlib.lookup(c"xkb_keysym_to_utf32")?,
 
             _dynlib: dynlib,
         })
