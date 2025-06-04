@@ -152,6 +152,7 @@ impl<R: Renderer> Fill<R> {
         }
     }
 
+    // TODO: rename to something like new_color?
     pub fn with_color(color: Rgba8) -> Self {
         Self {
             color,
@@ -182,6 +183,7 @@ impl<R: Renderer> RectShape<R> {
         }
     }
 
+    // TODO: rename to new_filled
     pub fn with_fill(coords: Rect, fill: Fill<R>) -> Self {
         Self {
             coords,
@@ -190,6 +192,7 @@ impl<R: Renderer> RectShape<R> {
         }
     }
 
+    // TODO: rename to new_stroked
     pub fn with_stroke(coords: Rect, stroke: Stroke) -> Self {
         Self {
             coords,

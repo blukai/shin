@@ -19,12 +19,14 @@ pub struct FontHandle {
     idx: usize,
 }
 
+#[derive(Debug)]
 struct CharData {
     metrics: CharMetrics,
     tex_page_idx: usize,
     tex_packer_entry_idx: usize,
 }
 
+#[derive(Debug)]
 struct FontData {
     font: fontdue::Font,
     size: f32,
@@ -32,11 +34,13 @@ struct FontData {
     line_metrics: LineMetrics,
 }
 
+#[derive(Debug)]
 struct TexturePage {
     tex_packer: TexturePacker,
     tex_handle: TextureHandle,
 }
 
+#[derive(Debug)]
 pub struct Char<'a> {
     tex_page: &'a TexturePage,
     font_data: &'a FontData,
@@ -148,7 +152,7 @@ impl FontService {
         }
         // allocate new page if needed
         if let None = tex_packer_entry_idx {
-            let mut tex_packer = TexturePacker::default();
+            let mut tex_packer = TexturePacker::new(DEFAULT_TEXTURE_WIDTH, DEFAULT_TEXTURE_HEIGHT);
             tex_packer_entry_idx = tex_packer.insert(metrics.width as u32, metrics.height as u32);
             // NOTE: this assert is somewhat redundant because there's another one above that
             // ensures that char size is <= texture size.

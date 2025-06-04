@@ -113,7 +113,7 @@ impl Default for TexturePacker {
 }
 
 impl TexturePacker {
-    fn new(texture_width: u32, texture_height: u32) -> Self {
+    pub fn new(texture_width: u32, texture_height: u32) -> Self {
         Self {
             w: texture_width,
             h: texture_height,

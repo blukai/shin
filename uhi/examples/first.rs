@@ -168,7 +168,6 @@ fn draw_mondriaan<R: uhi::Renderer>(
         }
     }
 
-    // TODO: `r` is broken; investigate!
     let text = "Tableau I, by Piet Mondriaan";
     let text_width = uhi
         .font_service
@@ -176,13 +175,9 @@ fn draw_mondriaan<R: uhi::Renderer>(
     let font_line_height = uhi.font_service.get_font_line_height(font_handle);
     let text_size = Vec2::new(text_width, font_line_height);
     let text_position = area.size() - Vec2::splat(24.0) - text_size;
-    uhi.draw_rect(RectShape::new(
+    uhi.draw_rect(RectShape::with_fill(
         Rect::new(text_position, text_position + text_size),
         Fill::with_color(Rgba8::GRAY),
-        Stroke {
-            width: 1.0,
-            color: Rgba8::BLACK,
-        },
     ));
     uhi.draw_text(text, font_handle, text_position, Rgba8::BLACK);
 }
