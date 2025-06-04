@@ -10,6 +10,183 @@ use window::{Event, Window, WindowAttrs, WindowEvent};
 
 const FONT: &[u8] = include_bytes!("../../fixtures/JetBrainsMono-Regular.ttf");
 
+// Tableau I, by Piet Mondriaan
+// https://en.wikipedia.org/wiki/File:Tableau_I,_by_Piet_Mondriaan.jpg
+fn draw_mondriaan<R: uhi::Renderer>(
+    uhi: &mut uhi::Context<R>,
+    font_handle: uhi::FontHandle,
+    area: uhi::Rect,
+) {
+    use uhi::*;
+
+    // TODO: figure out a nicer way to layout and draw stuff. with no heap allocations for the
+    // layout!
+
+    const SIZE: Vec2 = Vec2::new(1130.0, 1200.0);
+
+    const TOP_HEIGHT: f32 = 640.0;
+    const GAP: Constraint = uhi::Constraint::Length(20.0);
+    const BOTTOM_HEIGHT: f32 = 540.0;
+
+    let [top, gap, bottom] = vstack([
+        Constraint::Percentage(TOP_HEIGHT / SIZE.y),
+        GAP,
+        Constraint::Percentage(BOTTOM_HEIGHT / SIZE.y),
+    ])
+    .split(area.clone());
+
+    // top
+    {
+        uhi.draw_rect(RectShape::with_fill(
+            top.clone(),
+            Fill::with_color(Rgba8::WHITE),
+        ));
+
+        {
+            let [left, lgap, mid, rgap, right] = hstack([
+                Constraint::Percentage(500.0 / SIZE.x),
+                GAP,
+                Constraint::Fill(1.0),
+                GAP,
+                Constraint::Percentage(170.0 / SIZE.x),
+            ])
+            .split(top);
+
+            {
+                let [top, gap, bottom] = vstack([
+                    Constraint::Percentage(10.0 / TOP_HEIGHT),
+                    GAP,
+                    Constraint::Fill(1.0),
+                ])
+                .split(left);
+                uhi.draw_rect(RectShape::with_fill(top, Fill::with_color(Rgba8::RED)));
+                uhi.draw_rect(RectShape::with_fill(gap, Fill::with_color(Rgba8::BLACK)));
+                uhi.draw_rect(RectShape::with_fill(bottom, Fill::with_color(Rgba8::WHITE)));
+            }
+
+            uhi.draw_rect(RectShape::with_fill(lgap, Fill::with_color(Rgba8::BLACK)));
+            uhi.draw_rect(RectShape::with_fill(mid, Fill::with_color(Rgba8::WHITE)));
+            uhi.draw_rect(RectShape::with_fill(rgap, Fill::with_color(Rgba8::BLACK)));
+
+            {
+                let [top, tgap, mid, bgap, bottom] = vstack([
+                    Constraint::Percentage(80.0 / TOP_HEIGHT),
+                    GAP,
+                    Constraint::Fill(1.0),
+                    GAP,
+                    Constraint::Percentage(130.0 / TOP_HEIGHT),
+                ])
+                .split(right);
+                uhi.draw_rect(RectShape::with_fill(top, Fill::with_color(Rgba8::BLACK)));
+                uhi.draw_rect(RectShape::with_fill(tgap, Fill::with_color(Rgba8::BLACK)));
+                uhi.draw_rect(RectShape::with_fill(mid, Fill::with_color(Rgba8::WHITE)));
+                uhi.draw_rect(RectShape::with_fill(bgap, Fill::with_color(Rgba8::BLACK)));
+                uhi.draw_rect(RectShape::with_fill(bottom, Fill::with_color(Rgba8::WHITE)));
+            }
+        }
+    }
+
+    uhi.draw_rect(RectShape::with_fill(gap, Fill::with_color(Rgba8::BLACK)));
+
+    // bottom
+    {
+        uhi.draw_rect(RectShape::with_fill(
+            bottom.clone(),
+            Fill::with_color(Rgba8::WHITE),
+        ));
+
+        {
+            let [left, lgap, _, rgap, right] = hstack([
+                Constraint::Percentage(500.0 / SIZE.x),
+                GAP,
+                Constraint::Fill(1.0),
+                GAP,
+                Constraint::Percentage(170.0 / SIZE.x),
+            ])
+            .split(bottom);
+
+            let lmgap;
+            {
+                let [_, gap, right] = hstack([
+                    Constraint::Percentage(100.0 / SIZE.x),
+                    GAP,
+                    Constraint::Fill(1.0),
+                ])
+                .split(left);
+                lmgap = gap.clone();
+                uhi.draw_rect(RectShape::with_fill(gap, Fill::with_color(Rgba8::BLACK)));
+
+                {
+                    let [top, gap, _] = vstack([
+                        Constraint::Percentage(300.0 / BOTTOM_HEIGHT),
+                        GAP,
+                        Constraint::Fill(1.0),
+                    ])
+                    .split(right);
+                    uhi.draw_rect(RectShape::with_fill(top, Fill::with_color(Rgba8::BLUE)));
+                    uhi.draw_rect(RectShape::with_fill(gap, Fill::with_color(Rgba8::BLACK)));
+                }
+            }
+
+            uhi.draw_rect(RectShape::with_fill(
+                lgap.clone(),
+                Fill::with_color(Rgba8::BLACK),
+            ));
+            uhi.draw_rect(RectShape::with_fill(
+                rgap.clone(),
+                Fill::with_color(Rgba8::BLACK),
+            ));
+            uhi.draw_rect(RectShape::with_fill(right, Fill::with_color(Rgba8::ORANGE)));
+
+            // bottom-mid section [white .......... black ..]
+            {
+                let min_x = lmgap.max.x;
+                let max_x = rgap.min.x;
+                let [_, gap, bottom] = vstack([
+                    Constraint::Fill(1.0),
+                    GAP,
+                    Constraint::Percentage(30.0 / SIZE.y),
+                ])
+                .split(Rect::new(
+                    Vec2::new(min_x, 0.0),
+                    Vec2::new(max_x, area.max.y),
+                ));
+                uhi.draw_rect(RectShape::with_fill(gap, Fill::with_color(Rgba8::BLACK)));
+
+                {
+                    let [left, gap, right] = hstack([
+                        Constraint::Fill(1.0),
+                        GAP,
+                        Constraint::Percentage(100.0 / SIZE.x),
+                    ])
+                    .split(bottom);
+                    uhi.draw_rect(RectShape::with_fill(left, Fill::with_color(Rgba8::WHITE)));
+                    uhi.draw_rect(RectShape::with_fill(gap, Fill::with_color(Rgba8::BLACK)));
+                    uhi.draw_rect(RectShape::with_fill(right, Fill::with_color(Rgba8::BLACK)));
+                }
+            }
+        }
+    }
+
+    // TODO: `r` is broken; investigate!
+    let text = "Tableau I, by Piet Mondriaan";
+    let text_width = uhi
+        .font_service
+        .get_text_width(text, font_handle, &mut uhi.texture_service);
+    let font_line_height = uhi.font_service.get_font_line_height(font_handle);
+    let text_size = Vec2::new(text_width, font_line_height);
+    let text_position = area.size() - Vec2::splat(24.0) - text_size;
+    uhi.draw_rect(RectShape::new(
+        Rect::new(text_position, text_position + text_size),
+        Fill::with_color(Rgba8::GRAY),
+        Stroke {
+            width: 1.0,
+            color: Rgba8::BLACK,
+        },
+    ));
+    uhi.draw_text(text, font_handle, text_position, Rgba8::BLACK);
+}
+
 struct Logger;
 
 impl log::Log for Logger {
@@ -185,26 +362,7 @@ impl Context {
         {
             let window_size = Vec2::new(self.window_size.0 as f32, self.window_size.1 as f32);
 
-            uhi.draw_rect(uhi::RectShape::with_fill(
-                uhi::Rect::from_center_size(window_size / 2.0, 100.0),
-                uhi::Fill::with_color(uhi::Rgba8::FUCHSIA),
-            ));
-
-            let text = "YO, sailor!";
-
-            let text_width =
-                uhi.font_service
-                    .get_text_width(text, font_handle, &mut uhi.texture_service);
-            let font_line_height = uhi.font_service.get_font_line_height(font_handle);
-            let text_size = Vec2::new(text_width, font_line_height);
-            let text_position = window_size / 2.0 - text_size / 2.0;
-
-            uhi.draw_rect(uhi::RectShape::with_fill(
-                uhi::Rect::new(text_position, text_position + text_size),
-                uhi::Fill::with_color(uhi::Rgba8::WHITE),
-            ));
-
-            uhi.draw_text(text, font_handle, text_position, uhi::Rgba8::BLACK);
+            draw_mondriaan(uhi, font_handle, uhi::Rect::new(Vec2::ZERO, window_size));
 
             unsafe {
                 egl_context.make_current(egl_surface.as_ptr())?;
@@ -233,6 +391,26 @@ fn main() {
         ctx.iterate().expect("iteration failure");
     }
 }
+
+// struct TextEdit<T: AsMut<String>> {
+//     text: T,
+// }
+//
+// impl<T: AsMut<String>> TextEdit<T> {
+//     fn new(text: T) -> Self {
+//         Self { text }
+//     }
+//
+//     fn handle_event(&mut self, ev: &window::Event) {
+//         match ev {
+//             _ => {}
+//         }
+//     }
+//
+//     fn draw<R: uhi::Renderer>(&self, uhi: &mut uhi::Context<R>) {
+//
+//     }
+// }
 
 // todo (maybe):
 // https://tchayen.com/how-to-write-a-flexbox-layout-engine

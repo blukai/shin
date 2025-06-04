@@ -5,6 +5,7 @@ use glam::Vec2;
 mod context;
 mod drawbuffer;
 mod fontservice;
+mod layout;
 mod renderer;
 mod texturepacker;
 mod textureservice;
@@ -12,6 +13,7 @@ mod textureservice;
 pub use context::*;
 pub use drawbuffer::*;
 pub use fontservice::*;
+pub use layout::*;
 pub use renderer::*;
 pub use texturepacker::*;
 pub use textureservice::*;
@@ -75,6 +77,10 @@ impl Rect {
 
     pub fn height(&self) -> f32 {
         self.max.y - self.min.y
+    }
+
+    pub fn size(&self) -> Vec2 {
+        self.max - self.min
     }
 }
 
