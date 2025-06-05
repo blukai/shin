@@ -5,28 +5,33 @@ pub use fontdue::layout::{
 use glam::Vec2;
 
 use crate::{
-    DrawBuffer, DrawData, Fill, FillTexture, FontHandle, FontService, LineShape, Rect, RectShape,
-    Renderer, Rgba8, TextureKind, TextureService,
+    DrawBuffer, DrawData, Externs, Fill, FillTexture, FontHandle, FontService, LineShape, Rect,
+    RectShape, Rgba8, TextureKind, TextureService,
 };
 
-pub struct Context<R: Renderer> {
+pub struct Context<E: Externs> {
     pub font_service: FontService,
-    pub texture_service: TextureService<R>,
+    pub texture_service: TextureService<E>,
 
-    draw_buffer: DrawBuffer<R>,
+    draw_buffer: DrawBuffer<E>,
+
+    focus: Option<E::WidgetId>,
 }
 
-impl<R: Renderer> Default for Context<R> {
+impl<E: Externs> Default for Context<E> {
     fn default() -> Self {
         Self {
-            draw_buffer: DrawBuffer::default(),
             texture_service: TextureService::default(),
             font_service: FontService::default(),
+
+            draw_buffer: DrawBuffer::default(),
+
+            focus: None,
         }
     }
 }
 
-impl<R: Renderer> Context<R> {
+impl<E: Externs> Context<E> {
     // draw buffer delegates
 
     #[inline]
@@ -35,12 +40,12 @@ impl<R: Renderer> Context<R> {
     }
 
     #[inline]
-    pub fn draw_rect(&mut self, rect: RectShape<R>) {
+    pub fn draw_rect(&mut self, rect: RectShape<E>) {
         self.draw_buffer.push_rect(rect);
     }
 
     #[inline]
-    pub fn get_draw_data<'a>(&'a self) -> DrawData<'a, R> {
+    pub fn get_draw_data<'a>(&'a self) -> DrawData<'a, E> {
         self.draw_buffer.get_draw_data()
     }
 
@@ -78,5 +83,15 @@ impl<R: Renderer> Context<R> {
                 ),
             ));
         }
+    }
+
+    // other
+
+    pub fn set_focus(&mut self, id: Option<E::WidgetId>) {
+        self.focus = id;
+    }
+
+    pub fn get_focus(&self) -> Option<&E::WidgetId> {
+        self.focus.as_ref()
     }
 }

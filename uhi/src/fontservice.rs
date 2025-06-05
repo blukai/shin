@@ -1,5 +1,5 @@
 use crate::{
-    Rect, Renderer, TextureDesc, TextureFormat, TextureHandle, TexturePacker, TextureRegion,
+    Externs, Rect, TextureDesc, TextureFormat, TextureHandle, TexturePacker, TextureRegion,
     TextureService,
 };
 
@@ -7,9 +7,6 @@ use anyhow::anyhow;
 use fontdue::{Font, FontSettings, LineMetrics, Metrics as CharMetrics};
 use glam::Vec2;
 use nohash::NoHashMap;
-
-// NOTE: fontdue's layouting is way too inconvenient; and there's no way to control its
-// allocations.
 
 const DEFAULT_TEXTURE_WIDTH: u32 = 256;
 const DEFAULT_TEXTURE_HEIGHT: u32 = 256;
@@ -89,6 +86,11 @@ pub struct FontService {
 }
 
 impl FontService {
+    // TODO: do not return font handle, instead add FontId into Externs. this will make things
+    // nicer by not requiring you to carry the handle around.
+    //
+    // TODO: create_font must accept font id and data, get rid of size; size must becode a part of
+    // get_or_allocate_char.
     pub fn create_font<D>(&mut self, data: D, size: f32) -> anyhow::Result<FontHandle>
     where
         D: AsRef<[u8]>,
@@ -125,11 +127,11 @@ impl FontService {
         Ok(FontHandle { idx })
     }
 
-    fn create_char_if_not_exists<R: Renderer>(
+    fn create_char_if_not_exists<E: Externs>(
         &mut self,
         ch: char,
         font_handle: FontHandle,
-        texture_service: &mut TextureService<R>,
+        texture_service: &mut TextureService<E>,
     ) {
         let font_data = &mut self.fonts[font_handle.idx];
         if font_data.chars.contains_key(&(ch as u32)) {
@@ -195,11 +197,11 @@ impl FontService {
     }
 
     #[inline]
-    pub fn get_or_allocate_char<'a, R: Renderer>(
+    pub fn get_or_allocate_char<'a, E: Externs>(
         &'a mut self,
         ch: char,
         font_handle: FontHandle,
-        texture_service: &mut TextureService<R>,
+        texture_service: &mut TextureService<E>,
     ) -> Char<'a> {
         self.create_char_if_not_exists(ch, font_handle, texture_service);
 
@@ -214,11 +216,11 @@ impl FontService {
         }
     }
 
-    pub fn get_text_width<R: Renderer>(
+    pub fn get_text_width<E: Externs>(
         &mut self,
         text: &str,
         font_handle: FontHandle,
-        texture_service: &mut TextureService<R>,
+        texture_service: &mut TextureService<E>,
     ) -> f32 {
         let mut width: f32 = 0.0;
         for ch in text.chars() {

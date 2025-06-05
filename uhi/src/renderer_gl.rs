@@ -3,7 +3,7 @@ use std::{ffi::c_void, mem::offset_of, ptr::null};
 use anyhow::{Context as _, anyhow};
 use gpu::gl::{self, GlContexter};
 
-use crate::{Context, TextureKind, TextureService, Vertex};
+use crate::{Context, Externs, TextureKind, TextureService, Vertex};
 
 use super::Renderer;
 
@@ -181,11 +181,14 @@ impl GlRenderer {
         }
     }
 
-    fn handle_textures(
+    fn handle_textures<E>(
         &self,
         gl: &gl::Context,
-        texture_service: &mut TextureService<Self>,
-    ) -> anyhow::Result<()> {
+        texture_service: &mut TextureService<E>,
+    ) -> anyhow::Result<()>
+    where
+        E: Externs<TextureHandle = <Self as Renderer>::TextureHandle>,
+    {
         while let Some((ticket, desc)) = texture_service.next_pending_create() {
             let texture = unsafe {
                 let texture = gl
@@ -262,12 +265,15 @@ impl GlRenderer {
         Ok(())
     }
 
-    pub fn render(
+    pub fn render<E>(
         &self,
-        ctx: &mut Context<Self>,
+        ctx: &mut Context<E>,
         gl: &gl::Context,
         view_size: (u32, u32),
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<()>
+    where
+        E: Externs<TextureHandle = <Self as Renderer>::TextureHandle>,
+    {
         self.setup_state(gl);
         self.handle_textures(gl, &mut ctx.texture_service)?;
 

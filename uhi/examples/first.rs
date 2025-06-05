@@ -6,14 +6,26 @@ use gpu::{
 };
 use raw_window_handle as rwh;
 use std::ffi::c_void;
-use window::{Event, Window, WindowAttrs, WindowEvent};
+use window::{Event, PointerEvent, Window, WindowAttrs, WindowEvent};
 
 const FONT: &[u8] = include_bytes!("../../fixtures/JetBrainsMono-Regular.ttf");
 
+#[derive(Debug, Clone)]
+enum UhiId {
+    Pep,
+}
+
+struct UhiExterns;
+
+impl uhi::Externs for UhiExterns {
+    type WidgetId = UhiId;
+    type TextureHandle = <uhi::GlRenderer as uhi::Renderer>::TextureHandle;
+}
+
 // Tableau I, by Piet Mondriaan
 // https://en.wikipedia.org/wiki/File:Tableau_I,_by_Piet_Mondriaan.jpg
-fn draw_mondriaan<R: uhi::Renderer>(
-    uhi: &mut uhi::Context<R>,
+fn draw_mondriaan<E: uhi::Externs>(
+    uhi: &mut uhi::Context<E>,
     font_handle: uhi::FontHandle,
     area: uhi::Rect,
 ) {
@@ -177,9 +189,9 @@ fn draw_mondriaan<R: uhi::Renderer>(
     let text_position = area.size() - Vec2::splat(24.0) - text_size;
     uhi.draw_rect(RectShape::with_fill(
         Rect::new(text_position, text_position + text_size),
-        Fill::with_color(Rgba8::GRAY),
+        Fill::with_color(Rgba8::new(128, 128, 128, 128)),
     ));
-    uhi.draw_text(text, font_handle, text_position, Rgba8::BLACK);
+    uhi.draw_text(text, font_handle, text_position, Rgba8::WHITE);
 }
 
 struct Logger;
@@ -215,7 +227,7 @@ struct InitializedGraphicsContext {
     egl_context: egl::Context,
     egl_surface: egl::Surface,
     gl: gl::Context,
-    uhi: uhi::Context<uhi::GlRenderer>,
+    uhi: uhi::Context<UhiExterns>,
     uhi_renderer: uhi::GlRenderer,
     font_handle: uhi::FontHandle,
 }
@@ -359,6 +371,8 @@ impl Context {
 
             draw_mondriaan(uhi, font_handle, uhi::Rect::new(Vec2::ZERO, window_size));
 
+            // TextEdit::new(UhiId::Pep, &mut "kek".to_string()).draw(uhi, font_handle);
+
             unsafe {
                 egl_context.make_current(egl_surface.as_ptr())?;
 
@@ -387,25 +401,8 @@ fn main() {
     }
 }
 
-// struct TextEdit<T: AsMut<String>> {
-//     text: T,
-// }
+// TODO: figure out input state.
 //
-// impl<T: AsMut<String>> TextEdit<T> {
-//     fn new(text: T) -> Self {
-//         Self { text }
-//     }
-//
-//     fn handle_event(&mut self, ev: &window::Event) {
-//         match ev {
-//             _ => {}
-//         }
-//     }
-//
-//     fn draw<R: uhi::Renderer>(&self, uhi: &mut uhi::Context<R>) {
-//
-//     }
-// }
+// widgets don't have to have event handler and drawer. it would be nicer to combine everything
+// into a single function.
 
-// todo (maybe):
-// https://tchayen.com/how-to-write-a-flexbox-layout-engine

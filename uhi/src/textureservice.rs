@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
-use crate::Renderer;
+use crate::Externs;
 
 #[derive(Debug, Clone)]
-pub enum TextureKind<R: Renderer> {
+pub enum TextureKind<E: Externs> {
     Internal(TextureHandle),
-    External(R::TextureHandle),
+    External(E::TextureHandle),
 }
 
 // NOTE: TextureFormat is modeled after webgpu, see:
@@ -59,8 +59,8 @@ pub struct TexturePendingUpdate<'a> {
     pub region: &'a TextureRegion,
 }
 
-struct Materialization<R: Renderer> {
-    texture: R::TextureHandle,
+struct Materialization<E: Externs> {
+    texture: E::TextureHandle,
     desc: TextureDesc,
 }
 
@@ -70,17 +70,17 @@ struct Materialization<R: Renderer> {
 // NOTE: this may seem like an shitty stupid extra unnecessary layer of abstraction because in shin
 // were dealing only with opengl/webgl which allows to do stuff in immediate-mode. but i want to be
 // able to use uhi in other projects that use other graphics apis.
-pub struct TextureService<R: Renderer> {
+pub struct TextureService<E: Externs> {
     id_acc: u32,
     pending_creates: HashMap<TextureCreateTicket, TextureDesc>,
     // TODO: make use of my RangeAlloc thing pointing into large chunk of linear memory. make some
     // kind of TransientBuffer thing or something, idk, might need a better name, but i think the
     // idea is solid. except that RangeAlloc is not highly enough efficient/optimized.
     pending_updates: HashMap<TextureUpdateTicket, Vec<u8>>,
-    materializations: HashMap<TextureHandle, Materialization<R>>,
+    materializations: HashMap<TextureHandle, Materialization<E>>,
 }
 
-impl<R: Renderer> Default for TextureService<R> {
+impl<E: Externs> Default for TextureService<E> {
     fn default() -> Self {
         Self {
             id_acc: 0,
@@ -91,7 +91,7 @@ impl<R: Renderer> Default for TextureService<R> {
     }
 }
 
-impl<R: Renderer> TextureService<R> {
+impl<E: Externs> TextureService<E> {
     pub fn enque_create(&mut self, desc: TextureDesc) -> TextureHandle {
         let handle = TextureHandle { id: self.id_acc };
         self.id_acc += 1;
@@ -107,7 +107,7 @@ impl<R: Renderer> TextureService<R> {
             .map(|(k, v)| (k.clone(), v))
     }
 
-    pub fn commit_create(&mut self, ticket: TextureCreateTicket, texture: R::TextureHandle) {
+    pub fn commit_create(&mut self, ticket: TextureCreateTicket, texture: E::TextureHandle) {
         let desc = self
             .pending_creates
             .remove(&ticket)
@@ -153,7 +153,7 @@ impl<R: Renderer> TextureService<R> {
     }
 
     // NOTE: this will panic if texture was not yet created.
-    pub fn get(&self, handle: TextureHandle) -> &R::TextureHandle {
+    pub fn get(&self, handle: TextureHandle) -> &E::TextureHandle {
         self.materializations
             .get(&handle)
             .map(|m| &m.texture)

@@ -1,4 +1,4 @@
-use std::mem;
+use std::{fmt, mem};
 
 use glam::Vec2;
 
@@ -17,6 +17,12 @@ pub use layout::*;
 pub use renderer::*;
 pub use texturepacker::*;
 pub use textureservice::*;
+
+pub trait Externs {
+    // NOTE: WidgetId is needed for maintaining focused (/activated) widgets.
+    type WidgetId: fmt::Debug + Clone;
+    type TextureHandle: fmt::Debug + Clone;
+}
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Rect {
@@ -133,19 +139,19 @@ impl Rgba8 {
 }
 
 #[derive(Debug, Clone)]
-pub struct FillTexture<R: Renderer> {
-    pub kind: TextureKind<R>,
+pub struct FillTexture<E: Externs> {
+    pub kind: TextureKind<E>,
     pub coords: Rect,
 }
 
 #[derive(Debug, Clone)]
-pub struct Fill<R: Renderer> {
+pub struct Fill<E: Externs> {
     pub color: Rgba8,
-    pub texture: Option<FillTexture<R>>,
+    pub texture: Option<FillTexture<E>>,
 }
 
-impl<R: Renderer> Fill<R> {
-    pub fn new(color: Rgba8, texture: FillTexture<R>) -> Self {
+impl<E: Externs> Fill<E> {
+    pub fn new(color: Rgba8, texture: FillTexture<E>) -> Self {
         Self {
             color,
             texture: Some(texture),
@@ -168,14 +174,14 @@ pub struct Stroke {
 }
 
 #[derive(Debug)]
-pub struct RectShape<R: Renderer> {
+pub struct RectShape<E: Externs> {
     pub coords: Rect,
-    pub fill: Option<Fill<R>>,
+    pub fill: Option<Fill<E>>,
     pub stroke: Option<Stroke>,
 }
 
-impl<R: Renderer> RectShape<R> {
-    pub fn new(coords: Rect, fill: Fill<R>, stroke: Stroke) -> Self {
+impl<E: Externs> RectShape<E> {
+    pub fn new(coords: Rect, fill: Fill<E>, stroke: Stroke) -> Self {
         Self {
             coords,
             fill: Some(fill),
@@ -184,7 +190,7 @@ impl<R: Renderer> RectShape<R> {
     }
 
     // TODO: rename to new_filled
-    pub fn with_fill(coords: Rect, fill: Fill<R>) -> Self {
+    pub fn with_fill(coords: Rect, fill: Fill<E>) -> Self {
         Self {
             coords,
             fill: Some(fill),

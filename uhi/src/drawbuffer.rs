@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use glam::Vec2;
 
-use crate::{Fill, LineShape, Rect, RectShape, Stroke, TextureKind, Vertex, renderer::Renderer};
+use crate::{Externs, Fill, LineShape, Rect, RectShape, Stroke, TextureKind, Vertex};
 
 // TODO: instancing (to enable batching (vertices will be able to exist in 0..1 coordinate space
 // (probably) and then they can be translated, scaled, rotated with instance transforms (for
@@ -35,27 +35,27 @@ fn compute_line_width_offset(a: &Vec2, b: &Vec2, width: f32) -> Vec2 {
 
 // TODO: do Primitive instead of DrawCommand?
 #[derive(Debug)]
-pub struct DrawCommand<R: Renderer> {
+pub struct DrawCommand<E: Externs> {
     pub index_range: Range<u32>,
-    pub texture: Option<TextureKind<R>>,
+    pub texture: Option<TextureKind<E>>,
 }
 
 #[derive(Debug)]
-pub struct DrawData<'a, R: Renderer> {
+pub struct DrawData<'a, E: Externs> {
     pub indices: &'a [u32],
     pub vertices: &'a [Vertex],
-    pub commands: &'a [DrawCommand<R>],
+    pub commands: &'a [DrawCommand<E>],
 }
 
 #[derive(Debug)]
-pub struct DrawBuffer<R: Renderer> {
+pub struct DrawBuffer<E: Externs> {
     vertices: Vec<Vertex>,
     indices: Vec<u32>,
     pending_indices: usize,
-    draw_commands: Vec<DrawCommand<R>>,
+    draw_commands: Vec<DrawCommand<E>>,
 }
 
-impl<R: Renderer> Default for DrawBuffer<R> {
+impl<E: Externs> Default for DrawBuffer<E> {
     fn default() -> Self {
         Self {
             vertices: Vec::new(),
@@ -66,7 +66,7 @@ impl<R: Renderer> Default for DrawBuffer<R> {
     }
 }
 
-impl<R: Renderer> DrawBuffer<R> {
+impl<E: Externs> DrawBuffer<E> {
     pub fn clear(&mut self) {
         assert!(self.pending_indices == 0);
         self.vertices.clear();
@@ -85,7 +85,7 @@ impl<R: Renderer> DrawBuffer<R> {
         self.pending_indices += 3;
     }
 
-    fn commit_primitive(&mut self, texture: Option<TextureKind<R>>) {
+    fn commit_primitive(&mut self, texture: Option<TextureKind<E>>) {
         if self.pending_indices == 0 {
             return;
         }
@@ -98,7 +98,7 @@ impl<R: Renderer> DrawBuffer<R> {
         self.pending_indices = 0;
     }
 
-    pub fn get_draw_data<'a>(&'a self) -> DrawData<'a, R> {
+    pub fn get_draw_data<'a>(&'a self) -> DrawData<'a, E> {
         DrawData {
             indices: self.indices.as_slice(),
             vertices: self.vertices.as_slice(),
@@ -147,7 +147,7 @@ impl<R: Renderer> DrawBuffer<R> {
         self.commit_primitive(None);
     }
 
-    fn push_rect_filled(&mut self, coords: Rect, fill: Fill<R>) {
+    fn push_rect_filled(&mut self, coords: Rect, fill: Fill<E>) {
         let idx = self.vertices.len() as u32;
 
         let (color, texture, tex_coords) = if let Some(fill_texture) = fill.texture {
@@ -244,7 +244,7 @@ impl<R: Renderer> DrawBuffer<R> {
         self.commit_primitive(None);
     }
 
-    pub fn push_rect(&mut self, rect: RectShape<R>) {
+    pub fn push_rect(&mut self, rect: RectShape<E>) {
         if let Some(fill) = rect.fill {
             self.push_rect_filled(rect.coords.clone(), fill);
         }
