@@ -5,6 +5,7 @@ members = [
   "gl-generator",
   "gpu",
   "nohash",
+  "rangealloc",
   "uhi",
   "wayland-scanner",
   "window",
@@ -15,8 +16,8 @@ members = [
 edition = "2024"
 
 [workspace.dependencies]
+ab_glyph = "0.2"
 anyhow = "1"
-fontdue = { version = "0.9", default-features = false, features = ["simd"] }
 glam = "0.30" # TODO: do i really need glam here?
 libc = "0.2"
 log = "0.4"
@@ -27,6 +28,7 @@ dynlib = { path = "dynlib" }
 gl-generator = { path = "gl-generator" }
 gpu = { path = "gpu" }
 nohash = { path = "nohash" }
+rangealloc = { path = "rangealloc" }
 uhi = { path = "uhi" }
 wayland-scanner = { path = "wayland-scanner" }
 window = { path = "window" }

@@ -1,9 +1,9 @@
 use std::{
-    hash::{BuildHasherDefault, Hasher},
+    hash::{BuildHasherDefault, Hash, Hasher},
     marker::PhantomData,
 };
 
-pub trait NoHash {}
+pub trait NoHash: Hash {}
 
 impl NoHash for u8 {}
 impl NoHash for u16 {}

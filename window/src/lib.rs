@@ -42,7 +42,8 @@ pub struct WindowAttrs {
 #[derive(Debug)]
 pub enum WindowEvent {
     Configure { logical_size: (u32, u32) },
-    Resize { physical_size: (u32, u32) },
+    Resized { physical_size: (u32, u32) },
+    ScaleFactorChanged { scale_factor: f64 },
     CloseRequested,
 }
 
@@ -57,6 +58,7 @@ pub trait Window: rwh::HasDisplayHandle + rwh::HasWindowHandle {
     fn pump_events(&mut self) -> anyhow::Result<()>;
     fn pop_event(&mut self) -> Option<Event>;
     fn set_cursor_shape(&mut self, cursor_shape: CursorShape) -> anyhow::Result<()>;
+    fn scale_factor(&self) -> f64;
 }
 
 pub fn create_window(window_attrs: WindowAttrs) -> anyhow::Result<Box<dyn Window>> {

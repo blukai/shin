@@ -34,14 +34,14 @@ const CURSOR_SIZE: u32 = 24;
 // to 1.0. On the other hand, if it's something like 1.5 then we'll upscale it to 2.0.
 //
 // stolen from chrome (wayland_cursor_factory.cc)
-const CURSOR_SCALE_FLOORING_THRESHOLD: f32 = 0.2;
+const CURSOR_SCALE_FLOORING_THRESHOLD: f64 = 0.2;
 
 // Wayland only supports cursor images with an integer scale, so we must upscale cursor images with
 // non-integer scales to integer scaled images so that the cursor is displayed correctly.
 //
 // stolen from chrome (wayland_cursor_factory.cc)
-fn get_cursor_scale(scale: f32) -> u32 {
-    (scale - CURSOR_SCALE_FLOORING_THRESHOLD).ceil() as u32
+fn get_cursor_scale(scale_factor: f64) -> u32 {
+    (scale_factor - CURSOR_SCALE_FLOORING_THRESHOLD).ceil() as u32
 }
 
 // https://gitlab.freedesktop.org/wayland/wayland/-/blob/827d0c30adc4519fafa7a9c725ff355b1d4fa3bd/cursor/cursor-data.h
@@ -133,7 +133,7 @@ pub struct WaylandBackend {
     wp_fractional_scale_v1: *mut libwayland_client::wp_fractional_scale_v1,
     wp_viewport: *mut libwayland_client::wp_viewport,
     logical_size: Option<(u32, u32)>,
-    fractional_scale: Option<f32>,
+    scale_factor: Option<f64>,
 
     // pointer
     cursor_shape: Option<CursorShape>,
@@ -317,10 +317,10 @@ unsafe extern "C" fn handle_wp_fractional_scale_v1_preferred_scale(
     log::debug!("recv wp_fractional_scale_v1_preferred_scale");
 
     // > The sent scale is the numerator of a fraction with a denominator of 120.
-    let fractional_scale = scale as f32 / 120.0;
+    let scale_factor = scale as f64 / 120.0;
 
     let evl = unsafe { &mut *(data as *mut WaylandBackend) };
-    evl.maybe_resize(None, Some(fractional_scale));
+    evl.maybe_resize(None, Some(scale_factor));
 }
 
 const WP_FRACTIONAL_SCALE_MANAGER_V1_LISTENER: libwayland_client::wp_fractional_scale_v1_listener =
@@ -576,7 +576,7 @@ impl WaylandBackend {
             wp_fractional_scale_v1: null_mut(),
             wp_viewport: null_mut(),
             logical_size: None,
-            fractional_scale: None,
+            scale_factor: None,
 
             cursor_shape: None,
             pointer_frame_events: VecDeque::new(),
@@ -745,7 +745,7 @@ impl WaylandBackend {
             )
         };
         assert!(!boxed.cursor_surface.is_null());
-        assert!(boxed.fractional_scale.is_none());
+        assert!(boxed.scale_factor.is_none());
         boxed.load_cursor_theme_for_scale(1.0);
 
         // keyboard
@@ -768,6 +768,8 @@ impl WaylandBackend {
 
         unsafe { libwayland_client::wl_surface_commit(&boxed.libwayland_client, boxed.wl_surface) };
         unsafe { (boxed.libwayland_client.wl_display_roundtrip)(boxed.wl_display.as_ptr()) };
+
+        // TODO: consider waiting for fractional scale event (if fractional scale interface exists)
         assert!(boxed.acked_first_xdg_surface_ack_configure);
         boxed
             .events
@@ -796,8 +798,8 @@ impl WaylandBackend {
         }
     }
 
-    fn load_cursor_theme_for_scale(&mut self, fractional_scale: f32) {
-        let cursor_scale = get_cursor_scale(fractional_scale);
+    fn load_cursor_theme_for_scale(&mut self, scale_factor: f64) {
+        let cursor_scale = get_cursor_scale(scale_factor);
         self.cursor_theme = unsafe {
             assert!(!self.wl_shm.is_null());
             (self.libwayland_cursor.wl_cursor_theme_load)(
@@ -817,8 +819,8 @@ impl WaylandBackend {
         }
     }
 
-    fn maybe_resize(&mut self, logical_size: Option<(u32, u32)>, fractional_scale: Option<f32>) {
-        assert!(logical_size.is_some() || fractional_scale.is_some());
+    fn maybe_resize(&mut self, logical_size: Option<(u32, u32)>, scale_factor: Option<f64>) {
+        assert!(logical_size.is_some() || scale_factor.is_some());
 
         let mut logical_size_changed = false;
         if let Some(logical_size) = logical_size {
@@ -830,13 +832,13 @@ impl WaylandBackend {
             }
         }
 
-        let mut fractional_scale_changed = false;
-        if let Some(fractional_scale) = fractional_scale {
-            fractional_scale_changed = self.fractional_scale != Some(fractional_scale);
-            if fractional_scale_changed {
-                self.fractional_scale = Some(fractional_scale);
+        let mut scale_factor_changed = false;
+        if let Some(scale_factor) = scale_factor {
+            scale_factor_changed = self.scale_factor != Some(scale_factor);
+            if scale_factor_changed {
+                self.scale_factor = Some(scale_factor);
 
-                self.load_cursor_theme_for_scale(fractional_scale);
+                self.load_cursor_theme_for_scale(scale_factor);
                 if let Err(err) =
                     self.set_cursor_shape(self.cursor_shape.unwrap_or(CursorShape::Default))
                 {
@@ -845,18 +847,25 @@ impl WaylandBackend {
             }
         }
 
-        if !logical_size_changed && !fractional_scale_changed {
+        if !logical_size_changed && !scale_factor_changed {
             return;
         }
 
         let logical_size = self.logical_size.expect("logical size");
-        let fractional_scale = self.fractional_scale.unwrap_or(1.0);
+        let scale_factor = self.scale_factor.unwrap_or(1.0);
         let physical_size = (
-            (logical_size.0 as f32 * fractional_scale) as u32,
-            (logical_size.1 as f32 * fractional_scale) as u32,
+            (logical_size.0 as f64 * scale_factor) as u32,
+            (logical_size.1 as f64 * scale_factor) as u32,
         );
+
         self.events
-            .push_back(Event::Window(WindowEvent::Resize { physical_size }));
+            .push_back(Event::Window(WindowEvent::Resized { physical_size }));
+        if scale_factor_changed {
+            self.events
+                .push_back(Event::Window(WindowEvent::ScaleFactorChanged {
+                    scale_factor,
+                }));
+        }
     }
 }
 
@@ -891,7 +900,7 @@ impl Window for WaylandBackend {
     }
 
     fn pop_event(&mut self) -> Option<Event> {
-        self.events.pop_back()
+        self.events.pop_front()
     }
 
     fn set_cursor_shape(&mut self, cursor_shape: CursorShape) -> anyhow::Result<()> {
@@ -967,5 +976,9 @@ impl Window for WaylandBackend {
 
         self.cursor_shape = Some(cursor_shape);
         Ok(())
+    }
+
+    fn scale_factor(&self) -> f64 {
+        self.scale_factor.unwrap_or(1.0)
     }
 }

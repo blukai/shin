@@ -19,8 +19,6 @@ pub use texturepacker::*;
 pub use textureservice::*;
 
 pub trait Externs {
-    // NOTE: WidgetId is needed for maintaining focused (/activated) widgets.
-    type WidgetId: fmt::Debug + Clone;
     type TextureHandle: fmt::Debug + Clone;
 }
 
@@ -87,6 +85,10 @@ impl Rect {
 
     pub fn size(&self) -> Vec2 {
         self.max - self.min
+    }
+
+    pub fn translate_by(&self, delta: &Vec2) -> Self {
+        Self::new(self.min + *delta, self.max + *delta)
     }
 }
 

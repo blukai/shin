@@ -91,10 +91,14 @@ impl Window for WebBackend {
     }
 
     fn pop_event(&mut self) -> Option<Event> {
-        self.events.pop_back()
+        self.events.pop_front()
     }
 
     fn set_cursor_shape(&mut self, cursor_shape: CursorShape) -> anyhow::Result<()> {
+        unimplemented!()
+    }
+
+    fn scale_factor(&self) -> f64 {
         unimplemented!()
     }
 }

@@ -95,9 +95,14 @@ impl winit::application::ApplicationHandler for App {
 
         use winit::event::WindowEvent::*;
         let maybe_event = match window_event {
-            Resized(physical_size) => Some(Event::Window(WindowEvent::Resize {
+            Resized(physical_size) => Some(Event::Window(WindowEvent::Resized {
                 physical_size: (physical_size.width, physical_size.height),
             })),
+            ScaleFactorChanged { scale_factor, .. } => {
+                Some(Event::Window(WindowEvent::ScaleFactorChanged {
+                    scale_factor,
+                }))
+            }
             CursorMoved { position, .. } => {
                 let position = (position.x, position.y);
                 Some(Event::Pointer(PointerEvent::Motion { position }))
@@ -194,7 +199,7 @@ impl Window for WinitBackend {
     }
 
     fn pop_event(&mut self) -> Option<Event> {
-        self.app.events.pop_back()
+        self.app.events.pop_front()
     }
 
     fn set_cursor_shape(&mut self, cursor_shape: CursorShape) -> anyhow::Result<()> {
@@ -202,5 +207,13 @@ impl Window for WinitBackend {
             window.set_cursor(map_cursor_shape(cursor_shape));
         }
         Ok(())
+    }
+
+    fn scale_factor(&self) -> f64 {
+        self.app
+            .window
+            .as_ref()
+            .map(|window| window.scale_factor())
+            .unwrap_or(1.0)
     }
 }

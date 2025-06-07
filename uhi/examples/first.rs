@@ -6,19 +6,13 @@ use gpu::{
 };
 use raw_window_handle as rwh;
 use std::ffi::c_void;
-use window::{Event, PointerEvent, Window, WindowAttrs, WindowEvent};
+use window::{Event, Window, WindowAttrs, WindowEvent};
 
 const FONT: &[u8] = include_bytes!("../../fixtures/JetBrainsMono-Regular.ttf");
-
-#[derive(Debug, Clone)]
-enum UhiId {
-    Pep,
-}
 
 struct UhiExterns;
 
 impl uhi::Externs for UhiExterns {
-    type WidgetId = UhiId;
     type TextureHandle = <uhi::GlRenderer as uhi::Renderer>::TextureHandle;
 }
 
@@ -28,6 +22,7 @@ fn draw_mondriaan<E: uhi::Externs>(
     uhi: &mut uhi::Context<E>,
     font_handle: uhi::FontHandle,
     area: uhi::Rect,
+    scale_factor: f64,
 ) {
     use uhi::*;
 
@@ -181,17 +176,21 @@ fn draw_mondriaan<E: uhi::Externs>(
     }
 
     let text = "Tableau I, by Piet Mondriaan";
-    let text_width = uhi
+    let font_size = (14.0 * scale_factor) as f32;
+
+    let text_width =
+        uhi.font_service
+            .get_text_width(text, font_handle, font_size, &mut uhi.texture_service);
+    let font_line_height = uhi
         .font_service
-        .get_text_width(text, font_handle, &mut uhi.texture_service);
-    let font_line_height = uhi.font_service.get_font_line_height(font_handle);
+        .get_font_line_height(font_handle, font_size);
     let text_size = Vec2::new(text_width, font_line_height);
     let text_position = area.size() - Vec2::splat(24.0) - text_size;
     uhi.draw_rect(RectShape::with_fill(
         Rect::new(text_position, text_position + text_size),
         Fill::with_color(Rgba8::new(128, 128, 128, 128)),
     ));
-    uhi.draw_text(text, font_handle, text_position, Rgba8::WHITE);
+    uhi.draw_text(text, font_handle, font_size, text_position, Rgba8::WHITE);
 }
 
 struct Logger;
@@ -277,7 +276,7 @@ impl GraphicsContext {
         let uhi_renderer = uhi::GlRenderer::new(&gl)?;
         let font_handle = uhi
             .font_service
-            .create_font(FONT, 24.0)
+            .register_font_slice(FONT)
             .context("could not create font")?;
 
         *self = Self::Initialized(InitializedGraphicsContext {
@@ -342,7 +341,7 @@ impl Context {
                         }
                     }
                 }
-                Event::Window(WindowEvent::Resize { physical_size }) => {
+                Event::Window(WindowEvent::Resized { physical_size }) => {
                     self.window_size = physical_size;
 
                     if let GraphicsContext::Initialized(ref mut igc) = self.graphics_context {
@@ -369,7 +368,12 @@ impl Context {
         {
             let window_size = Vec2::new(self.window_size.0 as f32, self.window_size.1 as f32);
 
-            draw_mondriaan(uhi, font_handle, uhi::Rect::new(Vec2::ZERO, window_size));
+            draw_mondriaan(
+                uhi,
+                font_handle,
+                uhi::Rect::new(Vec2::ZERO, window_size),
+                self.window.scale_factor(),
+            );
 
             // TextEdit::new(UhiId::Pep, &mut "kek".to_string()).draw(uhi, font_handle);
 

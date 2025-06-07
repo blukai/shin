@@ -220,7 +220,7 @@ impl Context {
                         }
                     }
                 }
-                Event::Window(WindowEvent::Resize { physical_size }) => {
+                Event::Window(WindowEvent::Resized { physical_size }) => {
                     self.window_size = physical_size;
 
                     #[cfg(target_family = "wasm")]

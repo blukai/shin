@@ -102,21 +102,23 @@ pub struct TexturePackerEntry {
 pub struct TexturePacker {
     w: u32,
     h: u32,
+    gap: u32,
 
     tree: Tree<TexturePackerEntry>,
 }
 
 impl Default for TexturePacker {
     fn default() -> Self {
-        Self::new(DEFAULT_TEXTURE_WIDTH, DEFAULT_TEXTURE_HEIGHT)
+        Self::new(DEFAULT_TEXTURE_WIDTH, DEFAULT_TEXTURE_HEIGHT, 0)
     }
 }
 
 impl TexturePacker {
-    pub fn new(texture_width: u32, texture_height: u32) -> Self {
+    pub fn new(texture_width: u32, texture_height: u32, gap: u32) -> Self {
         Self {
             w: texture_width,
             h: texture_height,
+            gap,
 
             tree: Tree::new(TexturePackerEntry {
                 x: 0,
@@ -204,8 +206,8 @@ impl TexturePacker {
                     ..*entry
                 },
                 TexturePackerEntry {
-                    x: entry.x + width,
-                    w: dw,
+                    x: entry.x + width + self.gap,
+                    w: dw - self.gap,
                     h: cache_slot_height,
                     in_use: false,
                     ..*entry
@@ -221,9 +223,9 @@ impl TexturePacker {
                     ..*entry
                 },
                 TexturePackerEntry {
-                    y: entry.y + height,
+                    y: entry.y + height + self.gap,
                     w: cache_slot_width,
-                    h: dh,
+                    h: dh - self.gap,
                     in_use: false,
                     ..*entry
                 },

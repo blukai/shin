@@ -1,11 +1,7 @@
-pub use fontdue::layout::{
-    GlyphPosition, HorizontalAlign as TextHAlign, LayoutSettings as TextLayoutSttings,
-    VerticalAlign as TextVAlign, WrapStyle as TextWrapStyle,
-};
 use glam::Vec2;
 
 use crate::{
-    DrawBuffer, DrawData, Externs, Fill, FillTexture, FontHandle, FontService, LineShape, Rect,
+    DrawBuffer, DrawData, Externs, Fill, FillTexture, FontHandle, FontService, LineShape,
     RectShape, Rgba8, TextureKind, TextureService,
 };
 
@@ -14,8 +10,6 @@ pub struct Context<E: Externs> {
     pub texture_service: TextureService<E>,
 
     draw_buffer: DrawBuffer<E>,
-
-    focus: Option<E::WidgetId>,
 }
 
 impl<E: Externs> Default for Context<E> {
@@ -25,8 +19,6 @@ impl<E: Externs> Default for Context<E> {
             font_service: FontService::default(),
 
             draw_buffer: DrawBuffer::default(),
-
-            focus: None,
         }
     }
 }
@@ -56,42 +48,36 @@ impl<E: Externs> Context<E> {
 
     // text
 
-    pub fn draw_text(&mut self, text: &str, font_handle: FontHandle, position: Vec2, color: Rgba8) {
-        let mut x = position.x;
-        for ch in text.chars() {
-            let ch =
-                self.font_service
-                    .get_or_allocate_char(ch, font_handle, &mut self.texture_service);
+    pub fn draw_text(
+        &mut self,
+        text: &str,
+        font_handle: FontHandle,
+        font_size: f32,
+        position: Vec2,
+        color: Rgba8,
+    ) {
+        let font_ascent = self.font_service.get_font_ascent(font_handle, font_size);
+        let mut x_offset = position.x;
 
-            let metrics = ch.metrics();
-            let size = Vec2::new(metrics.width as f32, metrics.height as f32);
-            let min = Vec2::new(
-                x + metrics.bounds.xmin,
-                position.y + ch.font_ascent() - (metrics.bounds.ymin + metrics.bounds.height),
-            );
-            let max = min + size;
-            x += metrics.advance_width;
+        for ch in text.chars() {
+            let char_ref =
+                self.font_service
+                    .get_char(ch, font_handle, font_size, &mut self.texture_service);
+            let char_bounds = char_ref.bounds();
+            let y_offset = position.y + font_ascent;
 
             self.draw_buffer.push_rect(RectShape::with_fill(
-                Rect::new(min, max),
+                char_bounds.translate_by(&Vec2::new(x_offset, y_offset)),
                 Fill::new(
                     color,
                     FillTexture {
-                        kind: TextureKind::Internal(ch.tex_handle()),
-                        coords: ch.tex_coords(),
+                        kind: TextureKind::Internal(char_ref.tex_handle()),
+                        coords: char_ref.tex_coords(),
                     },
                 ),
             ));
+
+            x_offset += char_ref.advance_width();
         }
-    }
-
-    // other
-
-    pub fn set_focus(&mut self, id: Option<E::WidgetId>) {
-        self.focus = id;
-    }
-
-    pub fn get_focus(&self) -> Option<&E::WidgetId> {
-        self.focus.as_ref()
     }
 }
