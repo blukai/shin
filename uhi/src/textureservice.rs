@@ -1,8 +1,16 @@
-use std::{collections::HashMap, ops::Range};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Range,
+};
 
 use rangealloc::RangeAlloc;
 
 use crate::Externs;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TextureHandle {
+    id: u32,
+}
 
 #[derive(Debug, Clone)]
 pub enum TextureKind<E: Externs> {
@@ -13,6 +21,7 @@ pub enum TextureKind<E: Externs> {
 // NOTE: TextureFormat is modeled after webgpu, see:
 // - https://github.com/webgpu-native/webgpu-headers/blob/449359147fae26c07efe4fece25013df396287db/webgpu.h
 // - https://www.w3.org/TR/webgpu/#texture-formats
+#[derive(Debug)]
 pub enum TextureFormat {
     Rgba8Unorm,
     R8Unorm,
@@ -27,12 +36,15 @@ impl TextureFormat {
     }
 }
 
+#[derive(Debug)]
 pub struct TextureDesc {
     pub format: TextureFormat,
     pub w: u32,
     pub h: u32,
 }
 
+// NOTE: all the non-Debug stuff is derived because TextureRegion needs to be used as part of a
+// hash map key.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TextureRegion {
     pub x: u32,
@@ -41,33 +53,16 @@ pub struct TextureRegion {
     pub h: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TextureHandle {
-    id: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug)]
 pub struct TextureCreateTicket {
     handle: TextureHandle,
 }
 
-// NOTE: non_exhaustive supposedly ensures that this struct cannot be constructed outside.
-#[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TextureUpdateTicket {
-    handle: TextureHandle,
-    // NOTE: having region here theoretically enables update deduplication.
-    region: TextureRegion,
-}
-
-// TODO: make use of my RangeAlloc thing pointing into large chunk of linear memory. make some kind
-// of TransientBuffer thing or something, idk, might need a better name, but i think the idea is
-// solid. except that RangeAlloc is not highly enough efficient/optimized.
-pub struct TexturePendingUpdate<'a> {
-    pub handle: TextureHandle,
-    pub data: &'a [u8],
+pub struct TexturePendingUpdate<'a, E: Externs> {
+    pub region: TextureRegion,
+    pub texture: &'a E::TextureHandle,
     pub desc: &'a TextureDesc,
-    pub region: &'a TextureRegion,
+    pub data: &'a [u8],
 }
 
 struct Materialization<E: Externs> {
@@ -87,11 +82,10 @@ pub struct TextureService<E: Externs> {
     buf: Vec<u8>,
     range_alloc: RangeAlloc<usize>,
 
-    pending_creates: HashMap<TextureCreateTicket, TextureDesc>,
-    // TODO: make use of my RangeAlloc thing pointing into large chunk of linear memory. make some
-    // kind of TransientBuffer thing or something, idk, might need a better name, but i think the
-    // idea is solid. except that RangeAlloc is not highly enough efficient/optimized.
-    pending_updates: HashMap<TextureUpdateTicket, Range<usize>>,
+    pending_creates: HashMap<TextureHandle, TextureDesc>,
+    pending_updates: HashMap<(TextureHandle, TextureRegion), Range<usize>>,
+    pending_destroys: HashSet<TextureHandle>,
+
     materializations: HashMap<TextureHandle, Materialization<E>>,
 }
 
@@ -105,6 +99,8 @@ impl<E: Externs> Default for TextureService<E> {
 
             pending_creates: HashMap::default(),
             pending_updates: HashMap::default(),
+            pending_destroys: HashSet::default(),
+
             materializations: HashMap::default(),
         }
     }
@@ -116,8 +112,10 @@ impl<E: Externs> TextureService<E> {
             id: self.handle_id_acc,
         };
         self.handle_id_acc += 1;
-        self.pending_creates
-            .insert(TextureCreateTicket { handle }, desc);
+
+        log::debug!("TextureService::enque_create ({handle:?}: {desc:?})");
+
+        self.pending_creates.insert(handle, desc);
         handle
     }
 
@@ -125,32 +123,41 @@ impl<E: Externs> TextureService<E> {
         self.pending_creates
             .iter()
             .next()
-            .map(|(k, v)| (k.clone(), v))
+            .map(|(handle, desc)| (TextureCreateTicket { handle: *handle }, desc))
     }
 
     pub fn commit_create(&mut self, ticket: TextureCreateTicket, texture: E::TextureHandle) {
+        log::debug!("TextureService::commit_create ({:?})", &ticket.handle);
+
+        let TextureCreateTicket { handle } = ticket;
         let desc = self
             .pending_creates
-            .remove(&ticket)
+            .remove(&handle)
             .expect("pending create");
         let old_materialization = self
             .materializations
-            .insert(ticket.handle, Materialization { texture, desc });
+            .insert(handle, Materialization { texture, desc });
         assert!(old_materialization.is_none());
+    }
+
+    /// NOTE: this will panic if texture was not yet created.
+    pub fn get(&self, handle: TextureHandle) -> &E::TextureHandle {
+        self.materializations
+            .get(&handle)
+            .map(|m| &m.texture)
+            .expect("dangling handle")
     }
 
     /// NOTE: returned buffer points into uninitialized or dirty memory (non-zeroed). you need to
     /// write each and every byte.
     pub fn enque_update(&mut self, handle: TextureHandle, region: TextureRegion) -> &mut [u8] {
+        log::debug!("TextureService::enque_update ({handle:?}: {region:?})");
+
         let tex_format = self
             .materializations
             .get(&handle)
             .map(|m| &m.desc.format)
-            .or_else(|| {
-                self.pending_creates
-                    .get(&TextureCreateTicket { handle })
-                    .map(|desc| &desc.format)
-            })
+            .or_else(|| self.pending_creates.get(&handle).map(|desc| &desc.format))
             .expect("materialized or pending-create texture");
         let region_size = (region.w * region.h * tex_format.block_size() as u32) as usize;
 
@@ -172,40 +179,45 @@ impl<E: Externs> TextureService<E> {
             });
         let dst = &mut self.buf[range.clone()];
 
-        self.pending_updates
-            .insert(TextureUpdateTicket { handle, region }, range);
+        self.pending_updates.insert((handle, region), range);
 
         dst
     }
 
-    pub fn next_pending_update(&self) -> Option<(TextureUpdateTicket, TexturePendingUpdate)> {
-        self.pending_updates.iter().next().map(|(ticket, range)| {
-            (
-                ticket.clone(),
-                TexturePendingUpdate {
-                    handle: ticket.handle,
-                    data: &self.buf[range.clone()],
-                    desc: &self
-                        .materializations
-                        .get(&ticket.handle)
-                        .expect("materialized texture")
-                        .desc,
-                    region: &ticket.region,
-                },
-            )
+    pub fn next_pending_update(&mut self) -> Option<TexturePendingUpdate<E>> {
+        let Some(key) = self.pending_updates.iter().next().map(|(k, _)| k.clone()) else {
+            return None;
+        };
+        let range = self.pending_updates.remove(&key).unwrap();
+        let (handle, region) = key;
+
+        let materialization = self.materializations.get(&handle).expect("dangling handle");
+
+        Some(TexturePendingUpdate {
+            region,
+            texture: &materialization.texture,
+            desc: &materialization.desc,
+            data: &self.buf[range],
         })
     }
 
-    pub fn commit_update(&mut self, ticket: TextureUpdateTicket) {
-        let range = self.pending_updates.remove(&ticket).expect("valid ticket");
-        self.range_alloc.deallocate(range);
+    pub fn enque_destroy(&mut self, handle: TextureHandle) {
+        log::debug!("TextureService::enque_destroy ({handle:?})");
+
+        self.pending_destroys.insert(handle);
     }
 
-    // NOTE: this will panic if texture was not yet created.
-    pub fn get(&self, handle: TextureHandle) -> &E::TextureHandle {
-        self.materializations
-            .get(&handle)
-            .map(|m| &m.texture)
-            .expect("dangling handle")
+    pub fn next_pending_destroy(&mut self) -> Option<E::TextureHandle> {
+        while let Some(handle) = self.pending_destroys.iter().next().copied() {
+            self.pending_destroys.remove(&handle);
+
+            self.pending_updates.retain(|(h, _), _| *h != handle);
+            self.pending_creates.remove(&handle);
+
+            if let Some(materialization) = self.materializations.remove(&handle) {
+                return Some(materialization.texture);
+            }
+        }
+        return None;
     }
 }

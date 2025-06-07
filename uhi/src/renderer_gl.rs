@@ -189,6 +189,10 @@ impl GlRenderer {
     where
         E: Externs<TextureHandle = <Self as Renderer>::TextureHandle>,
     {
+        while let Some(texture) = texture_service.next_pending_destroy() {
+            unsafe { gl.delete_texture(texture) };
+        }
+
         while let Some((ticket, desc)) = texture_service.next_pending_create() {
             let texture = unsafe {
                 let texture = gl
@@ -242,10 +246,9 @@ impl GlRenderer {
             texture_service.commit_create(ticket, texture);
         }
 
-        while let Some((ticket, update)) = texture_service.next_pending_update() {
-            let texture = texture_service.get(update.handle);
+        while let Some(update) = texture_service.next_pending_update() {
             unsafe {
-                gl.bind_texture(gl::TEXTURE_2D, Some(*texture));
+                gl.bind_texture(gl::TEXTURE_2D, Some(*update.texture));
                 // TODO: describe_texture_format thing
                 gl.tex_sub_image_2d(
                     gl::TEXTURE_2D,
@@ -259,7 +262,6 @@ impl GlRenderer {
                     update.data.as_ptr() as *const c_void,
                 );
             }
-            texture_service.commit_update(ticket);
         }
 
         Ok(())

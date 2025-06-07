@@ -50,13 +50,14 @@ struct FontInstance {
 }
 
 impl FontInstance {
-    fn new(font: &FontArc, pt_size: f32) -> Self {
+    fn new(font: &FontArc, pt_size: f32, window_scale_factor: Option<f64>) -> Self {
         // NOTE: see https://github.com/alexheretic/ab-glyph/issues/14 for details.
-        let scale_factor = font
+        let font_scale_factor = font
             .units_per_em()
             .map(|units_per_em| font.height_unscaled() / units_per_em)
             .unwrap_or(1.0);
-        let scale = PxScale::from(pt_size * scale_factor);
+        let scale =
+            PxScale::from(pt_size * window_scale_factor.unwrap_or(1.0) as f32 * font_scale_factor);
 
         let scaled = font.as_scaled(scale);
         let ascent = scaled.ascent();
@@ -196,6 +197,7 @@ fn rasterize_char<E: Externs>(
 
 #[derive(Default)]
 pub struct FontService {
+    scale_factor: Option<f64>,
     // NOTE: i don't need an Arc, but whatever. FontArc makes it convenient because it wraps both
     // FontRef and FontVec.
     fonts: Vec<FontArc>,
@@ -204,6 +206,19 @@ pub struct FontService {
 }
 
 impl FontService {
+    pub fn set_scale_factor<E: Externs>(
+        &mut self,
+        scale_factor: f64,
+        texture_service: &mut TextureService<E>,
+    ) {
+        self.scale_factor = Some(scale_factor);
+
+        self.font_instances.clear();
+        for tex_page in self.tex_pages.drain(..) {
+            texture_service.enque_destroy(tex_page.tex_handle);
+        }
+    }
+
     pub fn register_font_slice(&mut self, font_data: &'static [u8]) -> anyhow::Result<FontHandle> {
         let idx = self.fonts.len();
         self.fonts.push(FontArc::try_from_slice(font_data)?);
@@ -232,7 +247,7 @@ impl FontService {
             .font_instances
             .entry(make_font_instance_key(font_handle, pt_size))
             // font instance does not exist
-            .or_insert_with(|| FontInstance::new(font, pt_size));
+            .or_insert_with(|| FontInstance::new(font, pt_size, self.scale_factor));
 
         let rasterized_char = font_instance
             .rasterized_chars
@@ -276,7 +291,13 @@ impl FontService {
 
         self.font_instances
             .entry(make_font_instance_key(font_handle, pt_size))
-            .or_insert_with(|| FontInstance::new(&self.fonts[font_handle.idx as usize], pt_size))
+            .or_insert_with(|| {
+                FontInstance::new(
+                    &self.fonts[font_handle.idx as usize],
+                    pt_size,
+                    self.scale_factor,
+                )
+            })
     }
 
     #[inline]

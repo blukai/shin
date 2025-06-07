@@ -22,7 +22,6 @@ fn draw_mondriaan<E: uhi::Externs>(
     uhi: &mut uhi::Context<E>,
     font_handle: uhi::FontHandle,
     area: uhi::Rect,
-    scale_factor: f64,
 ) {
     use uhi::*;
 
@@ -176,7 +175,7 @@ fn draw_mondriaan<E: uhi::Externs>(
     }
 
     let text = "Tableau I, by Piet Mondriaan";
-    let font_size = (14.0 * scale_factor) as f32;
+    let font_size = 14.0;
 
     let text_width =
         uhi.font_service
@@ -348,6 +347,13 @@ impl Context {
                         igc.egl_surface.resize(physical_size.0, physical_size.1)?;
                     }
                 }
+                Event::Window(WindowEvent::ScaleFactorChanged { scale_factor }) => {
+                    if let GraphicsContext::Initialized(ref mut igc) = self.graphics_context {
+                        igc.uhi
+                            .font_service
+                            .set_scale_factor(scale_factor, &mut igc.uhi.texture_service);
+                    }
+                }
                 Event::Window(WindowEvent::CloseRequested) => {
                     self.close_requested = true;
                     return Ok(());
@@ -368,12 +374,7 @@ impl Context {
         {
             let window_size = Vec2::new(self.window_size.0 as f32, self.window_size.1 as f32);
 
-            draw_mondriaan(
-                uhi,
-                font_handle,
-                uhi::Rect::new(Vec2::ZERO, window_size),
-                self.window.scale_factor(),
-            );
+            draw_mondriaan(uhi, font_handle, uhi::Rect::new(Vec2::ZERO, window_size));
 
             // TextEdit::new(UhiId::Pep, &mut "kek".to_string()).draw(uhi, font_handle);
 
