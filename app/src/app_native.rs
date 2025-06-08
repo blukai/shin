@@ -1,0 +1,209 @@
+use std::ffi::c_void;
+
+use gpu::{egl, gl};
+use raw_window_handle as rwh;
+use window::{Event, Window, WindowAttrs, WindowEvent};
+
+use crate::{AppContext, AppHandler};
+
+struct Logger;
+
+impl log::Log for Logger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::max_level()
+    }
+
+    fn log(&self, record: &log::Record) {
+        println!(
+            "{level:<5} {file}:{line} > {text}",
+            level = record.level(),
+            file = record.file().unwrap_or_else(|| record.target()),
+            line = record
+                .line()
+                .map_or_else(|| "??".to_string(), |line| line.to_string()),
+            text = record.args(),
+        );
+    }
+
+    fn flush(&self) {}
+}
+
+impl Logger {
+    fn init() {
+        log::set_logger(&Logger).expect("could not set logger");
+        log::set_max_level(log::LevelFilter::Trace);
+    }
+}
+
+struct InitializedGraphicsContext {
+    egl_context: egl::Context,
+    egl_surface: egl::Surface,
+    gl_context: gl::Context,
+}
+
+enum GraphicsContext {
+    Initialized(InitializedGraphicsContext),
+    Uninit,
+}
+
+impl GraphicsContext {
+    fn new_uninit() -> Self {
+        Self::Uninit
+    }
+
+    fn init(
+        &mut self,
+        display_handle: rwh::DisplayHandle,
+        window_handle: rwh::WindowHandle,
+        width: u32,
+        height: u32,
+    ) -> anyhow::Result<&mut InitializedGraphicsContext> {
+        assert!(matches!(self, Self::Uninit));
+
+        let egl_context = egl::Context::new(
+            display_handle,
+            egl::Config {
+                min_swap_interval: Some(0),
+                ..egl::Config::default()
+            },
+        )?;
+        let egl_surface = egl::Surface::new(&egl_context, window_handle, width, height)?;
+
+        egl_context.make_current(egl_surface.as_ptr())?;
+
+        // TODO: figure out an okay way to include vsync toggle.
+        // context.set_swap_interval(&egl, 0)?;
+
+        let gl_context = unsafe {
+            gl::Context::load_with(|procname| egl_context.get_proc_address(procname) as *mut c_void)
+        };
+
+        *self = Self::Initialized(InitializedGraphicsContext {
+            egl_context,
+            egl_surface,
+            gl_context,
+        });
+        let Self::Initialized(init) = self else {
+            unreachable!();
+        };
+        Ok(init)
+    }
+}
+
+struct Context<A: AppHandler> {
+    window: Box<dyn Window>,
+    graphics_context: GraphicsContext,
+    app_handler: Option<A>,
+    close_requested: bool,
+}
+
+impl<A: AppHandler> Context<A> {
+    fn new(window_attrs: WindowAttrs) -> anyhow::Result<Self> {
+        let window = window::create_window(window_attrs)?;
+        let graphics_context = GraphicsContext::new_uninit();
+
+        Ok(Self {
+            window,
+            graphics_context,
+            app_handler: None,
+            close_requested: false,
+        })
+    }
+
+    fn iterate(&mut self) -> anyhow::Result<()> {
+        self.window.pump_events()?;
+
+        while let Some(event) = self.window.pop_event() {
+            if !matches!(event, Event::Pointer(window::PointerEvent::Motion { .. })) {
+                log::debug!("event: {event:?}");
+            }
+
+            match event {
+                Event::Window(WindowEvent::Configure { logical_size }) => {
+                    match self.graphics_context {
+                        GraphicsContext::Uninit => {
+                            let igc = self.graphics_context.init(
+                                self.window.display_handle()?,
+                                self.window.window_handle()?,
+                                logical_size.0,
+                                logical_size.1,
+                            )?;
+
+                            self.app_handler = Some(A::create(AppContext {
+                                window: self.window.as_mut(),
+                                gl: &mut igc.gl_context,
+                            }));
+                        }
+
+                        GraphicsContext::Initialized(_) => {
+                            unreachable!();
+                        }
+                    }
+
+                    continue;
+                }
+
+                Event::Window(WindowEvent::Resized { physical_size }) => {
+                    if let GraphicsContext::Initialized(ref mut igc) = self.graphics_context {
+                        igc.egl_surface.resize(physical_size.0, physical_size.1)?;
+                    }
+                }
+
+                Event::Window(WindowEvent::CloseRequested) => {
+                    self.close_requested = true;
+                    return Ok(());
+                }
+
+                _ => {}
+            }
+
+            let (
+                Some(app_handler),
+                GraphicsContext::Initialized(InitializedGraphicsContext { gl_context: gl, .. }),
+            ) = (self.app_handler.as_mut(), &mut self.graphics_context)
+            else {
+                continue;
+            };
+            app_handler.handle_event(
+                AppContext {
+                    window: self.window.as_mut(),
+                    // TODO: should gl be included into event context? prob not.
+                    gl,
+                },
+                event,
+            );
+        }
+
+        let (
+            Some(app_handler),
+            GraphicsContext::Initialized(InitializedGraphicsContext {
+                egl_context,
+                egl_surface,
+                gl_context: gl,
+            }),
+        ) = (self.app_handler.as_mut(), &mut self.graphics_context)
+        else {
+            return Ok(());
+        };
+
+        egl_context.make_current(egl_surface.as_ptr())?;
+
+        app_handler.update(AppContext {
+            window: self.window.as_mut(),
+            gl,
+        });
+
+        egl_context.swap_buffers(egl_surface.as_ptr())?;
+
+        Ok(())
+    }
+}
+
+pub fn run<A: AppHandler>(window_attrs: WindowAttrs) {
+    Logger::init();
+
+    let mut ctx = Context::<A>::new(window_attrs).expect("could not create app context");
+    while !ctx.close_requested {
+        ctx.iterate().expect("iteration failure");
+    }
+}

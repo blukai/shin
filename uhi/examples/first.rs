@@ -1,12 +1,7 @@
-use anyhow::Context as _;
+use app::AppHandler;
 use glam::Vec2;
-use gpu::{
-    egl,
-    gl::{self, GlContexter},
-};
-use raw_window_handle as rwh;
-use std::ffi::c_void;
-use window::{Event, Window, WindowAttrs, WindowEvent};
+use gpu::gl::{self, GlContext};
+use window::{Event, WindowAttrs, WindowEvent};
 
 const FONT: &[u8] = include_bytes!("../../fixtures/JetBrainsMono-Regular.ttf");
 
@@ -192,222 +187,67 @@ fn draw_mondriaan<E: uhi::Externs>(
     uhi.draw_text(text, font_handle, font_size, text_position, Rgba8::WHITE);
 }
 
-struct Logger;
-
-impl log::Log for Logger {
-    fn enabled(&self, metadata: &log::Metadata) -> bool {
-        metadata.level() <= log::max_level()
-    }
-
-    fn log(&self, record: &log::Record) {
-        println!(
-            "{level:<5} {file}:{line} > {text}",
-            level = record.level(),
-            file = record.file().unwrap_or_else(|| record.target()),
-            line = record
-                .line()
-                .map_or_else(|| "??".to_string(), |line| line.to_string()),
-            text = record.args(),
-        );
-    }
-
-    fn flush(&self) {}
-}
-
-impl Logger {
-    fn init() {
-        log::set_logger(&Logger).expect("could not set logger");
-        log::set_max_level(log::LevelFilter::Trace);
-    }
-}
-
-struct InitializedGraphicsContext {
-    egl_context: egl::Context,
-    egl_surface: egl::Surface,
-    gl: gl::Context,
-    uhi: uhi::Context<UhiExterns>,
+struct App {
+    uhi_context: uhi::Context<UhiExterns>,
+    uhi_font_handle: uhi::FontHandle,
     uhi_renderer: uhi::GlRenderer,
-    font_handle: uhi::FontHandle,
 }
 
-enum GraphicsContext {
-    Initialized(InitializedGraphicsContext),
-    Uninit,
-}
-
-impl GraphicsContext {
-    fn new_uninit() -> Self {
-        Self::Uninit
-    }
-
-    fn init(
-        &mut self,
-        display_handle: rwh::DisplayHandle,
-        window_handle: rwh::WindowHandle,
-        width: u32,
-        height: u32,
-    ) -> anyhow::Result<&mut InitializedGraphicsContext> {
-        assert!(matches!(self, Self::Uninit));
-
-        let egl_context = egl::Context::new(
-            display_handle,
-            egl::Config {
-                min_swap_interval: Some(0),
-                ..egl::Config::default()
-            },
-        )?;
-        let egl_surface = egl::Surface::new(&egl_context, window_handle, width, height)?;
-
-        egl_context.make_current(egl_surface.as_ptr())?;
-
-        let gl = unsafe {
-            gl::Context::load_with(|procname| egl_context.get_proc_address(procname) as *mut c_void)
-        };
-
-        let version = unsafe { gl.get_string(gl::VERSION) }.context("could not get version")?;
-        let shading_language_version = unsafe { gl.get_string(gl::SHADING_LANGUAGE_VERSION) }
-            .context("could not get shading language version")?;
-        log::info!(
-            "initialized gl version {version}, shading language version {shading_language_version}"
-        );
-
-        let mut uhi = uhi::Context::default();
-        let uhi_renderer = uhi::GlRenderer::new(&gl)?;
-        let font_handle = uhi
+impl AppHandler for App {
+    fn create(ctx: app::AppContext) -> Self {
+        let mut uhi_context = uhi::Context::default();
+        let uhi_font_handle = uhi_context
             .font_service
             .register_font_slice(FONT)
-            .context("could not create font")?;
+            .expect("invalid font");
+        let uhi_renderer = uhi::GlRenderer::new(ctx.gl).expect("uhi gl renderer fucky wucky");
 
-        *self = Self::Initialized(InitializedGraphicsContext {
-            egl_context,
-            egl_surface,
-            gl,
-
-            uhi,
+        Self {
+            uhi_context,
+            uhi_font_handle,
             uhi_renderer,
-            font_handle,
-        });
-        let Self::Initialized(init) = self else {
-            unreachable!();
-        };
-        Ok(init)
-    }
-}
-
-struct Context {
-    window: Box<dyn Window>,
-    window_size: (u32, u32),
-    graphics_context: GraphicsContext,
-    close_requested: bool,
-}
-
-impl Context {
-    fn new() -> anyhow::Result<Self> {
-        let window = window::create_window(WindowAttrs::default())?;
-        let graphics_context = GraphicsContext::new_uninit();
-
-        Ok(Self {
-            window,
-            window_size: (0, 0),
-            graphics_context,
-            close_requested: false,
-        })
+        }
     }
 
-    fn iterate(&mut self) -> anyhow::Result<()> {
-        self.window.pump_events()?;
-
-        while let Some(event) = self.window.pop_event() {
-            if !matches!(event, Event::Pointer(window::PointerEvent::Motion { .. })) {
-                log::debug!("event: {event:?}");
+    fn handle_event(&mut self, _ctx: app::AppContext, event: Event) {
+        match event {
+            Event::Window(WindowEvent::ScaleFactorChanged { scale_factor }) => {
+                self.uhi_context
+                    .font_service
+                    .set_scale_factor(scale_factor, &mut self.uhi_context.texture_service);
             }
-
-            match event {
-                Event::Window(WindowEvent::Configure { logical_size }) => {
-                    self.window_size = logical_size;
-
-                    match self.graphics_context {
-                        GraphicsContext::Uninit => {
-                            self.graphics_context.init(
-                                self.window.display_handle()?,
-                                self.window.window_handle()?,
-                                logical_size.0,
-                                logical_size.1,
-                            )?;
-                        }
-                        GraphicsContext::Initialized(ref mut igc) => {
-                            igc.egl_surface.resize(logical_size.0, logical_size.1)?;
-                        }
-                    }
-                }
-                Event::Window(WindowEvent::Resized { physical_size }) => {
-                    self.window_size = physical_size;
-
-                    if let GraphicsContext::Initialized(ref mut igc) = self.graphics_context {
-                        igc.egl_surface.resize(physical_size.0, physical_size.1)?;
-                    }
-                }
-                Event::Window(WindowEvent::ScaleFactorChanged { scale_factor }) => {
-                    if let GraphicsContext::Initialized(ref mut igc) = self.graphics_context {
-                        igc.uhi
-                            .font_service
-                            .set_scale_factor(scale_factor, &mut igc.uhi.texture_service);
-                    }
-                }
-                Event::Window(WindowEvent::CloseRequested) => {
-                    self.close_requested = true;
-                    return Ok(());
-                }
-                _ => {}
-            }
+            _ => {}
         }
+    }
 
-        if let GraphicsContext::Initialized(InitializedGraphicsContext {
-            ref mut uhi,
-            ref uhi_renderer,
-            font_handle,
+    fn update(&mut self, ctx: app::AppContext) {
+        let window_size = ctx.window.size();
 
-            ref egl_context,
-            ref egl_surface,
-            ref gl,
-        }) = self.graphics_context
-        {
-            let window_size = Vec2::new(self.window_size.0 as f32, self.window_size.1 as f32);
+        unsafe { ctx.gl.clear_color(0.0, 0.0, 0.3, 1.0) };
+        unsafe { ctx.gl.clear(gl::COLOR_BUFFER_BIT) };
 
-            draw_mondriaan(uhi, font_handle, uhi::Rect::new(Vec2::ZERO, window_size));
+        draw_mondriaan(
+            &mut self.uhi_context,
+            self.uhi_font_handle,
+            uhi::Rect::new(
+                Vec2::ZERO,
+                Vec2::new(window_size.0 as f32, window_size.1 as f32),
+            ),
+        );
+        // TextEdit::new(UhiId::Pep, &mut "kek".to_string()).draw(uhi, font_handle);
 
-            // TextEdit::new(UhiId::Pep, &mut "kek".to_string()).draw(uhi, font_handle);
-
-            unsafe {
-                egl_context.make_current(egl_surface.as_ptr())?;
-
-                gl.clear_color(0.0, 0.0, 0.3, 1.0);
-                gl.clear(gl::COLOR_BUFFER_BIT);
-
-                uhi_renderer.render(uhi, gl, self.window_size)?;
-
-                egl_context.swap_buffers(egl_surface.as_ptr())?;
-            }
-
-            uhi.clear_draw_buffer();
-        }
-
-        Ok(())
+        self.uhi_renderer
+            .render(&mut self.uhi_context, ctx.gl, window_size)
+            .expect("uhi renderer fucky wucky");
+        self.uhi_context.clear_draw_buffer();
     }
 }
 
 fn main() {
-    Logger::init();
-
-    let mut ctx = Context::new().expect("could not create context");
-
-    while !ctx.close_requested {
-        ctx.iterate().expect("iteration failure");
-    }
+    app::run::<App>(WindowAttrs::default());
 }
 
 // TODO: figure out input state.
 //
 // widgets don't have to have event handler and drawer. it would be nicer to combine everything
 // into a single function.
-

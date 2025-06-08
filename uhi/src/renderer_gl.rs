@@ -1,7 +1,7 @@
 use std::{ffi::c_void, mem::offset_of, ptr::null};
 
 use anyhow::{Context as _, anyhow};
-use gpu::gl::{self, GlContexter};
+use gpu::gl::{self, GlContext};
 
 use crate::{Context, Externs, TextureKind, TextureService, Vertex};
 

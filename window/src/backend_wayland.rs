@@ -851,19 +851,14 @@ impl WaylandBackend {
             return;
         }
 
-        let logical_size = self.logical_size.expect("logical size");
-        let scale_factor = self.scale_factor.unwrap_or(1.0);
-        let physical_size = (
-            (logical_size.0 as f64 * scale_factor) as u32,
-            (logical_size.1 as f64 * scale_factor) as u32,
-        );
+        self.events.push_back(Event::Window(WindowEvent::Resized {
+            physical_size: self.size(),
+        }));
 
-        self.events
-            .push_back(Event::Window(WindowEvent::Resized { physical_size }));
         if scale_factor_changed {
             self.events
                 .push_back(Event::Window(WindowEvent::ScaleFactorChanged {
-                    scale_factor,
+                    scale_factor: self.scale_factor(),
                 }));
         }
     }
@@ -980,5 +975,14 @@ impl Window for WaylandBackend {
 
     fn scale_factor(&self) -> f64 {
         self.scale_factor.unwrap_or(1.0)
+    }
+
+    fn size(&self) -> (u32, u32) {
+        let logical_size = self.logical_size.expect("logical size");
+        let scale_factor = self.scale_factor.unwrap_or(1.0);
+        (
+            (logical_size.0 as f64 * scale_factor) as u32,
+            (logical_size.1 as f64 * scale_factor) as u32,
+        )
     }
 }

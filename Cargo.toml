@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+  "app",
   "dynlib",
   "gl-generator",
   "gpu",
@@ -24,6 +25,7 @@ log = "0.4"
 raw-window-handle = { version = "0.6", features = ["std"] } # TODO: get rid of rwh
 winit = "0.30"
 # workspace
+app = { path = "app" }
 dynlib = { path = "dynlib" }
 gl-generator = { path = "gl-generator" }
 gpu = { path = "gpu" }
@@ -44,6 +46,7 @@ anyhow.workspace = true
 log.workspace = true
 raw-window-handle.workspace = true
 # workspace
+app.workspace = true
 gpu.workspace = true
 window.workspace = true
 

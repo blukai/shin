@@ -145,7 +145,7 @@ impl<E: Externs> TextureService<E> {
         self.materializations
             .get(&handle)
             .map(|m| &m.texture)
-            .expect("dangling handle")
+            .unwrap_or_else(|| panic!("dangling handle ({handle:?})"))
     }
 
     /// NOTE: returned buffer points into uninitialized or dirty memory (non-zeroed). you need to
@@ -211,7 +211,13 @@ impl<E: Externs> TextureService<E> {
         while let Some(handle) = self.pending_destroys.iter().next().copied() {
             self.pending_destroys.remove(&handle);
 
-            self.pending_updates.retain(|(h, _), _| *h != handle);
+            self.pending_updates.retain(|(h, _), range| {
+                let ok = *h != handle;
+                if !ok {
+                    self.range_alloc.deallocate(range.clone());
+                }
+                ok
+            });
             self.pending_creates.remove(&handle);
 
             if let Some(materialization) = self.materializations.remove(&handle) {

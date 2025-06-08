@@ -17,6 +17,8 @@ rangealloc.workspace = true
 [dev-dependencies]
 raw-window-handle.workspace = true
 # workspace
+app.workspace = true
+gpu.workspace = true
 window.workspace = true
 
 [features]

@@ -213,10 +213,11 @@ impl FontService {
     ) {
         self.scale_factor = Some(scale_factor);
 
-        self.font_instances.clear();
         for tex_page in self.tex_pages.drain(..) {
             texture_service.enque_destroy(tex_page.tex_handle);
         }
+
+        self.font_instances.clear();
     }
 
     pub fn register_font_slice(&mut self, font_data: &'static [u8]) -> anyhow::Result<FontHandle> {

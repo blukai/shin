@@ -28,9 +28,7 @@ pub use gl46::*;
 #[cfg(target_family = "wasm")]
 pub use webgl2::*;
 
-// NOTE: i couldn't find any specifics on naming conventions in rust, thus i'm going to use what i
-// used to: https://go.dev/doc/effective_go#interface-names
-pub trait GlContexter {
+pub trait GlContext {
     type Buffer;
     type Program;
     type Shader;
@@ -130,7 +128,7 @@ pub trait GlContexter {
     unsafe fn viewport(&self, x: GLint, y: GLint, width: GLsizei, height: GLsizei);
 }
 
-pub type Buffer = <Context as GlContexter>::Buffer;
-pub type Program = <Context as GlContexter>::Program;
-pub type Shader = <Context as GlContexter>::Shader;
-pub type Texture = <Context as GlContexter>::Texture;
+pub type Buffer = <Context as GlContext>::Buffer;
+pub type Program = <Context as GlContext>::Program;
+pub type Shader = <Context as GlContext>::Shader;
+pub type Texture = <Context as GlContext>::Texture;

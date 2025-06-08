@@ -1,6 +1,6 @@
 use std::ffi::{CStr, c_void};
 
-use super::GlContexter;
+use super::GlContext;
 use super::types::*;
 
 unsafe extern "C" {
@@ -18,7 +18,7 @@ impl Context {
     }
 }
 
-impl GlContexter for Context {
+impl GlContext for Context {
     type Buffer = u32;
     type Program = u32;
     type Shader = u32;

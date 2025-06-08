@@ -65,6 +65,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34ac096ce696dc2fcabef30516bb13c0a68a11d30131d3df6f04711467681b04"
 
 [[package]]
+name = "app"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "gpu",
+ "log",
+ "raw-window-handle",
+ "window",
+]
+
+[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -965,6 +976,7 @@ name = "shin"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "app",
  "gpu",
  "log",
  "raw-window-handle",
@@ -1133,6 +1145,7 @@ version = "0.0.0"
 dependencies = [
  "ab_glyph",
  "anyhow",
+ "app",
  "glam",
  "gpu",
  "log",

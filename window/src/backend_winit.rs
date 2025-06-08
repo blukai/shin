@@ -210,10 +210,13 @@ impl Window for WinitBackend {
     }
 
     fn scale_factor(&self) -> f64 {
-        self.app
-            .window
-            .as_ref()
-            .map(|window| window.scale_factor())
-            .unwrap_or(1.0)
+        let window = self.app.window.as_ref().expect("initialized window");
+        window.scale_factor()
+    }
+
+    fn size(&self) -> (u32, u32) {
+        let window = self.app.window.as_ref().expect("initialized window");
+        let inner_size = window.inner_size();
+        (inner_size.width, inner_size.height)
     }
 }

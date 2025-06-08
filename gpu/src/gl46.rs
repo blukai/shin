@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::{Context as _, anyhow};
 
-use super::GlContexter;
+use super::GlContext;
 use super::enums::*;
 use super::types::*;
 
@@ -32,7 +32,7 @@ impl Context {
     }
 }
 
-impl GlContexter for Context {
+impl GlContext for Context {
     type Buffer = NonZero<GLuint>;
     type Program = NonZero<GLuint>;
     type Shader = NonZero<GLuint>;

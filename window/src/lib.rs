@@ -59,6 +59,7 @@ pub trait Window: rwh::HasDisplayHandle + rwh::HasWindowHandle {
     fn pop_event(&mut self) -> Option<Event>;
     fn set_cursor_shape(&mut self, cursor_shape: CursorShape) -> anyhow::Result<()>;
     fn scale_factor(&self) -> f64;
+    fn size(&self) -> (u32, u32);
 }
 
 pub fn create_window(window_attrs: WindowAttrs) -> anyhow::Result<Box<dyn Window>> {
