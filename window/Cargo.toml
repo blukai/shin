@@ -8,6 +8,8 @@ anyhow.workspace = true
 log.workspace = true
 raw-window-handle.workspace = true
 winit = { workspace = true, optional = true }
+# workspace
+input.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 libc.workspace = true

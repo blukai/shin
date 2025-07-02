@@ -70,6 +70,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "gl",
+ "input",
  "log",
  "raw-window-handle",
  "window",
@@ -414,6 +415,13 @@ checksum = "62f822373a4fe84d4bb149bf54e584a7f4abec90e072ed49cda0edea5b95471f"
 dependencies = [
  "equivalent",
  "hashbrown",
+]
+
+[[package]]
+name = "input"
+version = "0.0.0"
+dependencies = [
+ "nohash",
 ]
 
 [[package]]
@@ -978,6 +986,7 @@ dependencies = [
  "anyhow",
  "app",
  "gl",
+ "input",
  "log",
  "raw-window-handle",
  "window",
@@ -1148,6 +1157,7 @@ dependencies = [
  "app",
  "gl",
  "glam",
+ "input",
  "log",
  "nohash",
  "rangealloc",
@@ -1408,6 +1418,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "dynlib",
+ "input",
  "libc",
  "log",
  "raw-window-handle",

@@ -2,9 +2,10 @@ use std::collections::VecDeque;
 use std::ffi::CString;
 
 use anyhow::anyhow;
+use input::CursorShape;
 use raw_window_handle as rwh;
 
-use crate::{CursorShape, DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent};
+use crate::{DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent};
 
 pub mod js_sys {
     use std::ffi::{c_char, c_void};

@@ -5,6 +5,7 @@ members = [
   "dynlib",
   "gl",
   "gl-generator",
+  "input",
   "nohash",
   "rangealloc",
   "uhi",
@@ -29,6 +30,7 @@ app = { path = "app" }
 dynlib = { path = "dynlib" }
 gl = { path = "gl" }
 gl-generator = { path = "gl-generator" }
+input = { path = "input" }
 nohash = { path = "nohash" }
 rangealloc = { path = "rangealloc" }
 uhi = { path = "uhi" }
@@ -48,6 +50,7 @@ raw-window-handle.workspace = true
 # workspace
 app.workspace = true
 gl.workspace = true
+input.workspace = true
 window.workspace = true
 
 [features]

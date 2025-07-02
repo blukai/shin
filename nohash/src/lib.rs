@@ -1,4 +1,7 @@
 use std::{
+    any::type_name,
+    collections::{HashMap, HashSet},
+    fmt,
     hash::{BuildHasherDefault, Hash, Hasher},
     marker::PhantomData,
 };
@@ -16,7 +19,6 @@ impl NoHash for i32 {}
 impl NoHash for i64 {}
 impl NoHash for isize {}
 
-#[derive(Debug, Default, Clone, Copy)]
 pub struct NoHashHasher<T>(u64, PhantomData<T>);
 
 impl<T: NoHash> Hasher for NoHashHasher<T> {
@@ -69,7 +71,30 @@ impl<T: NoHash> Hasher for NoHashHasher<T> {
     }
 }
 
+// NOTE: traits down below for `NoHashHasher` are implemented by hand because deriving these traits
+// would require `T` to implement them, which is unnecessary since `T` is merely a type marker.
+
+impl<T> fmt::Debug for NoHashHasher<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple(type_name::<Self>()).field(&self.0).finish()
+    }
+}
+
+impl<T> Default for NoHashHasher<T> {
+    fn default() -> Self {
+        Self(0, PhantomData)
+    }
+}
+
+impl<T> Clone for NoHashHasher<T> {
+    fn clone(&self) -> Self {
+        Self(self.0, PhantomData)
+    }
+}
+
+impl<T> Copy for NoHashHasher<T> {}
+
 pub type BuildNoHashHasher<T> = BuildHasherDefault<NoHashHasher<T>>;
 
-pub type NoHashMap<K, V> = std::collections::HashMap<K, V, BuildNoHashHasher<K>>;
-pub type NoHashSet<T> = std::collections::HashSet<T, BuildNoHashHasher<T>>;
+pub type NoHashMap<K, V> = HashMap<K, V, BuildNoHashHasher<K>>;
+pub type NoHashSet<T> = HashSet<T, BuildNoHashHasher<T>>;

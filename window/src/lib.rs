@@ -3,9 +3,6 @@ use std::env;
 use anyhow::anyhow;
 use raw_window_handle as rwh;
 
-mod input;
-pub use input::*;
-
 #[cfg(unix)]
 pub mod libwayland_client;
 #[cfg(unix)]
@@ -50,14 +47,14 @@ pub enum WindowEvent {
 #[derive(Debug)]
 pub enum Event {
     Window(WindowEvent),
-    Pointer(PointerEvent),
-    Keyboard(KeyboardEvent),
+    Pointer(input::PointerEvent),
+    Keyboard(input::KeyboardEvent),
 }
 
 pub trait Window: rwh::HasDisplayHandle + rwh::HasWindowHandle {
     fn pump_events(&mut self) -> anyhow::Result<()>;
     fn pop_event(&mut self) -> Option<Event>;
-    fn set_cursor_shape(&mut self, cursor_shape: CursorShape) -> anyhow::Result<()>;
+    fn set_cursor_shape(&mut self, cursor_shape: input::CursorShape) -> anyhow::Result<()>;
     fn scale_factor(&self) -> f64;
     fn size(&self) -> (u32, u32);
 }

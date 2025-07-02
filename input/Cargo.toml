@@ -1,0 +1,7 @@
+[package]
+name = "input"
+version = "0.0.0"
+edition.workspace = true
+
+[dependencies]
+nohash.workspace = true

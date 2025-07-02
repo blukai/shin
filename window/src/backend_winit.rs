@@ -1,13 +1,11 @@
 use std::collections::VecDeque;
 
 use anyhow::{Context, anyhow};
+use input::{CursorShape, KeyboardEvent, Keycode, PointerButton, PointerEvent, Scancode};
 use raw_window_handle as rwh;
 use winit::platform::pump_events::EventLoopExtPumpEvents;
 
-use crate::{
-    CursorShape, DEFAULT_LOGICAL_SIZE, Event, KeyboardEvent, Keycode, PointerButton, PointerEvent,
-    Scancode, Window, WindowAttrs, WindowEvent,
-};
+use crate::{DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent};
 
 #[inline]
 fn map_pointer_button(button: winit::event::MouseButton) -> Option<PointerButton> {

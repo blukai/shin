@@ -4,11 +4,12 @@ use std::ptr::{NonNull, null_mut};
 use std::slice;
 
 use anyhow::{Context as _, anyhow};
+use input::{CursorShape, KeyboardEvent, Keycode, PointerButton, PointerEvent, Scancode};
 use raw_window_handle as rwh;
 
 use crate::{
-    CursorShape, DEFAULT_LOGICAL_SIZE, Event, KeyboardEvent, Keycode, PointerButton, PointerEvent,
-    Scancode, Window, WindowAttrs, WindowEvent, libwayland_client, libwayland_cursor, xkb,
+    DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent, libwayland_client,
+    libwayland_cursor, xkb,
 };
 
 // https://github.com/torvalds/linux/blob/231825b2e1ff6ba799c5eaf396d3ab2354e37c6b/include/uapi/linux/input-event-codes.h#L356

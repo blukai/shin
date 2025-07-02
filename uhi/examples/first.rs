@@ -191,6 +191,8 @@ struct App {
     uhi_context: uhi::Context<UhiExterns>,
     uhi_font_handle: uhi::FontHandle,
     uhi_renderer: uhi::GlRenderer,
+
+    input_state: input::State,
 }
 
 impl AppHandler for App {
@@ -206,6 +208,8 @@ impl AppHandler for App {
             uhi_context,
             uhi_font_handle,
             uhi_renderer,
+
+            input_state: input::State::default(),
         }
     }
 
@@ -215,6 +219,12 @@ impl AppHandler for App {
                 self.uhi_context
                     .font_service
                     .set_scale_factor(scale_factor, &mut self.uhi_context.texture_service);
+            }
+            Event::Pointer(ev) => {
+                self.input_state.handle_pointer_event(ev);
+            }
+            Event::Keyboard(ev) => {
+                self.input_state.handle_keyboard_event(ev);
             }
             _ => {}
         }
@@ -240,14 +250,15 @@ impl AppHandler for App {
             .render(&mut self.uhi_context, ctx.gl_api, window_size)
             .expect("uhi renderer fucky wucky");
         self.uhi_context.clear_draw_buffer();
+
+        // TODO: make input state clearing better. find a better place for it? make less manual?
+        // idk. make it better somehow.
+        self.input_state.pointer.buttons.clear();
+        self.input_state.keyboard.scancodes.clear();
+        self.input_state.keyboard.keycodes.clear();
     }
 }
 
 fn main() {
     app::run::<App>(WindowAttrs::default());
 }
-
-// TODO: figure out input state.
-//
-// widgets don't have to have event handler and drawer. it would be nicer to combine everything
-// into a single function.
