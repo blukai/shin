@@ -5,34 +5,34 @@ use std::{
 
 use anyhow::{Context as _, anyhow};
 
-use super::GlContext;
+use super::Apier;
 use super::enums::*;
 use super::types::*;
 
 #[allow(non_snake_case)]
 #[allow(dead_code)]
-mod api {
-    use crate::gl::types::*;
+mod sys {
+    use crate::api::types::*;
 
     include!(concat!(env!("OUT_DIR"), "/gl_api_generated.rs"));
 }
 
-pub struct Context {
-    api: api::Api,
+pub struct Api {
+    api: sys::Api,
 }
 
-impl Context {
+impl Api {
     pub unsafe fn load_with<F>(get_proc_address: F) -> Self
     where
         F: FnMut(*const std::ffi::c_char) -> *mut std::ffi::c_void,
     {
         Self {
-            api: unsafe { api::Api::load_with(get_proc_address) },
+            api: unsafe { sys::Api::load_with(get_proc_address) },
         }
     }
 }
 
-impl GlContext for Context {
+impl Apier for Api {
     type Buffer = NonZero<GLuint>;
     type Program = NonZero<GLuint>;
     type Shader = NonZero<GLuint>;

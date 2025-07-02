@@ -1,6 +1,5 @@
 use std::{ffi::CString, panic};
 
-use gpu::{gl, web};
 use raw_window_handle as rwh;
 use window::{Event, Window, WindowAttrs, WindowEvent};
 
@@ -43,8 +42,8 @@ impl Logger {
 }
 
 struct InitializedGraphicsContext {
-    web_surface: web::Surface,
-    gl_context: gl::Context,
+    web_surface: gl::context_web::Surface,
+    gl_api: gl::api::Api,
 }
 
 enum GraphicsContext {
@@ -63,13 +62,13 @@ impl GraphicsContext {
     ) -> anyhow::Result<&mut InitializedGraphicsContext> {
         assert!(matches!(self, Self::Uninit));
 
-        let web_surface = web::Surface::new(window_handle);
+        let web_surface = gl::context_web::Surface::new(window_handle);
 
-        let gl_context = gl::Context::from_extern_ref(web_surface.as_extern_ref());
+        let gl_api = gl::api::Api::from_extern_ref(web_surface.as_extern_ref());
 
         *self = Self::Initialized(InitializedGraphicsContext {
             web_surface,
-            gl_context,
+            gl_api,
         });
         let Self::Initialized(init) = self else {
             unreachable!();
@@ -112,7 +111,7 @@ impl<A: AppHandler> Context<A> {
 
                             self.app_handler = Some(A::create(AppContext {
                                 window: self.window.as_mut(),
-                                gl: &mut igc.gl_context,
+                                gl_api: &mut igc.gl_api,
                             }));
                         }
 
@@ -129,7 +128,7 @@ impl<A: AppHandler> Context<A> {
 
             let (
                 Some(app_handler),
-                GraphicsContext::Initialized(InitializedGraphicsContext { gl_context: gl, .. }),
+                GraphicsContext::Initialized(InitializedGraphicsContext { gl_api, .. }),
             ) = (self.app_handler.as_mut(), &mut self.graphics_context)
             else {
                 continue;
@@ -138,7 +137,7 @@ impl<A: AppHandler> Context<A> {
                 AppContext {
                     window: self.window.as_mut(),
                     // TODO: should gl be included into event context? prob not.
-                    gl,
+                    gl_api,
                 },
                 event,
             );
@@ -146,7 +145,7 @@ impl<A: AppHandler> Context<A> {
 
         let (
             Some(app_handler),
-            GraphicsContext::Initialized(InitializedGraphicsContext { gl_context: gl, .. }),
+            GraphicsContext::Initialized(InitializedGraphicsContext { gl_api, .. }),
         ) = (self.app_handler.as_mut(), &mut self.graphics_context)
         else {
             return Ok(());
@@ -154,7 +153,7 @@ impl<A: AppHandler> Context<A> {
 
         app_handler.update(AppContext {
             window: self.window.as_mut(),
-            gl,
+            gl_api,
         });
 
         Ok(())

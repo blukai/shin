@@ -69,7 +69,7 @@ name = "app"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "gpu",
+ "gl",
  "log",
  "raw-window-handle",
  "window",
@@ -370,6 +370,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "gl"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "dynlib",
+ "gl-generator",
+ "log",
+ "raw-window-handle",
+]
+
+[[package]]
 name = "gl-generator"
 version = "0.0.0"
 dependencies = [
@@ -382,17 +393,6 @@ name = "glam"
 version = "0.30.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b46b9ca4690308844c644e7c634d68792467260e051c8543e0c7871662b3ba7"
-
-[[package]]
-name = "gpu"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "dynlib",
- "gl-generator",
- "log",
- "raw-window-handle",
-]
 
 [[package]]
 name = "hashbrown"
@@ -977,7 +977,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "app",
- "gpu",
+ "gl",
  "log",
  "raw-window-handle",
  "window",
@@ -1146,8 +1146,8 @@ dependencies = [
  "ab_glyph",
  "anyhow",
  "app",
+ "gl",
  "glam",
- "gpu",
  "log",
  "nohash",
  "rangealloc",

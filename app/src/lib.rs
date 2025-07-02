@@ -1,9 +1,8 @@
-use gpu::gl;
 use window::{Event, Window};
 
 pub struct AppContext<'a> {
     pub window: &'a mut dyn Window,
-    pub gl: &'a mut gl::Context,
+    pub gl_api: &'a mut gl::api::Api,
 }
 
 pub trait AppHandler {

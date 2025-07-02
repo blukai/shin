@@ -1,6 +1,6 @@
 use app::AppHandler;
+use gl::api::Apier as _;
 use glam::Vec2;
-use gpu::gl::{self, GlContext};
 use window::{Event, WindowAttrs, WindowEvent};
 
 const FONT: &[u8] = include_bytes!("../../fixtures/JetBrainsMono-Regular.ttf");
@@ -200,7 +200,7 @@ impl AppHandler for App {
             .font_service
             .register_font_slice(FONT)
             .expect("invalid font");
-        let uhi_renderer = uhi::GlRenderer::new(ctx.gl).expect("uhi gl renderer fucky wucky");
+        let uhi_renderer = uhi::GlRenderer::new(ctx.gl_api).expect("uhi gl renderer fucky wucky");
 
         Self {
             uhi_context,
@@ -223,8 +223,8 @@ impl AppHandler for App {
     fn update(&mut self, ctx: app::AppContext) {
         let window_size = ctx.window.size();
 
-        unsafe { ctx.gl.clear_color(0.0, 0.0, 0.3, 1.0) };
-        unsafe { ctx.gl.clear(gl::COLOR_BUFFER_BIT) };
+        unsafe { ctx.gl_api.clear_color(0.0, 0.0, 0.3, 1.0) };
+        unsafe { ctx.gl_api.clear(gl::api::COLOR_BUFFER_BIT) };
 
         draw_mondriaan(
             &mut self.uhi_context,
@@ -237,7 +237,7 @@ impl AppHandler for App {
         // TextEdit::new(UhiId::Pep, &mut "kek".to_string()).draw(uhi, font_handle);
 
         self.uhi_renderer
-            .render(&mut self.uhi_context, ctx.gl, window_size)
+            .render(&mut self.uhi_context, ctx.gl_api, window_size)
             .expect("uhi renderer fucky wucky");
         self.uhi_context.clear_draw_buffer();
     }

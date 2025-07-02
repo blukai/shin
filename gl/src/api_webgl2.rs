@@ -1,6 +1,6 @@
 use std::ffi::{CStr, c_void};
 
-use super::GlContext;
+use super::Apier;
 use super::types::*;
 
 unsafe extern "C" {
@@ -8,17 +8,17 @@ unsafe extern "C" {
     fn gl_clear(extern_ref: u32, mask: u32);
 }
 
-pub struct Context {
+pub struct Api {
     extern_ref: u32,
 }
 
-impl Context {
+impl Api {
     pub fn from_extern_ref(extern_ref: u32) -> Self {
         Self { extern_ref }
     }
 }
 
-impl GlContext for Context {
+impl Apier for Api {
     type Buffer = u32;
     type Program = u32;
     type Shader = u32;

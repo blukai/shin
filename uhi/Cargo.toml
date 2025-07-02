@@ -9,8 +9,8 @@ anyhow.workspace = true
 glam.workspace = true
 log.workspace = true
 # workspace
-# gpu = { workspace = true, optional = true }
-gpu.workspace = true
+# gl = { workspace = true, optional = true }
+gl.workspace = true
 nohash.workspace = true
 rangealloc.workspace = true
 
@@ -18,11 +18,11 @@ rangealloc.workspace = true
 raw-window-handle.workspace = true
 # workspace
 app.workspace = true
-gpu.workspace = true
+gl.workspace = true
 window.workspace = true
 
 [features]
-# renderer_gl = ["dep:gpu"]
+# renderer_gl = ["dep:gl"]
 renderer_gl = []
 
 [[example]]

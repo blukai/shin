@@ -3,8 +3,8 @@ resolver = "2"
 members = [
   "app",
   "dynlib",
+  "gl",
   "gl-generator",
-  "gpu",
   "nohash",
   "rangealloc",
   "uhi",
@@ -27,8 +27,8 @@ winit = "0.30"
 # workspace
 app = { path = "app" }
 dynlib = { path = "dynlib" }
+gl = { path = "gl" }
 gl-generator = { path = "gl-generator" }
-gpu = { path = "gpu" }
 nohash = { path = "nohash" }
 rangealloc = { path = "rangealloc" }
 uhi = { path = "uhi" }
@@ -47,7 +47,7 @@ log.workspace = true
 raw-window-handle.workspace = true
 # workspace
 app.workspace = true
-gpu.workspace = true
+gl.workspace = true
 window.workspace = true
 
 [features]

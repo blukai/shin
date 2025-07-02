@@ -12,23 +12,23 @@ pub(crate) mod enums {
 }
 
 #[cfg(not(target_family = "wasm"))]
-#[path = "gl46.rs"]
-mod gl46;
+#[path = "api_gl46.rs"]
+mod api_gl46;
 
 #[cfg(target_family = "wasm")]
-#[path = "webgl2.rs"]
-mod webgl2;
+#[path = "api_webgl2.rs"]
+mod api_webgl2;
 
 pub use enums::*;
 pub use types::*;
 
 #[cfg(not(target_family = "wasm"))]
-pub use gl46::*;
+pub use api_gl46::*;
 
 #[cfg(target_family = "wasm")]
-pub use webgl2::*;
+pub use api_webgl2::*;
 
-pub trait GlContext {
+pub trait Apier {
     type Buffer;
     type Program;
     type Shader;
@@ -128,7 +128,7 @@ pub trait GlContext {
     unsafe fn viewport(&self, x: GLint, y: GLint, width: GLsizei, height: GLsizei);
 }
 
-pub type Buffer = <Context as GlContext>::Buffer;
-pub type Program = <Context as GlContext>::Program;
-pub type Shader = <Context as GlContext>::Shader;
-pub type Texture = <Context as GlContext>::Texture;
+pub type Buffer = <Api as Apier>::Buffer;
+pub type Program = <Api as Apier>::Program;
+pub type Shader = <Api as Apier>::Shader;
+pub type Texture = <Api as Apier>::Texture;

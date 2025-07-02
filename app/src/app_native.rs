@@ -1,6 +1,5 @@
 use std::ffi::c_void;
 
-use gpu::{egl, gl};
 use raw_window_handle as rwh;
 use window::{Event, Window, WindowAttrs, WindowEvent};
 
@@ -36,9 +35,9 @@ impl Logger {
 }
 
 struct InitializedGraphicsContext {
-    egl_context: egl::Context,
-    egl_surface: egl::Surface,
-    gl_context: gl::Context,
+    egl_context: gl::context_egl::Context,
+    egl_surface: gl::context_egl::Surface,
+    gl_api: gl::api::Api,
 }
 
 enum GraphicsContext {
@@ -60,28 +59,31 @@ impl GraphicsContext {
     ) -> anyhow::Result<&mut InitializedGraphicsContext> {
         assert!(matches!(self, Self::Uninit));
 
-        let egl_context = egl::Context::new(
+        let egl_context = gl::context_egl::Context::new(
             display_handle,
-            egl::Config {
+            gl::context_egl::Config {
                 min_swap_interval: Some(0),
-                ..egl::Config::default()
+                ..gl::context_egl::Config::default()
             },
         )?;
-        let egl_surface = egl::Surface::new(&egl_context, window_handle, width, height)?;
+        let egl_surface =
+            gl::context_egl::Surface::new(&egl_context, window_handle, width, height)?;
 
         egl_context.make_current(egl_surface.as_ptr())?;
 
         // TODO: figure out an okay way to include vsync toggle.
         // context.set_swap_interval(&egl, 0)?;
 
-        let gl_context = unsafe {
-            gl::Context::load_with(|procname| egl_context.get_proc_address(procname) as *mut c_void)
+        let gl_api = unsafe {
+            gl::api::Api::load_with(|procname| {
+                egl_context.get_proc_address(procname) as *mut c_void
+            })
         };
 
         *self = Self::Initialized(InitializedGraphicsContext {
             egl_context,
             egl_surface,
-            gl_context,
+            gl_api,
         });
         let Self::Initialized(init) = self else {
             unreachable!();
@@ -131,7 +133,7 @@ impl<A: AppHandler> Context<A> {
 
                             self.app_handler = Some(A::create(AppContext {
                                 window: self.window.as_mut(),
-                                gl: &mut igc.gl_context,
+                                gl_api: &mut igc.gl_api,
                             }));
                         }
 
@@ -159,7 +161,7 @@ impl<A: AppHandler> Context<A> {
 
             let (
                 Some(app_handler),
-                GraphicsContext::Initialized(InitializedGraphicsContext { gl_context: gl, .. }),
+                GraphicsContext::Initialized(InitializedGraphicsContext { gl_api, .. }),
             ) = (self.app_handler.as_mut(), &mut self.graphics_context)
             else {
                 continue;
@@ -168,7 +170,7 @@ impl<A: AppHandler> Context<A> {
                 AppContext {
                     window: self.window.as_mut(),
                     // TODO: should gl be included into event context? prob not.
-                    gl,
+                    gl_api,
                 },
                 event,
             );
@@ -179,7 +181,7 @@ impl<A: AppHandler> Context<A> {
             GraphicsContext::Initialized(InitializedGraphicsContext {
                 egl_context,
                 egl_surface,
-                gl_context: gl,
+                gl_api,
             }),
         ) = (self.app_handler.as_mut(), &mut self.graphics_context)
         else {
@@ -190,7 +192,7 @@ impl<A: AppHandler> Context<A> {
 
         app_handler.update(AppContext {
             window: self.window.as_mut(),
-            gl,
+            gl_api,
         });
 
         egl_context.swap_buffers(egl_surface.as_ptr())?;
