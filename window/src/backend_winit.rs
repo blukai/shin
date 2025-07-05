@@ -36,6 +36,12 @@ fn map_keyboard_physical_key(physical_key: winit::keyboard::PhysicalKey) -> Opti
         PhysicalKey::Code(KeyCode::KeyA) => Some(Scancode::A),
         PhysicalKey::Code(KeyCode::KeyS) => Some(Scancode::S),
         PhysicalKey::Code(KeyCode::KeyD) => Some(Scancode::D),
+        PhysicalKey::Code(KeyCode::ShiftLeft) => Some(Scancode::ShiftLeft),
+        PhysicalKey::Code(KeyCode::ShiftRight) => Some(Scancode::ShiftRight),
+        PhysicalKey::Code(KeyCode::ArrowUp) => Some(Scancode::ArrowUp),
+        PhysicalKey::Code(KeyCode::ArrowLeft) => Some(Scancode::ArrowLeft),
+        PhysicalKey::Code(KeyCode::ArrowRight) => Some(Scancode::ArrowRight),
+        PhysicalKey::Code(KeyCode::ArrowDown) => Some(Scancode::ArrowDown),
         _ => None,
     }
 }

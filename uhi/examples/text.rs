@@ -1,0 +1,101 @@
+use app::AppHandler;
+use gl::api::Apier as _;
+use glam::Vec2;
+use window::{Event, WindowAttrs, WindowEvent};
+
+const FONT: &[u8] = include_bytes!("../../fixtures/JetBrainsMono-Regular.ttf");
+
+struct UhiExterns;
+
+impl uhi::Externs for UhiExterns {
+    type TextureHandle = <uhi::GlRenderer as uhi::Renderer>::TextureHandle;
+}
+
+struct App {
+    uhi_context: uhi::Context<UhiExterns>,
+    uhi_renderer: uhi::GlRenderer,
+
+    font_handle: uhi::FontHandle,
+    input_state: input::State,
+
+    text: String,
+    text_state: uhi::TextState,
+    text_appearance: uhi::TextAppearance,
+}
+
+impl AppHandler for App {
+    fn create(ctx: app::AppContext) -> Self {
+        let mut uhi_context = uhi::Context::default();
+        let uhi_renderer = uhi::GlRenderer::new(ctx.gl_api).expect("uhi gl renderer fucky wucky");
+
+        let font_handle = uhi_context
+            .font_service
+            .register_font_slice(FONT)
+            .expect("invalid font");
+
+        Self {
+            uhi_context,
+            uhi_renderer,
+
+            font_handle,
+            input_state: input::State::default(),
+
+            text: "hello, sailor!".to_string(),
+            text_state: uhi::TextState::default(),
+            text_appearance: uhi::TextAppearance::new(font_handle, 14.0),
+        }
+    }
+
+    fn handle_event(&mut self, _ctx: app::AppContext, event: Event) {
+        match event {
+            Event::Window(WindowEvent::ScaleFactorChanged { scale_factor }) => {
+                self.uhi_context
+                    .font_service
+                    .set_scale_factor(scale_factor, &mut self.uhi_context.texture_service);
+            }
+            Event::Pointer(ev) => {
+                self.input_state.pointer.handle_event(ev);
+            }
+            Event::Keyboard(ev) => {
+                self.input_state.keyboard.handle_event(ev);
+            }
+            _ => {}
+        }
+    }
+
+    fn update(&mut self, ctx: app::AppContext) {
+        let window_size = ctx.window.size();
+
+        unsafe { ctx.gl_api.clear_color(0.0, 0.0, 0.3, 1.0) };
+        unsafe { ctx.gl_api.clear(gl::api::COLOR_BUFFER_BIT) };
+
+        uhi::update_text(
+            &mut self.text,
+            &mut self.text_state,
+            &self.text_appearance,
+            &self.input_state,
+        );
+        uhi::draw_text(
+            &mut self.text,
+            Some(&self.text_state),
+            &self.text_appearance,
+            Vec2::splat(24.0),
+            &mut self.uhi_context,
+        );
+
+        self.uhi_renderer
+            .render(&mut self.uhi_context, ctx.gl_api, window_size)
+            .expect("uhi renderer fucky wucky");
+        self.uhi_context.draw_buffer.clear();
+
+        // TODO: make input state clearing better. find a better place for it? make less manual?
+        // idk. make it better somehow.
+        self.input_state.pointer.buttons.clear();
+        self.input_state.keyboard.scancodes.clear();
+        self.input_state.keyboard.keycodes.clear();
+    }
+}
+
+fn main() {
+    app::run::<App>(WindowAttrs::default());
+}

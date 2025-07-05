@@ -11,6 +11,7 @@ log.workspace = true
 # workspace
 # gl = { workspace = true, optional = true }
 gl.workspace = true
+input.workspace = true
 nohash.workspace = true
 rangealloc.workspace = true
 
@@ -18,8 +19,6 @@ rangealloc.workspace = true
 raw-window-handle.workspace = true
 # workspace
 app.workspace = true
-gl.workspace = true
-input.workspace = true
 window.workspace = true
 
 [features]
@@ -27,5 +26,9 @@ window.workspace = true
 renderer_gl = []
 
 [[example]]
-name = "first"
+name = "layout"
+features = ["renderer_gl"]
+
+[[example]]
+name = "text"
 features = ["renderer_gl"]

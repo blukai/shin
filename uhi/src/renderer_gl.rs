@@ -287,7 +287,7 @@ impl GlRenderer {
         self.setup_state(gl_api);
         self.handle_textures(gl_api, &mut ctx.texture_service)?;
 
-        let draw_data = ctx.get_draw_data();
+        let draw_data = ctx.draw_buffer.get_draw_data();
 
         unsafe {
             gl_api.viewport(

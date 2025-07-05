@@ -59,21 +59,20 @@ fn map_cursor_shape(cursor_shape: CursorShape) -> &'static CStr {
 }
 
 // https://github.com/torvalds/linux/blob/231825b2e1ff6ba799c5eaf396d3ab2354e37c6b/include/uapi/linux/input-event-codes.h#L76
-
-const KEY_ESC: u32 = 1;
-const KEY_W: u32 = 17;
-const KEY_A: u32 = 30;
-const KEY_S: u32 = 31;
-const KEY_D: u32 = 32;
-
 #[inline]
 fn map_keyboard_key(key: u32) -> Option<Scancode> {
     match key {
-        KEY_ESC => Some(Scancode::Esc),
-        KEY_W => Some(Scancode::W),
-        KEY_A => Some(Scancode::A),
-        KEY_S => Some(Scancode::S),
-        KEY_D => Some(Scancode::D),
+        1 => Some(Scancode::Esc),
+        17 => Some(Scancode::W),
+        30 => Some(Scancode::A),
+        31 => Some(Scancode::S),
+        32 => Some(Scancode::D),
+        42 => Some(Scancode::ShiftLeft),
+        54 => Some(Scancode::ShiftRight),
+        103 => Some(Scancode::ArrowUp),
+        105 => Some(Scancode::ArrowLeft),
+        106 => Some(Scancode::ArrowRight),
+        108 => Some(Scancode::ArrowDown),
         _ => None,
     }
 }

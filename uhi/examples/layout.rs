@@ -11,14 +11,16 @@ impl uhi::Externs for UhiExterns {
     type TextureHandle = <uhi::GlRenderer as uhi::Renderer>::TextureHandle;
 }
 
-// Tableau I, by Piet Mondriaan
-// https://en.wikipedia.org/wiki/File:Tableau_I,_by_Piet_Mondriaan.jpg
-fn draw_mondriaan<E: uhi::Externs>(
-    uhi: &mut uhi::Context<E>,
+fn draw<E: uhi::Externs>(
+    ctx: &mut uhi::Context<E>,
+    input_state: &input::State,
     font_handle: uhi::FontHandle,
     area: uhi::Rect,
 ) {
     use uhi::*;
+
+    // Tableau I, by Piet Mondriaan
+    // https://en.wikipedia.org/wiki/File:Tableau_I,_by_Piet_Mondriaan.jpg
 
     // TODO: figure out a nicer way to layout and draw stuff. with no heap allocations for the
     // layout!
@@ -38,7 +40,7 @@ fn draw_mondriaan<E: uhi::Externs>(
 
     // top
     {
-        uhi.draw_rect(RectShape::with_fill(
+        ctx.draw_buffer.push_rect(RectShape::with_fill(
             top.clone(),
             Fill::with_color(Rgba8::WHITE),
         ));
@@ -60,14 +62,20 @@ fn draw_mondriaan<E: uhi::Externs>(
                     Constraint::Fill(1.0),
                 ])
                 .split(left);
-                uhi.draw_rect(RectShape::with_fill(top, Fill::with_color(Rgba8::RED)));
-                uhi.draw_rect(RectShape::with_fill(gap, Fill::with_color(Rgba8::BLACK)));
-                uhi.draw_rect(RectShape::with_fill(bottom, Fill::with_color(Rgba8::WHITE)));
+                ctx.draw_buffer
+                    .push_rect(RectShape::with_fill(top, Fill::with_color(Rgba8::RED)));
+                ctx.draw_buffer
+                    .push_rect(RectShape::with_fill(gap, Fill::with_color(Rgba8::BLACK)));
+                ctx.draw_buffer
+                    .push_rect(RectShape::with_fill(bottom, Fill::with_color(Rgba8::WHITE)));
             }
 
-            uhi.draw_rect(RectShape::with_fill(lgap, Fill::with_color(Rgba8::BLACK)));
-            uhi.draw_rect(RectShape::with_fill(mid, Fill::with_color(Rgba8::WHITE)));
-            uhi.draw_rect(RectShape::with_fill(rgap, Fill::with_color(Rgba8::BLACK)));
+            ctx.draw_buffer
+                .push_rect(RectShape::with_fill(lgap, Fill::with_color(Rgba8::BLACK)));
+            ctx.draw_buffer
+                .push_rect(RectShape::with_fill(mid, Fill::with_color(Rgba8::WHITE)));
+            ctx.draw_buffer
+                .push_rect(RectShape::with_fill(rgap, Fill::with_color(Rgba8::BLACK)));
 
             {
                 let [top, tgap, mid, bgap, bottom] = vstack([
@@ -78,20 +86,26 @@ fn draw_mondriaan<E: uhi::Externs>(
                     Constraint::Percentage(130.0 / TOP_HEIGHT),
                 ])
                 .split(right);
-                uhi.draw_rect(RectShape::with_fill(top, Fill::with_color(Rgba8::BLACK)));
-                uhi.draw_rect(RectShape::with_fill(tgap, Fill::with_color(Rgba8::BLACK)));
-                uhi.draw_rect(RectShape::with_fill(mid, Fill::with_color(Rgba8::WHITE)));
-                uhi.draw_rect(RectShape::with_fill(bgap, Fill::with_color(Rgba8::BLACK)));
-                uhi.draw_rect(RectShape::with_fill(bottom, Fill::with_color(Rgba8::WHITE)));
+                ctx.draw_buffer
+                    .push_rect(RectShape::with_fill(top, Fill::with_color(Rgba8::BLACK)));
+                ctx.draw_buffer
+                    .push_rect(RectShape::with_fill(tgap, Fill::with_color(Rgba8::BLACK)));
+                ctx.draw_buffer
+                    .push_rect(RectShape::with_fill(mid, Fill::with_color(Rgba8::WHITE)));
+                ctx.draw_buffer
+                    .push_rect(RectShape::with_fill(bgap, Fill::with_color(Rgba8::BLACK)));
+                ctx.draw_buffer
+                    .push_rect(RectShape::with_fill(bottom, Fill::with_color(Rgba8::WHITE)));
             }
         }
     }
 
-    uhi.draw_rect(RectShape::with_fill(gap, Fill::with_color(Rgba8::BLACK)));
+    ctx.draw_buffer
+        .push_rect(RectShape::with_fill(gap, Fill::with_color(Rgba8::BLACK)));
 
     // bottom
     {
-        uhi.draw_rect(RectShape::with_fill(
+        ctx.draw_buffer.push_rect(RectShape::with_fill(
             bottom.clone(),
             Fill::with_color(Rgba8::WHITE),
         ));
@@ -115,7 +129,8 @@ fn draw_mondriaan<E: uhi::Externs>(
                 ])
                 .split(left);
                 lmgap = gap.clone();
-                uhi.draw_rect(RectShape::with_fill(gap, Fill::with_color(Rgba8::BLACK)));
+                ctx.draw_buffer
+                    .push_rect(RectShape::with_fill(gap, Fill::with_color(Rgba8::BLACK)));
 
                 {
                     let [top, gap, _] = vstack([
@@ -124,20 +139,23 @@ fn draw_mondriaan<E: uhi::Externs>(
                         Constraint::Fill(1.0),
                     ])
                     .split(right);
-                    uhi.draw_rect(RectShape::with_fill(top, Fill::with_color(Rgba8::BLUE)));
-                    uhi.draw_rect(RectShape::with_fill(gap, Fill::with_color(Rgba8::BLACK)));
+                    ctx.draw_buffer
+                        .push_rect(RectShape::with_fill(top, Fill::with_color(Rgba8::BLUE)));
+                    ctx.draw_buffer
+                        .push_rect(RectShape::with_fill(gap, Fill::with_color(Rgba8::BLACK)));
                 }
             }
 
-            uhi.draw_rect(RectShape::with_fill(
+            ctx.draw_buffer.push_rect(RectShape::with_fill(
                 lgap.clone(),
                 Fill::with_color(Rgba8::BLACK),
             ));
-            uhi.draw_rect(RectShape::with_fill(
+            ctx.draw_buffer.push_rect(RectShape::with_fill(
                 rgap.clone(),
                 Fill::with_color(Rgba8::BLACK),
             ));
-            uhi.draw_rect(RectShape::with_fill(right, Fill::with_color(Rgba8::ORANGE)));
+            ctx.draw_buffer
+                .push_rect(RectShape::with_fill(right, Fill::with_color(Rgba8::ORANGE)));
 
             // bottom-mid section [white .......... black ..]
             {
@@ -152,7 +170,8 @@ fn draw_mondriaan<E: uhi::Externs>(
                     Vec2::new(min_x, 0.0),
                     Vec2::new(max_x, area.max.y),
                 ));
-                uhi.draw_rect(RectShape::with_fill(gap, Fill::with_color(Rgba8::BLACK)));
+                ctx.draw_buffer
+                    .push_rect(RectShape::with_fill(gap, Fill::with_color(Rgba8::BLACK)));
 
                 {
                     let [left, gap, right] = hstack([
@@ -161,54 +180,49 @@ fn draw_mondriaan<E: uhi::Externs>(
                         Constraint::Percentage(100.0 / SIZE.x),
                     ])
                     .split(bottom);
-                    uhi.draw_rect(RectShape::with_fill(left, Fill::with_color(Rgba8::WHITE)));
-                    uhi.draw_rect(RectShape::with_fill(gap, Fill::with_color(Rgba8::BLACK)));
-                    uhi.draw_rect(RectShape::with_fill(right, Fill::with_color(Rgba8::BLACK)));
+                    ctx.draw_buffer
+                        .push_rect(RectShape::with_fill(left, Fill::with_color(Rgba8::WHITE)));
+                    ctx.draw_buffer
+                        .push_rect(RectShape::with_fill(gap, Fill::with_color(Rgba8::BLACK)));
+                    ctx.draw_buffer
+                        .push_rect(RectShape::with_fill(right, Fill::with_color(Rgba8::BLACK)));
                 }
             }
         }
     }
 
-    let text = "Tableau I, by Piet Mondriaan";
-    let font_size = 14.0;
-
-    let text_width =
-        uhi.font_service
-            .get_text_width(text, font_handle, font_size, &mut uhi.texture_service);
-    let font_line_height = uhi
-        .font_service
-        .get_font_line_height(font_handle, font_size);
-    let text_size = Vec2::new(text_width, font_line_height);
-    let text_position = area.size() - Vec2::splat(24.0) - text_size;
-    uhi.draw_rect(RectShape::with_fill(
-        Rect::new(text_position, text_position + text_size),
-        Fill::with_color(Rgba8::new(128, 128, 128, 128)),
-    ));
-    uhi.draw_text(text, font_handle, font_size, text_position, Rgba8::WHITE);
+    uhi::draw_text(
+        "Tableau I, by Piet Mondriaan",
+        None,
+        &uhi::TextAppearance::new(font_handle, 14.0).fg(uhi::Rgba8::FUCHSIA),
+        Vec2::splat(24.0),
+        ctx,
+    );
 }
 
 struct App {
     uhi_context: uhi::Context<UhiExterns>,
-    uhi_font_handle: uhi::FontHandle,
     uhi_renderer: uhi::GlRenderer,
 
+    font_handle: uhi::FontHandle,
     input_state: input::State,
 }
 
 impl AppHandler for App {
     fn create(ctx: app::AppContext) -> Self {
         let mut uhi_context = uhi::Context::default();
-        let uhi_font_handle = uhi_context
+        let uhi_renderer = uhi::GlRenderer::new(ctx.gl_api).expect("uhi gl renderer fucky wucky");
+
+        let font_handle = uhi_context
             .font_service
             .register_font_slice(FONT)
             .expect("invalid font");
-        let uhi_renderer = uhi::GlRenderer::new(ctx.gl_api).expect("uhi gl renderer fucky wucky");
 
         Self {
             uhi_context,
-            uhi_font_handle,
             uhi_renderer,
 
+            font_handle,
             input_state: input::State::default(),
         }
     }
@@ -221,10 +235,10 @@ impl AppHandler for App {
                     .set_scale_factor(scale_factor, &mut self.uhi_context.texture_service);
             }
             Event::Pointer(ev) => {
-                self.input_state.handle_pointer_event(ev);
+                self.input_state.pointer.handle_event(ev);
             }
             Event::Keyboard(ev) => {
-                self.input_state.handle_keyboard_event(ev);
+                self.input_state.keyboard.handle_event(ev);
             }
             _ => {}
         }
@@ -236,20 +250,20 @@ impl AppHandler for App {
         unsafe { ctx.gl_api.clear_color(0.0, 0.0, 0.3, 1.0) };
         unsafe { ctx.gl_api.clear(gl::api::COLOR_BUFFER_BIT) };
 
-        draw_mondriaan(
+        draw(
             &mut self.uhi_context,
-            self.uhi_font_handle,
+            &self.input_state,
+            self.font_handle,
             uhi::Rect::new(
                 Vec2::ZERO,
                 Vec2::new(window_size.0 as f32, window_size.1 as f32),
             ),
         );
-        // TextEdit::new(UhiId::Pep, &mut "kek".to_string()).draw(uhi, font_handle);
 
         self.uhi_renderer
             .render(&mut self.uhi_context, ctx.gl_api, window_size)
             .expect("uhi renderer fucky wucky");
-        self.uhi_context.clear_draw_buffer();
+        self.uhi_context.draw_buffer.clear();
 
         // TODO: make input state clearing better. find a better place for it? make less manual?
         // idk. make it better somehow.

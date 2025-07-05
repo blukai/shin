@@ -16,11 +16,6 @@ const TEXTURE_WIDTH: u32 = 256;
 const TEXTURE_HEIGHT: u32 = 256;
 const TEXTURE_GAP: u32 = 1;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FontHandle {
-    idx: u32,
-}
-
 #[derive(Debug)]
 struct TexturePage {
     tex_packer: TexturePacker,
@@ -36,55 +31,6 @@ struct RasterizedChar {
 
     bounds: Rect,
     advance_width: f32,
-}
-
-#[derive(Debug)]
-struct FontInstance {
-    rasterized_chars: NoHashMap<u32, RasterizedChar>,
-
-    scale: PxScale,
-    // TODO: is there a more proper name for this? i don't want to get this confused with css
-    // line-height - it's not exactly that.
-    line_height: f32,
-    ascent: f32,
-}
-
-impl FontInstance {
-    fn new(font: &FontArc, pt_size: f32, window_scale_factor: Option<f64>) -> Self {
-        // NOTE: see https://github.com/alexheretic/ab-glyph/issues/14 for details.
-        let font_scale_factor = font
-            .units_per_em()
-            .map(|units_per_em| font.height_unscaled() / units_per_em)
-            .unwrap_or(1.0);
-        let scale =
-            PxScale::from(pt_size * window_scale_factor.unwrap_or(1.0) as f32 * font_scale_factor);
-
-        let scaled = font.as_scaled(scale);
-        let ascent = scaled.ascent();
-        let descent = scaled.descent();
-        let line_gap = scaled.line_gap();
-        let line_height = ascent - descent + line_gap;
-
-        Self {
-            rasterized_chars: NoHashMap::default(),
-
-            scale,
-            line_height,
-            ascent,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct CharRef<'a> {
-    tex_page: &'a TexturePage,
-    rasterized_char: &'a RasterizedChar,
-}
-
-// NOTE: to many fidgeting is needed to hash floats. this is easier.
-#[inline(always)]
-fn make_font_instance_key(font_handle: FontHandle, pt_size: f32) -> u64 {
-    (font_handle.idx as u64) << 32 | (unsafe { mem::transmute::<_, u32>(pt_size) } as u64)
 }
 
 fn rasterize_char<E: Externs>(
@@ -195,6 +141,156 @@ fn rasterize_char<E: Externs>(
     }
 }
 
+// TODO: consider renaming CharRef into RasterizedCharRef or RasterizedChar into Char or
+// RasterizedChar into Glyph and CharRef into GlyphRef?
+#[derive(Debug)]
+pub struct CharRef<'a> {
+    rasterized_char: &'a RasterizedChar,
+    tex_page: &'a TexturePage,
+}
+
+impl<'a> CharRef<'a> {
+    #[inline]
+    pub fn bounds(&self) -> &Rect {
+        &self.rasterized_char.bounds
+    }
+
+    #[inline]
+    pub fn advance_width(&self) -> f32 {
+        self.rasterized_char.advance_width
+    }
+
+    #[inline]
+    pub fn tex_handle(&self) -> TextureHandle {
+        self.tex_page.tex_handle
+    }
+
+    #[inline]
+    pub fn tex_coords(&self) -> Rect {
+        self.rasterized_char.tex_coords.clone()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FontHandle {
+    idx: u32,
+}
+
+// NOTE: to many fidgeting is needed to hash floats. this is easier.
+#[inline(always)]
+fn make_font_instance_key(font_handle: FontHandle, pt_size: f32) -> u64 {
+    (font_handle.idx as u64) << 32 | (unsafe { mem::transmute::<_, u32>(pt_size) } as u64)
+}
+
+#[derive(Debug)]
+struct FontInstance {
+    rasterized_chars: NoHashMap<u32, RasterizedChar>,
+
+    scale: PxScale,
+    // TODO: is there a more proper name for this? i don't want to get this confused with css
+    // line-height - it's not exactly that.
+    line_height: f32,
+    ascent: f32,
+}
+
+impl FontInstance {
+    fn new(font: &FontArc, pt_size: f32, window_scale_factor: Option<f64>) -> Self {
+        // NOTE: see https://github.com/alexheretic/ab-glyph/issues/14 for details.
+        let font_scale_factor = font
+            .units_per_em()
+            .map(|units_per_em| font.height_unscaled() / units_per_em)
+            .unwrap_or(1.0);
+        let scale =
+            PxScale::from(pt_size * window_scale_factor.unwrap_or(1.0) as f32 * font_scale_factor);
+
+        let scaled = font.as_scaled(scale);
+        let ascent = scaled.ascent();
+        let descent = scaled.descent();
+        let line_gap = scaled.line_gap();
+        let line_height = ascent - descent + line_gap;
+
+        Self {
+            rasterized_chars: NoHashMap::default(),
+
+            scale,
+            line_height,
+            ascent,
+        }
+    }
+}
+
+// NOTE: font instance != font. a single font may parent multiple font instances.
+#[derive(Debug)]
+pub struct FontInstanceRefMut<'a> {
+    font: &'a FontArc,
+    font_instance: &'a mut FontInstance,
+    tex_pages: &'a mut Vec<TexturePage>,
+}
+
+impl<'a> FontInstanceRefMut<'a> {
+    #[inline]
+    pub fn line_height(&self) -> f32 {
+        self.font_instance.line_height
+    }
+
+    #[inline]
+    pub fn ascent(&self) -> f32 {
+        self.font_instance.ascent
+    }
+
+    /// gets a char, rasterizing and caching it if not already cached.
+    /// chars are cached per font instance (font + size combination) for subsequent lookups.
+    pub fn get_char<E: Externs>(
+        &mut self,
+        ch: char,
+        texture_service: &mut TextureService<E>,
+    ) -> CharRef {
+        let rasterized_char = self
+            .font_instance
+            .rasterized_chars
+            .entry(ch as u32)
+            // char does not exist
+            .or_insert_with(|| {
+                rasterize_char(
+                    ch,
+                    self.font,
+                    self.font_instance.scale,
+                    &mut self.tex_pages,
+                    texture_service,
+                )
+            });
+        let tex_page = &self.tex_pages[rasterized_char.tex_page_idx];
+
+        CharRef {
+            rasterized_char,
+            tex_page,
+        }
+    }
+
+    pub fn compute_text_width<E: Externs>(
+        &mut self,
+        text: &str,
+        texture_service: &mut TextureService<E>,
+    ) -> f32 {
+        let mut width: f32 = 0.0;
+        for ch in text.chars() {
+            let char_ref = self.get_char(ch, texture_service);
+            width += char_ref.rasterized_char.advance_width;
+        }
+        width
+    }
+
+    // TODO: consider renaming compute_text_size into compute_text_bounds?
+    pub fn compute_text_size<E: Externs>(
+        &mut self,
+        text: &str,
+        texture_service: &mut TextureService<E>,
+    ) -> Vec2 {
+        let text_width = self.compute_text_width(text, texture_service);
+        Vec2::new(text_width, self.font_instance.line_height)
+    }
+}
+
 #[derive(Default)]
 pub struct FontService {
     scale_factor: Option<f64>,
@@ -232,104 +328,22 @@ impl FontService {
         Ok(FontHandle { idx: idx as u32 })
     }
 
-    #[inline]
-    pub fn get_char<'a, E: Externs>(
-        &'a mut self,
-        ch: char,
+    pub fn get_font_instance_mut(
+        &mut self,
         font_handle: FontHandle,
         pt_size: f32,
-        texture_service: &mut TextureService<E>,
-    ) -> CharRef<'a> {
+    ) -> FontInstanceRefMut {
         assert!(pt_size > 0.0);
 
         let font = &self.fonts[font_handle.idx as usize];
-
         let font_instance = self
             .font_instances
             .entry(make_font_instance_key(font_handle, pt_size))
-            // font instance does not exist
             .or_insert_with(|| FontInstance::new(font, pt_size, self.scale_factor));
-
-        let rasterized_char = font_instance
-            .rasterized_chars
-            .entry(ch as u32)
-            // char does not exist
-            .or_insert_with(|| {
-                rasterize_char(
-                    ch,
-                    font,
-                    font_instance.scale,
-                    &mut self.tex_pages,
-                    texture_service,
-                )
-            });
-
-        let tex_page = &self.tex_pages[rasterized_char.tex_page_idx];
-
-        CharRef {
-            tex_page,
-            rasterized_char,
+        FontInstanceRefMut {
+            font,
+            font_instance,
+            tex_pages: &mut self.tex_pages,
         }
-    }
-
-    pub fn get_text_width<E: Externs>(
-        &mut self,
-        text: &str,
-        font_handle: FontHandle,
-        pt_size: f32,
-        texture_service: &mut TextureService<E>,
-    ) -> f32 {
-        let mut width: f32 = 0.0;
-        for ch in text.chars() {
-            let char_ref = self.get_char(ch, font_handle, pt_size, texture_service);
-            width += char_ref.rasterized_char.advance_width;
-        }
-        width
-    }
-
-    fn get_font_instance(&mut self, font_handle: FontHandle, pt_size: f32) -> &FontInstance {
-        assert!(pt_size > 0.0);
-
-        self.font_instances
-            .entry(make_font_instance_key(font_handle, pt_size))
-            .or_insert_with(|| {
-                FontInstance::new(
-                    &self.fonts[font_handle.idx as usize],
-                    pt_size,
-                    self.scale_factor,
-                )
-            })
-    }
-
-    #[inline]
-    pub fn get_font_line_height(&mut self, font_handle: FontHandle, pt_size: f32) -> f32 {
-        self.get_font_instance(font_handle, pt_size).line_height
-    }
-
-    #[inline]
-    pub fn get_font_ascent(&mut self, font_handle: FontHandle, pt_size: f32) -> f32 {
-        self.get_font_instance(font_handle, pt_size).ascent
-    }
-}
-
-impl<'a> CharRef<'a> {
-    #[inline]
-    pub fn tex_handle(&self) -> TextureHandle {
-        self.tex_page.tex_handle
-    }
-
-    #[inline]
-    pub fn tex_coords(&self) -> Rect {
-        self.rasterized_char.tex_coords.clone()
-    }
-
-    #[inline]
-    pub fn bounds(&self) -> &Rect {
-        &self.rasterized_char.bounds
-    }
-
-    #[inline]
-    pub fn advance_width(&self) -> f32 {
-        self.rasterized_char.advance_width
     }
 }

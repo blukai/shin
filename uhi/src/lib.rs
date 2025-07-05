@@ -7,6 +7,7 @@ mod drawbuffer;
 mod fontservice;
 mod layout;
 mod renderer;
+mod text;
 mod texturepacker;
 mod textureservice;
 
@@ -15,6 +16,7 @@ pub use drawbuffer::*;
 pub use fontservice::*;
 pub use layout::*;
 pub use renderer::*;
+pub use text::*;
 pub use texturepacker::*;
 pub use textureservice::*;
 
@@ -130,13 +132,14 @@ impl Rgba8 {
     }
 
     #[inline]
-    pub fn into_array(self) -> [u8; 4] {
-        unsafe { mem::transmute(self) }
+    pub const fn from_bytes(arr: [u8; 4]) -> Self {
+        unsafe { mem::transmute(arr) }
     }
 
+    /// works with hex: `Rgba8::from_u32(0x8faf9fff)`.
     #[inline]
-    pub fn from_array(arr: [u8; 4]) -> Self {
-        unsafe { mem::transmute(arr) }
+    pub const fn from_u32(value: u32) -> Self {
+        Self::from_bytes(u32::to_be_bytes(value))
     }
 }
 

@@ -1,6 +1,6 @@
 use std::hash::{Hash, Hasher};
 
-use nohash::{NoHash, NoHashSet};
+use nohash::{NoHash, NoHashMap, NoHashSet};
 
 // pointer
 
@@ -53,6 +53,12 @@ pub enum Scancode {
     A,
     S,
     D,
+    ShiftLeft,
+    ShiftRight,
+    ArrowUp,
+    ArrowLeft,
+    ArrowRight,
+    ArrowDown,
 }
 
 impl Hash for Scancode {
@@ -105,6 +111,10 @@ pub enum KeyboardEvent {
 // states
 
 // NOTE: this is inspired by bevy (or stolen if you will). input handling is kind of nice there.
+//
+// NOTE: bevy also has just_pressed and just_released - those don't really do the thing because
+// there can be a situation when key is pressed in a really quick succession with no frame in
+// between -> this wil result in key-skip.
 #[derive(Debug)]
 pub struct ButtonInput<B>
 where
@@ -133,15 +143,13 @@ where
     B: Copy + Eq + NoHash,
 {
     pub fn press(&mut self, button: B) {
-        if self.pressed.insert(button) {
-            self.just_pressed.insert(button);
-        }
+        self.pressed.insert(button);
+        self.just_pressed.insert(button);
     }
 
     pub fn release(&mut self, button: B) {
-        if self.pressed.remove(&button) {
-            self.just_released.insert(button);
-        }
+        self.pressed.remove(&button);
+        self.just_released.insert(button);
     }
 
     pub fn clear(&mut self) {
@@ -197,6 +205,8 @@ pub struct PointerState {
     pub position: (f64, f64),
     pub delta: (f64, f64),
     pub buttons: ButtonInput<PointerButton>,
+    // NOTE: this is currently unused, but the plan is to use it for text selection / dragging.
+    pub press_origins: NoHashMap<PointerButton, (f64, f64)>,
 }
 
 impl PointerState {
@@ -210,9 +220,11 @@ impl PointerState {
             }
             Press { button } => {
                 self.buttons.press(button);
+                self.press_origins.insert(button, self.position);
             }
             Release { button } => {
                 self.buttons.release(button);
+                self.press_origins.remove(&button);
             }
         }
     }
@@ -244,16 +256,4 @@ impl KeyboardState {
 pub struct State {
     pub pointer: PointerState,
     pub keyboard: KeyboardState,
-}
-
-impl State {
-    #[inline]
-    pub fn handle_pointer_event(&mut self, ev: PointerEvent) {
-        self.pointer.handle_event(ev);
-    }
-
-    #[inline]
-    pub fn handle_keyboard_event(&mut self, ev: KeyboardEvent) {
-        self.keyboard.handle_event(ev);
-    }
 }
