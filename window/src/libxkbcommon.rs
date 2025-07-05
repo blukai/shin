@@ -76,6 +76,8 @@ pub struct Lib {
         format: xkb_keymap_format,
         flags: xkb_keymap_compile_flags,
     ) -> *mut xkb_keymap,
+    pub xkb_keymap_key_repeats:
+        unsafe extern "C" fn(keymap: *mut xkb_keymap, key: xkb_keycode_t) -> c_int,
     pub xkb_keymap_unref: unsafe extern "C" fn(keymap: *mut xkb_keymap),
 
     pub xkb_state_mod_index_is_active: unsafe extern "C" fn(
@@ -114,6 +116,7 @@ impl Lib {
 
             xkb_keymap_mod_get_index: dynlib.lookup(c"xkb_keymap_mod_get_index")?,
             xkb_keymap_new_from_string: dynlib.lookup(c"xkb_keymap_new_from_string")?,
+            xkb_keymap_key_repeats: dynlib.lookup(c"xkb_keymap_key_repeats")?,
             xkb_keymap_unref: dynlib.lookup(c"xkb_keymap_unref")?,
 
             xkb_state_mod_index_is_active: dynlib.lookup(c"xkb_state_mod_index_is_active")?,

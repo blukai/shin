@@ -101,6 +101,8 @@ pub enum KeyboardEvent {
     Press {
         scancode: Scancode,
         keycode: Keycode,
+        /// true if this is a key repeat
+        repeat: bool,
     },
     Release {
         scancode: Scancode,
@@ -240,7 +242,9 @@ impl KeyboardState {
     pub fn handle_event(&mut self, ev: KeyboardEvent) {
         use KeyboardEvent::*;
         match ev {
-            Press { scancode, keycode } => {
+            Press {
+                scancode, keycode, ..
+            } => {
                 self.scancodes.press(scancode);
                 self.keycodes.press(keycode);
             }

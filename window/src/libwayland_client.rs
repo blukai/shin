@@ -49,12 +49,16 @@ pub fn wl_fixed_to_f64(f: wl_fixed) -> f64 {
 }
 
 pub struct Lib {
+    pub wl_display_cancel_read: unsafe extern "C" fn(display: *mut wl_display),
     pub wl_display_connect: unsafe extern "C" fn(name: *const c_char) -> *mut wl_display,
     pub wl_display_disconnect: unsafe extern "C" fn(display: *mut wl_display) -> *mut c_void,
     pub wl_display_dispatch: unsafe extern "C" fn(display: *mut wl_display) -> c_int,
     pub wl_display_dispatch_pending: unsafe extern "C" fn(display: *mut wl_display) -> c_int,
-    pub wl_display_roundtrip: unsafe extern "C" fn(display: *mut wl_display) -> c_int,
     pub wl_display_flush: unsafe extern "C" fn(display: *mut wl_display) -> c_int,
+    pub wl_display_get_fd: unsafe extern "C" fn(display: *mut wl_display) -> c_int,
+    pub wl_display_prepare_read: unsafe extern "C" fn(display: *mut wl_display) -> c_int,
+    pub wl_display_read_events: unsafe extern "C" fn(display: *mut wl_display) -> c_int,
+    pub wl_display_roundtrip: unsafe extern "C" fn(display: *mut wl_display) -> c_int,
 
     pub wl_proxy_add_listener: unsafe extern "C" fn(
         proxy: *mut wl_proxy,
@@ -81,12 +85,16 @@ impl Lib {
             .or_else(|_| DynLib::open(c"libwayland-client.so.0"))?;
 
         Ok(Self {
+            wl_display_cancel_read: dynlib.lookup(c"wl_display_cancel_read")?,
             wl_display_connect: dynlib.lookup(c"wl_display_connect")?,
             wl_display_disconnect: dynlib.lookup(c"wl_display_disconnect")?,
             wl_display_dispatch: dynlib.lookup(c"wl_display_dispatch")?,
             wl_display_dispatch_pending: dynlib.lookup(c"wl_display_dispatch_pending")?,
-            wl_display_roundtrip: dynlib.lookup(c"wl_display_roundtrip")?,
             wl_display_flush: dynlib.lookup(c"wl_display_flush")?,
+            wl_display_get_fd: dynlib.lookup(c"wl_display_get_fd")?,
+            wl_display_prepare_read: dynlib.lookup(c"wl_display_prepare_read")?,
+            wl_display_read_events: dynlib.lookup(c"wl_display_read_events")?,
+            wl_display_roundtrip: dynlib.lookup(c"wl_display_roundtrip")?,
 
             wl_proxy_add_listener: dynlib.lookup(c"wl_proxy_add_listener")?,
             wl_proxy_destroy: dynlib.lookup(c"wl_proxy_destroy")?,

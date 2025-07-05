@@ -1,7 +1,9 @@
 use std::collections::{HashMap, VecDeque};
 use std::ffi::{CStr, c_char, c_int, c_void};
-use std::ptr::{NonNull, null_mut};
+use std::mem::MaybeUninit;
+use std::ptr::{NonNull, null, null_mut};
 use std::slice;
+use std::time::Duration;
 
 use anyhow::{Context as _, anyhow};
 use input::{CursorShape, KeyboardEvent, Keycode, PointerButton, PointerEvent, Scancode};
@@ -108,6 +110,60 @@ impl SerialTracker {
     }
 }
 
+struct KeyRepeatInfo {
+    rate: Duration,
+    delay: Duration,
+}
+
+struct TimerFD(c_int);
+
+impl TimerFD {
+    unsafe fn new(clockid: libc::clockid_t, flags: c_int) -> anyhow::Result<Self> {
+        let ret = unsafe { libc::timerfd_create(clockid, flags) };
+        if ret == -1 {
+            let errno = unsafe { *libc::__errno_location() };
+            Err(anyhow!("could not create timerfd: 0x:{errno:x}"))
+        } else {
+            Ok(Self(ret))
+        }
+    }
+
+    unsafe fn arm(&self, it_interval: Duration, it_value: Duration) -> anyhow::Result<()> {
+        let timerspec = libc::itimerspec {
+            it_interval: libc::timespec {
+                tv_sec: it_interval.as_secs() as _,
+                tv_nsec: it_interval.as_nanos() as _,
+            },
+            it_value: libc::timespec {
+                tv_sec: it_value.as_secs() as _,
+                tv_nsec: it_value.as_nanos() as _,
+            },
+        };
+        let ret = unsafe { libc::timerfd_settime(self.0, 0, &timerspec, null_mut()) };
+        if ret == -1 {
+            let errno = unsafe { *libc::__errno_location() };
+            Err(anyhow!("could not set timerfd time: 0x:{errno:x}"))
+        } else {
+            Ok(())
+        }
+    }
+
+    unsafe fn disarm(&self) -> anyhow::Result<()> {
+        unsafe { self.arm(Duration::ZERO, Duration::ZERO) }
+    }
+
+    unsafe fn read<T>(&self) -> anyhow::Result<T> {
+        let mut value = MaybeUninit::uninit();
+        let ret = unsafe { libc::read(self.0, value.as_mut_ptr() as *mut c_void, size_of::<T>()) };
+        if ret != size_of::<T>() as libc::ssize_t {
+            let errno = unsafe { *libc::__errno_location() };
+            Err(anyhow!("could not read timerfd: 0x:{errno:x}"))
+        } else {
+            Ok(unsafe { value.assume_init() })
+        }
+    }
+}
+
 pub struct WaylandBackend {
     libwayland_client: libwayland_client::Lib,
     libwayland_cursor: libwayland_cursor::Lib,
@@ -148,6 +204,9 @@ pub struct WaylandBackend {
     // keyboard
     wl_keyboard: *mut libwayland_client::wl_keyboard,
     xkb_context: Option<xkb::Context>,
+    key_repeat_timerfd: TimerFD,
+    key_repeat_info: Option<KeyRepeatInfo>,
+    key_repeat: Option<(Scancode, Keycode)>,
 
     serial_tracker: SerialTracker,
     events: VecDeque<Event>,
@@ -391,12 +450,17 @@ unsafe extern "C" fn handle_wl_pointer_button(
 
     let evl = unsafe { &mut *(data as *mut WaylandBackend) };
 
-    let pressed = state == libwayland_client::WL_POINTER_BUTTON_STATE_PRESSED;
-    evl.pointer_frame_events.push_back(if pressed {
-        PointerEvent::Press { button }
-    } else {
-        PointerEvent::Release { button }
-    });
+    match state {
+        libwayland_client::WL_POINTER_BUTTON_STATE_PRESSED => {
+            let pointer_event = PointerEvent::Press { button };
+            evl.pointer_frame_events.push_back(pointer_event);
+        }
+        libwayland_client::WL_POINTER_BUTTON_STATE_RELEASED => {
+            let pointer_event = PointerEvent::Release { button };
+            evl.pointer_frame_events.push_back(pointer_event);
+        }
+        other => log::warn!("unknown pointer button state: {other}"),
+    }
 }
 
 unsafe extern "C" fn handle_wl_pointer_frame(
@@ -494,18 +558,45 @@ unsafe extern "C" fn handle_wl_keyboard_key(
         .as_ref()
         .expect("xkb contex has not been created");
 
-    let sym = unsafe {
-        (xkb_context.lib.xkb_state_key_get_one_sym)(xkb_context.state, key + EVDEV_OFFSET)
-    };
+    let key = key + EVDEV_OFFSET;
+    let sym = unsafe { (xkb_context.lib.xkb_state_key_get_one_sym)(xkb_context.state, key) };
     let utf32 = unsafe { (xkb_context.lib.xkb_keysym_to_utf32)(sym) };
     let keycode = char::from_u32(utf32).map_or_else(|| Keycode::Unhandled, Keycode::Char);
 
-    let pressed = state == libwayland_client::WL_KEYBOARD_KEY_STATE_PRESSED;
-    evl.events.push_back(Event::Keyboard(if pressed {
-        KeyboardEvent::Press { scancode, keycode }
-    } else {
-        KeyboardEvent::Release { scancode, keycode }
-    }));
+    match state {
+        libwayland_client::WL_KEYBOARD_KEY_STATE_PRESSED => {
+            let keyboard_event = KeyboardEvent::Press {
+                scancode,
+                keycode,
+                repeat: false,
+            };
+            evl.events.push_back(Event::Keyboard(keyboard_event));
+
+            if let Some(KeyRepeatInfo { rate, delay }) = evl.key_repeat_info {
+                assert!(!xkb_context.keymap.is_null());
+                if unsafe { (xkb_context.lib.xkb_keymap_key_repeats)(xkb_context.keymap, key) } == 1
+                {
+                    evl.key_repeat = Some((scancode, keycode));
+                    if let Err(err) = unsafe { evl.key_repeat_timerfd.arm(rate, delay) } {
+                        log::error!("could not arm key repeat: {err}");
+                    }
+                }
+            }
+        }
+        libwayland_client::WL_KEYBOARD_KEY_STATE_RELEASED => {
+            let keyboard_event = KeyboardEvent::Release { scancode, keycode };
+            evl.events.push_back(Event::Keyboard(keyboard_event));
+
+            evl.key_repeat = None;
+            if let Err(err) = unsafe { evl.key_repeat_timerfd.disarm() } {
+                log::error!("could not disarm key repeat: {err}");
+            }
+        }
+        libwayland_client::WL_KEYBOARD_KEY_STATE_REPEATED => {
+            // NOTE: key repetition is handled with repeat info timer ^.
+        }
+        other => log::warn!("unknown keyboard key state: {other}"),
+    }
 }
 
 unsafe extern "C" fn handle_wl_keyboard_modifiers(
@@ -535,6 +626,29 @@ unsafe extern "C" fn handle_wl_keyboard_modifiers(
     };
 }
 
+unsafe extern "C" fn handle_wl_keyboard_repeat_info(
+    data: *mut c_void,
+    _wl_keyboard: *mut libwayland_client::wl_keyboard,
+    rate: i32,
+    delay: i32,
+) {
+    // QUOTE: negative values for either rate or delay are illegal.
+    assert!(rate >= 0 && delay >= 0);
+
+    let evl = unsafe { &mut *(data as *mut WaylandBackend) };
+    // NOTE: a rate of zero disables any repeating, regardless of the delay's value.
+    evl.key_repeat_info = if rate == 0 {
+        None
+    } else {
+        Some(KeyRepeatInfo {
+            // QUOTE: rate of repeating keys in characters per second
+            rate: Duration::from_nanos(1_000_000_000 / rate as u64),
+            // QUOTE: delay in milliseconds since key down until repeating starts
+            delay: Duration::from_millis(delay as u64),
+        })
+    };
+}
+
 const WL_KEYBOARD_LISTENER: libwayland_client::wl_keyboard_listener =
     libwayland_client::wl_keyboard_listener {
         keymap: handle_wl_keyboard_keymap,
@@ -542,7 +656,7 @@ const WL_KEYBOARD_LISTENER: libwayland_client::wl_keyboard_listener =
         leave: handle_wl_keyboard_leave,
         key: handle_wl_keyboard_key,
         modifiers: handle_wl_keyboard_modifiers,
-        repeat_info: libwayland_client::noop_listener!(),
+        repeat_info: handle_wl_keyboard_repeat_info,
     };
 
 impl WaylandBackend {
@@ -553,6 +667,15 @@ impl WaylandBackend {
         let wl_display =
             NonNull::new(unsafe { (libwayland_client.wl_display_connect)(null_mut()) })
                 .context("could not connect to wayland display")?;
+
+        // TODO: do i need to call wl_display_disconnect here?
+        let key_repeat_timerfd = unsafe {
+            TimerFD::new(
+                libc::CLOCK_MONOTONIC,
+                libc::TFD_CLOEXEC | libc::TFD_NONBLOCK,
+            )
+        }
+        .context("could not create key repeat timer fd")?;
 
         let mut boxed = Box::new(WaylandBackend {
             libwayland_client,
@@ -586,6 +709,9 @@ impl WaylandBackend {
 
             wl_keyboard: null_mut(),
             xkb_context: None,
+            key_repeat_timerfd,
+            key_repeat_info: None,
+            key_repeat: None,
 
             serial_tracker: SerialTracker::default(),
             events: VecDeque::new(),
@@ -803,7 +929,7 @@ impl WaylandBackend {
         self.cursor_theme = unsafe {
             assert!(!self.wl_shm.is_null());
             (self.libwayland_cursor.wl_cursor_theme_load)(
-                map_cursor_shape(CursorShape::Default).as_ptr(),
+                null(),
                 (CURSOR_SIZE * cursor_scale) as c_int,
                 self.wl_shm,
             )
@@ -885,12 +1011,76 @@ impl rwh::HasWindowHandle for WaylandBackend {
 
 impl Window for WaylandBackend {
     fn pump_events(&mut self) -> anyhow::Result<()> {
-        let n = unsafe {
-            (self.libwayland_client.wl_display_dispatch_pending)(self.wl_display.as_ptr())
-        };
-        if n == -1 {
-            return Err(anyhow!("wl_display_dispatch_pending failed"));
+        // https://wayland.freedesktop.org/docs/html/apb.html#Client-classwl__display_1a40039c1169b153269a3dc0796a54ddb0
+        // https://gitlab.freedesktop.org/wayland/weston/-/blob/5a48cedc7b8421d8342dd6a943705955217b0fd1/clients/window.c#L7180
+
+        let client = &self.libwayland_client;
+        let display = self.wl_display.as_ptr();
+
+        // QUOTE: returns 0 on success or -1 if event queue was not empty
+        while unsafe { (client.wl_display_prepare_read)(display) } == -1 {
+            let ret = unsafe { (client.wl_display_dispatch_pending)(display) };
+            if ret == -1 {
+                return Err(anyhow!("wl_display_dispatch_pending failed"));
+            }
         }
+
+        let ret = unsafe { (client.wl_display_flush)(display) };
+        if ret == -1 {
+            // TODO: handle wl_display_flush's EAGAIN errno
+            return Err(anyhow!("wl_display_flush failed"));
+        }
+
+        let mut fds = [
+            libc::pollfd {
+                fd: unsafe { (client.wl_display_get_fd)(display) },
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: self.key_repeat_timerfd.0,
+                events: libc::POLLIN,
+                revents: 0,
+            },
+        ];
+        // TODO: should poll timeout eq -1 (blocking?)
+        let ret = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, 0) };
+        match ret {
+            -1 => {
+                unsafe { (client.wl_display_cancel_read)(display) };
+                let errno = unsafe { *libc::__errno_location() };
+                return Err(anyhow!("could not poll fds: 0x:{errno:x}"));
+            }
+            0 => {
+                unsafe { (client.wl_display_cancel_read)(display) };
+            }
+            1.. => {
+                if fds[0].revents & libc::POLLIN == libc::POLLIN {
+                    let ret = unsafe { (client.wl_display_read_events)(display) };
+                    if ret == -1 {
+                        return Err(anyhow!("wl_display_read_events failed"));
+                    }
+                } else {
+                    unsafe { (client.wl_display_cancel_read)(display) };
+                }
+
+                if fds[1].revents & libc::POLLIN == libc::POLLIN {
+                    if let Some((scancode, keycode)) = self.key_repeat {
+                        let exp: u64 = unsafe { self.key_repeat_timerfd.read() }?;
+                        for _ in 0..exp {
+                            let keyboard_event = KeyboardEvent::Press {
+                                scancode,
+                                keycode,
+                                repeat: true,
+                            };
+                            self.events.push_back(Event::Keyboard(keyboard_event));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
         Ok(())
     }
 

@@ -133,7 +133,11 @@ impl winit::application::ApplicationHandler for App {
                     };
                     let pressed = event.state.is_pressed();
                     Some(Event::Keyboard(if pressed {
-                        KeyboardEvent::Press { scancode, keycode }
+                        KeyboardEvent::Press {
+                            scancode,
+                            keycode,
+                            repeat: event.repeat,
+                        }
                     } else {
                         KeyboardEvent::Release { scancode, keycode }
                     }))
