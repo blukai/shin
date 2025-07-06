@@ -18,8 +18,12 @@ struct App {
     font_handle: uhi::FontHandle,
     input_state: input::State,
 
-    text: String,
-    text_state: uhi::TextState,
+    text_one: String,
+    text_one_state: uhi::TextState,
+
+    text_two: String,
+    text_two_state: uhi::TextState,
+
     text_appearance: uhi::TextAppearance,
 }
 
@@ -40,8 +44,12 @@ impl AppHandler for App {
             font_handle,
             input_state: input::State::default(),
 
-            text: "hello, sailor!".to_string(),
-            text_state: uhi::TextState::default(),
+            text_one: "hello, sailor!".to_string(),
+            text_one_state: uhi::TextState::default(),
+
+            text_two: "こんにちは".to_string(),
+            text_two_state: uhi::TextState::default(),
+
             text_appearance: uhi::TextAppearance::new(font_handle, 14.0),
         }
     }
@@ -70,16 +78,30 @@ impl AppHandler for App {
         unsafe { ctx.gl_api.clear(gl::api::COLOR_BUFFER_BIT) };
 
         uhi::update_text(
-            &mut self.text,
-            &mut self.text_state,
+            &mut self.text_one,
+            &mut self.text_one_state,
             &self.text_appearance,
             &self.input_state,
         );
         uhi::draw_text(
-            &mut self.text,
-            Some(&self.text_state),
+            &mut self.text_one,
+            Some(&self.text_one_state),
             &self.text_appearance,
             Vec2::splat(24.0),
+            &mut self.uhi_context,
+        );
+
+        uhi::update_text(
+            &mut self.text_two,
+            &mut self.text_two_state,
+            &self.text_appearance,
+            &self.input_state,
+        );
+        uhi::draw_text(
+            &mut self.text_two,
+            Some(&self.text_two_state),
+            &self.text_appearance,
+            Vec2::new(24.0, 56.0),
             &mut self.uhi_context,
         );
 

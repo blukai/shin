@@ -5,7 +5,6 @@ use input::Scancode;
 
 use crate::{Context, Externs, Fill, FillTexture, FontHandle, Rect, RectShape, Rgba8, TextureKind};
 
-// TODO: key repeat (input)
 // TODO: multiline
 // TODO: per-char layout styling
 // TODO: filters / input types (number-only, etc.)
@@ -90,14 +89,18 @@ impl TextState {
 
     // TODO: move modifiers (by char, by char type, by word, etc.)
 
-    fn move_cursor_left(&mut self, _text: &str, extend_selection: bool) {
+    fn move_cursor_left(&mut self, text: &str, extend_selection: bool) {
         if self.has_selection() && !extend_selection {
             self.cursor.end = self.cursor.end.min(self.cursor.start);
             self.cursor.start = self.cursor.end;
             return;
         }
 
-        self.cursor.end = self.cursor.end.saturating_sub(1);
+        let prev_char_width = &text[..self.cursor.end]
+            .chars()
+            .next_back()
+            .map_or_else(|| 0, |ch| ch.len_utf8());
+        self.cursor.end -= prev_char_width;
         if !extend_selection {
             self.cursor.start = self.cursor.end;
         }
@@ -110,7 +113,11 @@ impl TextState {
             return;
         }
 
-        self.cursor.end = (self.cursor.end + 1).min(text.len());
+        let next_char_width = &text[self.cursor.end..]
+            .chars()
+            .next()
+            .map_or_else(|| 0, |ch| ch.len_utf8());
+        self.cursor.end += next_char_width;
         if !extend_selection {
             self.cursor.start = self.cursor.end;
         }
