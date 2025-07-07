@@ -396,9 +396,10 @@ unsafe extern "C" fn handle_wl_pointer_motion(
 ) {
     let evl = unsafe { &mut *(data as *mut WaylandBackend) };
 
+    let scale_factor = evl.scale_factor();
     let position = (
-        libwayland_client::wl_fixed_to_f64(surface_x),
-        libwayland_client::wl_fixed_to_f64(surface_y),
+        libwayland_client::wl_fixed_to_f64(surface_x) * scale_factor,
+        libwayland_client::wl_fixed_to_f64(surface_y) * scale_factor,
     );
     evl.pointer_frame_events
         .push_back(PointerEvent::Motion { position });
