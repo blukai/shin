@@ -5,6 +5,7 @@ use glam::Vec2;
 mod context;
 mod drawbuffer;
 mod fontservice;
+mod interactionstate;
 mod layout;
 mod renderer;
 mod text;
@@ -14,6 +15,7 @@ mod textureservice;
 pub use context::*;
 pub use drawbuffer::*;
 pub use fontservice::*;
+pub use interactionstate::*;
 pub use layout::*;
 pub use renderer::*;
 pub use text::*;
@@ -91,6 +93,12 @@ impl Rect {
 
     pub fn translate_by(&self, delta: &Vec2) -> Self {
         Self::new(self.min + *delta, self.max + *delta)
+    }
+
+    pub fn contains(&self, point: &Vec2) -> bool {
+        let x = point.x >= self.min.x && point.x <= self.max.x;
+        let y = point.y >= self.min.y && point.y <= self.max.y;
+        x && y
     }
 }
 

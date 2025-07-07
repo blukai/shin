@@ -11,12 +11,7 @@ impl uhi::Externs for UhiExterns {
     type TextureHandle = <uhi::GlRenderer as uhi::Renderer>::TextureHandle;
 }
 
-fn draw<E: uhi::Externs>(
-    ctx: &mut uhi::Context<E>,
-    input_state: &input::State,
-    font_handle: uhi::FontHandle,
-    area: uhi::Rect,
-) {
+fn draw<E: uhi::Externs>(ctx: &mut uhi::Context<E>, font_handle: uhi::FontHandle, area: uhi::Rect) {
     use uhi::*;
 
     // Tableau I, by Piet Mondriaan
@@ -191,9 +186,8 @@ fn draw<E: uhi::Externs>(
         }
     }
 
-    uhi::draw_text(
+    uhi::draw_readonly_text(
         "Tableau I, by Piet Mondriaan",
-        None,
         &uhi::TextAppearance::new(font_handle, 14.0).fg(uhi::Rgba8::FUCHSIA),
         Vec2::splat(24.0),
         ctx,
@@ -252,7 +246,6 @@ impl AppHandler for App {
 
         draw(
             &mut self.uhi_context,
-            &self.input_state,
             self.font_handle,
             uhi::Rect::new(
                 Vec2::ZERO,

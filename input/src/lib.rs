@@ -23,6 +23,14 @@ impl Hash for PointerButton {
 
 impl NoHash for PointerButton {}
 
+impl PointerButton {
+    /// NOTE: this is useful for calling InputState's all_just_released method for example.
+    pub fn all() -> [Self; 3] {
+        use PointerButton::*;
+        [Primary, Secondary, Tertiary]
+    }
+}
+
 #[derive(Debug)]
 pub enum PointerEvent {
     Motion { position: (f64, f64) },
@@ -260,4 +268,13 @@ impl KeyboardState {
 pub struct State {
     pub pointer: PointerState,
     pub keyboard: KeyboardState,
+}
+
+impl State {
+    pub fn end_frame(&mut self) {
+        self.pointer.buttons.clear();
+
+        self.keyboard.scancodes.clear();
+        self.keyboard.keycodes.clear();
+    }
 }

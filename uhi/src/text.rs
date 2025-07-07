@@ -1,9 +1,12 @@
-use std::ops::Range;
+use std::{ops::Range, panic::Location};
 
 use glam::Vec2;
 use input::Scancode;
 
-use crate::{Context, Externs, Fill, FillTexture, FontHandle, Rect, RectShape, Rgba8, TextureKind};
+use crate::{
+    Context, Externs, Fill, FillTexture, FontHandle, Key, Rect, RectShape, Rgba8, Stroke,
+    TextureKind,
+};
 
 // TODO: multiline
 // TODO: per-char layout styling
@@ -11,8 +14,7 @@ use crate::{Context, Externs, Fill, FillTexture, FontHandle, Rect, RectShape, Rg
 
 // TODO: color schemes ?
 const FG: Rgba8 = Rgba8::WHITE;
-const CURSOR_ACTIVE: Rgba8 = Rgba8::from_u32(0x8faf9fff);
-const CURSOR_INACTIVE: Rgba8 = Rgba8::from_u32(0x8faf9fff);
+const CURSOR: Rgba8 = Rgba8::from_u32(0x8faf9fff);
 const SELECTION_ACTIVE: Rgba8 = Rgba8::from_u32(0x304a3dff);
 const SELECTION_INACTIVE: Rgba8 = Rgba8::from_u32(0x484848ff);
 
@@ -55,6 +57,7 @@ impl TextAppearance {
 // ----
 
 pub struct TextState {
+    key: Key,
     readonly: bool,
     // if equal, no selection; start may be less than or greater than end (start is where the
     // initial click was).
@@ -62,13 +65,11 @@ pub struct TextState {
 }
 
 impl Default for TextState {
-    // TODO: add id into TextState and track focus within the Context (by id).
-    //
-    // generate id with #[track_caller] + Location thing; allow to specify id manually (because
-    // when rendering lists location-based id would dup in a loop).
     #[track_caller]
     fn default() -> Self {
         Self {
+            key: Key::new(Location::caller()),
+
             readonly: Default::default(),
             cursor: Default::default(),
         }
@@ -76,6 +77,11 @@ impl Default for TextState {
 }
 
 impl TextState {
+    pub fn key(mut self, value: Key) -> Self {
+        self.key = value;
+        self
+    }
+
     pub fn readonly(mut self, value: bool) -> Self {
         self.readonly = value;
         self
@@ -128,37 +134,67 @@ impl TextState {
 
 // ----
 
-// TODO: hover, focus / activation and stuff
-pub fn update_text(
-    text: &mut String,
-    state: &mut TextState,
-    appearance: &TextAppearance,
-    input: &input::State,
-) {
-    use Scancode::*;
-    let scancodes = &input.keyboard.scancodes;
-    if scancodes.just_pressed(ArrowLeft) {
-        state.move_cursor_left(text, scancodes.any_pressed([ShiftLeft, ShiftRight]));
-    }
-    if scancodes.just_pressed(ArrowRight) {
-        state.move_cursor_right(text, scancodes.any_pressed([ShiftLeft, ShiftRight]));
+pub enum TextKind<'a> {
+    Readonly(&'a str),
+    Editable(&'a mut String),
+}
+
+impl<'a> TextKind<'a> {
+    #[inline]
+    fn as_str(&self) -> &str {
+        match self {
+            Self::Readonly(s) => s,
+            Self::Editable(s) => s.as_str(),
+        }
     }
 }
 
 pub fn draw_text<E: Externs>(
-    text: &str,
+    text: TextKind,
     // NOTE: if state is None - text is not interactable.
-    state: Option<&TextState>,
+    mut state: Option<&mut TextState>,
     appearance: &TextAppearance,
     // TODO: consider replacing position with Placement enum or something?
     // - singleline variant will need an position and width.
     // - multiline variant will need an area rect.
     position: Vec2,
+    input: Option<&input::State>,
     ctx: &mut Context<E>,
 ) {
     let mut font_instance_ref = ctx
         .font_service
         .get_font_instance_mut(appearance.font_handle, appearance.font_size);
+
+    if let (Some(state), Some(input)) = (state.as_deref_mut(), input) {
+        // TODO: text rect must take into account container's padding
+        let rect = Rect::new(
+            position,
+            position + font_instance_ref.compute_text_size(text.as_str(), &mut ctx.texture_service),
+        );
+        ctx.interaction_state
+            .maybe_set_hot_or_active(state.key, rect, input);
+
+        if ctx.interaction_state.is_active(state.key) {
+            use Scancode::*;
+            let scancodes = &input.keyboard.scancodes;
+            if scancodes.just_pressed(ArrowLeft) {
+                state.move_cursor_left(
+                    text.as_str(),
+                    scancodes.any_pressed([ShiftLeft, ShiftRight]),
+                );
+            }
+            if scancodes.just_pressed(ArrowRight) {
+                state.move_cursor_right(
+                    text.as_str(),
+                    scancodes.any_pressed([ShiftLeft, ShiftRight]),
+                );
+            }
+        }
+    }
+
+    // ----
+
+    let text = text.as_str();
 
     if let Some(state) = state {
         let cursor_end_x = font_instance_ref
@@ -177,12 +213,15 @@ pub fn draw_text<E: Externs>(
 
             ctx.draw_buffer.push_rect(RectShape::with_fill(
                 selection_rect,
-                // TODO: text edit activation/deactivation
-                Fill::with_color(SELECTION_ACTIVE),
+                Fill::with_color(if ctx.interaction_state.is_active(state.key) {
+                    SELECTION_ACTIVE
+                } else {
+                    SELECTION_INACTIVE
+                }),
             ));
         }
 
-        if !state.readonly {
+        if !state.readonly && ctx.interaction_state.is_active(state.key) {
             let cursor_rect = {
                 const CURSOR_WIDTH: f32 = 2.0;
                 let mut min = position + Vec2::new(cursor_end_x, 0.0);
@@ -193,15 +232,12 @@ pub fn draw_text<E: Externs>(
                 Rect::new(min, min + size)
             };
 
-            ctx.draw_buffer.push_rect(RectShape::with_fill(
-                cursor_rect,
-                // TODO: text edit activation/deactivation
-                Fill::with_color(CURSOR_ACTIVE),
-            ));
+            ctx.draw_buffer
+                .push_rect(RectShape::with_fill(cursor_rect, Fill::with_color(CURSOR)));
         }
     }
 
-    let fg = appearance.fg.unwrap_or(Rgba8::WHITE);
+    let fg = appearance.fg.unwrap_or(FG);
     let mut offset_x = position.x;
     let ascent = font_instance_ref.ascent();
     for ch in text.chars() {
@@ -220,4 +256,38 @@ pub fn draw_text<E: Externs>(
         ));
         offset_x += char_ref.advance_width();
     }
+}
+
+pub fn draw_readonly_text<E: Externs>(
+    text: &str,
+    appearance: &TextAppearance,
+    position: Vec2,
+    ctx: &mut Context<E>,
+) {
+    draw_text(
+        TextKind::Readonly(text),
+        None,
+        appearance,
+        position,
+        None,
+        ctx,
+    )
+}
+
+pub fn draw_editable_text<E: Externs>(
+    text: &mut String,
+    state: &mut TextState,
+    appearance: &TextAppearance,
+    position: Vec2,
+    input: &input::State,
+    ctx: &mut Context<E>,
+) {
+    draw_text(
+        TextKind::Readonly(text),
+        Some(state),
+        appearance,
+        position,
+        Some(input),
+        ctx,
+    )
 }
