@@ -223,12 +223,9 @@ pub fn draw_text<E: Externs>(
 
         if !state.readonly && ctx.interaction_state.is_active(state.key) {
             let cursor_rect = {
-                const CURSOR_WIDTH: f32 = 2.0;
-                let mut min = position + Vec2::new(cursor_end_x, 0.0);
-                if state.cursor.end == 0 {
-                    min -= CURSOR_WIDTH;
-                }
-                let size = Vec2::new(CURSOR_WIDTH, font_instance_ref.line_height());
+                let cursor_width: f32 = font_instance_ref.typical_advance_width();
+                let min = position + Vec2::new(cursor_end_x, 0.0);
+                let size = Vec2::new(cursor_width, font_instance_ref.line_height());
                 Rect::new(min, min + size)
             };
 
@@ -239,13 +236,21 @@ pub fn draw_text<E: Externs>(
 
     let fg = appearance.fg.unwrap_or(FG);
     let mut offset_x = position.x;
+    let mut offset_y = position.y;
     let ascent = font_instance_ref.ascent();
     for ch in text.chars() {
+        // TODO: multiline wrapping (max width)
+        // if ch == '\n' {
+        //     offset_x = position.x;
+        //     offset_y += font_instance_ref.line_height();
+        //     continue;
+        // }
+
         let char_ref = font_instance_ref.get_char(ch, &mut ctx.texture_service);
         let char_bounds = char_ref.bounds();
 
         ctx.draw_buffer.push_rect(RectShape::with_fill(
-            char_bounds.translate_by(&Vec2::new(offset_x, position.y + ascent)),
+            char_bounds.translate_by(&Vec2::new(offset_x, offset_y + ascent)),
             Fill::new(
                 fg,
                 FillTexture {

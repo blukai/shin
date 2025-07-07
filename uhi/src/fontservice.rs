@@ -184,13 +184,16 @@ fn make_font_instance_key(font_handle: FontHandle, pt_size: f32) -> u64 {
 
 #[derive(Debug)]
 struct FontInstance {
+    scale: PxScale,
     rasterized_chars: NoHashMap<u32, RasterizedChar>,
 
-    scale: PxScale,
     // TODO: is there a more proper name for this? i don't want to get this confused with css
     // line-height - it's not exactly that.
     line_height: f32,
     ascent: f32,
+    // width of the glyph 0.
+    // see https://developer.mozilla.org/en-US/docs/Web/CSS/length#ch
+    typical_advance_width: f32,
 }
 
 impl FontInstance {
@@ -208,13 +211,15 @@ impl FontInstance {
         let descent = scaled.descent();
         let line_gap = scaled.line_gap();
         let line_height = ascent - descent + line_gap;
+        let typical_advance_width = scaled.h_advance(font.glyph_id('0'));
 
         Self {
+            scale,
             rasterized_chars: NoHashMap::default(),
 
-            scale,
             line_height,
             ascent,
+            typical_advance_width,
         }
     }
 }
@@ -236,6 +241,11 @@ impl<'a> FontInstanceRefMut<'a> {
     #[inline]
     pub fn ascent(&self) -> f32 {
         self.font_instance.ascent
+    }
+
+    #[inline]
+    pub fn typical_advance_width(&self) -> f32 {
+        self.font_instance.typical_advance_width
     }
 
     /// gets a char, rasterizing and caching it if not already cached.
