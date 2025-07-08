@@ -75,10 +75,15 @@ impl AppHandler for App {
 
         // ----
 
-        let window_size = ctx.window.size();
-
         unsafe { ctx.gl_api.clear_color(0.0, 0.0, 0.3, 1.0) };
         unsafe { ctx.gl_api.clear(gl::api::COLOR_BUFFER_BIT) };
+
+        let window_size = ctx.window.size();
+        let area = uhi::Rect::new(
+            uhi::Vec2::ZERO,
+            uhi::Vec2::from(uhi::U32Vec2::from(window_size)),
+        )
+        .shrink(&uhi::Vec2::splat(24.0));
 
         uhi::draw_readonly_text(
             &format!(
@@ -87,7 +92,7 @@ impl AppHandler for App {
                 self.input_state.pointer.position.1.round()
             ),
             &self.text_appearance,
-            uhi::Vec2::new(24.0, 24.0 * 1.0),
+            area.clone().shrink(&uhi::Vec2::new(0.0, 24.0 * 0.0)),
             &mut self.uhi_context,
         );
 
@@ -95,7 +100,7 @@ impl AppHandler for App {
             &mut self.text_one,
             &mut self.text_one_state,
             &self.text_appearance,
-            uhi::Vec2::new(24.0, 24.0 * 3.0),
+            area.clone().shrink(&uhi::Vec2::new(0.0, 24.0 * 2.0)),
             &self.input_state,
             &mut self.uhi_context,
         );
@@ -104,7 +109,7 @@ impl AppHandler for App {
             &mut self.text_two,
             &mut self.text_two_state,
             &self.text_appearance,
-            uhi::Vec2::new(24.0, 24.0 * 5.0),
+            area.shrink(&uhi::Vec2::new(0.0, 24.0 * 4.0)),
             &self.input_state,
             &mut self.uhi_context,
         );

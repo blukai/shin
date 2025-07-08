@@ -150,8 +150,8 @@ pub struct CharRef<'a> {
 
 impl<'a> CharRef<'a> {
     #[inline]
-    pub fn bounds(&self) -> &Rect {
-        &self.rasterized_char.bounds
+    pub fn bounds(&self) -> Rect {
+        self.rasterized_char.bounds.clone()
     }
 
     #[inline]

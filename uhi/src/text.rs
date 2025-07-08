@@ -209,10 +209,7 @@ pub fn draw_text<E: Externs>(
     // NOTE: if state is None - text is not interactable.
     mut state: Option<&mut TextState>,
     appearance: &TextAppearance,
-    // TODO: consider replacing position with Placement enum or something?
-    // - singleline variant will need an position and width.
-    // - multiline variant will need an area rect.
-    position: Vec2,
+    rect: Rect,
     input: Option<&input::State>,
     ctx: &mut Context<E>,
 ) {
@@ -222,12 +219,12 @@ pub fn draw_text<E: Externs>(
 
     if let (Some(state), Some(input)) = (state.as_deref_mut(), input) {
         // TODO: text rect must take into account container's padding
-        let rect = Rect::new(
-            position,
-            position + font_instance_ref.compute_text_size(text.as_str(), &mut ctx.texture_service),
+        let text_rect = Rect::new(
+            rect.min,
+            rect.min + font_instance_ref.compute_text_size(text.as_str(), &mut ctx.texture_service),
         );
         ctx.interaction_state
-            .maybe_set_hot_or_active(state.key, rect, input);
+            .maybe_set_hot_or_active(state.key, text_rect, input);
 
         // TODO: move state updating (event handling) out
         if ctx.interaction_state.is_active(state.key) {
@@ -286,7 +283,8 @@ pub fn draw_text<E: Externs>(
             let left = cursor_start_x.min(cursor_end_x);
             let right = cursor_start_x.max(cursor_end_x);
             let selection_rect = {
-                let min = position + Vec2::new(left, 0.0);
+                // TODO: multiline text support
+                let min = rect.min + Vec2::new(left, 0.0);
                 let size = Vec2::new(right - left, font_instance_ref.line_height());
                 Rect::new(min, min + size)
             };
@@ -304,7 +302,8 @@ pub fn draw_text<E: Externs>(
         if ctx.interaction_state.is_active(state.key) {
             let cursor_rect = {
                 let cursor_width: f32 = font_instance_ref.typical_advance_width();
-                let min = position + Vec2::new(cursor_end_x, 0.0);
+                // TODO: multiline text support
+                let min = rect.min + Vec2::new(cursor_end_x, 0.0);
                 let size = Vec2::new(cursor_width, font_instance_ref.line_height());
                 Rect::new(min, min + size)
             };
@@ -315,8 +314,8 @@ pub fn draw_text<E: Externs>(
     }
 
     let fg = appearance.fg.unwrap_or(FG);
-    let mut offset_x = position.x;
-    let mut offset_y = position.y;
+    let mut offset_x = rect.min.x;
+    let mut offset_y = rect.min.y;
     let ascent = font_instance_ref.ascent();
     for ch in text.chars() {
         // TODO: multiline wrapping (max width)
@@ -327,7 +326,7 @@ pub fn draw_text<E: Externs>(
         // }
 
         let char_ref = font_instance_ref.get_char(ch, &mut ctx.texture_service);
-        let char_bounds = char_ref.bounds();
+        let char_bounds = char_ref.bounds().clone();
 
         ctx.draw_buffer.push_rect(RectShape::with_fill(
             char_bounds.translate_by(&Vec2::new(offset_x, offset_y + ascent)),
@@ -346,24 +345,17 @@ pub fn draw_text<E: Externs>(
 pub fn draw_readonly_text<E: Externs>(
     text: &str,
     appearance: &TextAppearance,
-    position: Vec2,
+    rect: Rect,
     ctx: &mut Context<E>,
 ) {
-    draw_text(
-        TextKind::Readonly(text),
-        None,
-        appearance,
-        position,
-        None,
-        ctx,
-    )
+    draw_text(TextKind::Readonly(text), None, appearance, rect, None, ctx)
 }
 
 pub fn draw_editable_text<E: Externs>(
     text: &mut String,
     state: &mut TextState,
     appearance: &TextAppearance,
-    position: Vec2,
+    rect: Rect,
     input: &input::State,
     ctx: &mut Context<E>,
 ) {
@@ -371,7 +363,7 @@ pub fn draw_editable_text<E: Externs>(
         TextKind::Editable(text),
         Some(state),
         appearance,
-        position,
+        rect,
         Some(input),
         ctx,
     )

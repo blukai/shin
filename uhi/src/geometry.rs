@@ -84,10 +84,15 @@ impl From<(f32, f32)> for Vec2 {
     }
 }
 
-// TODO: it is "legal" to create Vec2 (which is dealing with f32') from f64', right?
-impl From<(f64, f64)> for Vec2 {
-    fn from((x, y): (f64, f64)) -> Self {
-        Self::new(x as f32, y as f32)
+impl From<F64Vec2> for Vec2 {
+    fn from(value: F64Vec2) -> Self {
+        Self::new(value.x as f32, value.y as f32)
+    }
+}
+
+impl From<U32Vec2> for Vec2 {
+    fn from(value: U32Vec2) -> Self {
+        Self::new(value.x as f32, value.y as f32)
     }
 }
 
@@ -135,6 +140,44 @@ impl Vec2 {
             x: -self.y,
             y: self.x,
         }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct F64Vec2 {
+    pub x: f64,
+    pub y: f64,
+}
+
+impl From<(f64, f64)> for F64Vec2 {
+    fn from((x, y): (f64, f64)) -> Self {
+        Self::new(x, y)
+    }
+}
+
+impl F64Vec2 {
+    #[inline]
+    pub const fn new(x: f64, y: f64) -> Self {
+        Self { x, y }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct U32Vec2 {
+    pub x: u32,
+    pub y: u32,
+}
+
+impl From<(u32, u32)> for U32Vec2 {
+    fn from((x, y): (u32, u32)) -> Self {
+        Self::new(x, y)
+    }
+}
+
+impl U32Vec2 {
+    #[inline]
+    pub const fn new(x: u32, y: u32) -> Self {
+        Self { x, y }
     }
 }
 
@@ -205,7 +248,7 @@ impl Rect {
         self.max - self.min
     }
 
-    pub fn translate_by(&self, delta: &Vec2) -> Self {
+    pub fn translate_by(self, delta: &Vec2) -> Self {
         Self::new(self.min + *delta, self.max + *delta)
     }
 
@@ -213,5 +256,13 @@ impl Rect {
         let x = point.x >= self.min.x && point.x <= self.max.x;
         let y = point.y >= self.min.y && point.y <= self.max.y;
         x && y
+    }
+
+    pub fn shrink(self, amount: &Vec2) -> Self {
+        Self::new(self.min + *amount, self.max - *amount)
+    }
+
+    pub fn expand(self, amount: &Vec2) -> Self {
+        Self::new(self.min - *amount, self.max + *amount)
     }
 }

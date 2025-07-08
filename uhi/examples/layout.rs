@@ -188,7 +188,7 @@ fn draw<E: uhi::Externs>(ctx: &mut uhi::Context<E>, font_handle: uhi::FontHandle
     uhi::draw_readonly_text(
         "Tableau I, by Piet Mondriaan",
         &uhi::TextAppearance::new(font_handle, 14.0).fg(uhi::Rgba8::FUCHSIA),
-        Vec2::splat(24.0),
+        area.shrink(&Vec2::splat(24.0)),
         ctx,
     );
 }
@@ -238,17 +238,17 @@ impl AppHandler for App {
     }
 
     fn update(&mut self, ctx: app::AppContext) {
-        let window_size = ctx.window.size();
-
         unsafe { ctx.gl_api.clear_color(0.0, 0.0, 0.3, 1.0) };
         unsafe { ctx.gl_api.clear(gl::api::COLOR_BUFFER_BIT) };
+
+        let window_size = ctx.window.size();
 
         draw(
             &mut self.uhi_context,
             self.font_handle,
             uhi::Rect::new(
                 uhi::Vec2::ZERO,
-                uhi::Vec2::new(window_size.0 as f32, window_size.1 as f32),
+                uhi::Vec2::from(uhi::U32Vec2::from(window_size)),
             ),
         );
 
