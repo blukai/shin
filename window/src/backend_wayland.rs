@@ -520,17 +520,30 @@ unsafe extern "C" fn handle_wl_pointer_enter(
     _wl_pointer: *mut libwayland_client::wl_pointer,
     serial: u32,
     _surface: *mut libwayland_client::wl_surface,
-    _surface_x: libwayland_client::wl_fixed,
-    _surface_y: libwayland_client::wl_fixed,
+    surface_x: libwayland_client::wl_fixed,
+    surface_y: libwayland_client::wl_fixed,
 ) {
     log::debug!("recv wl_pointer_enter");
 
     let evl = unsafe { &mut *(data as *mut WaylandBackend) };
+
     evl.serial_tracker
         .update_serial(SerialType::PointerEnter, serial);
     if let Err(err) = evl.set_cursor_shape(evl.cursor_shape.unwrap_or(CursorShape::Default)) {
         log::error!("could not set cursor shape (pointer enter): {err:?}");
     }
+
+    let scale_factor = evl.scale_factor();
+    let position = (
+        libwayland_client::wl_fixed_to_f64(surface_x) * scale_factor,
+        libwayland_client::wl_fixed_to_f64(surface_y) * scale_factor,
+    );
+    // NOTE: pushing motion event on enter is somewhat weird? idk yet how correct this is, but i
+    // don't think it's worth introducing enter/leave pointer events (for what reason?).
+    // ultimately doing this helps to: compute correct deltas; dispatch press with correct delta
+    // when window spawns right under the cursor.
+    evl.pointer_frame_events
+        .push_back(PointerEvent::Motion { position });
 }
 
 unsafe extern "C" fn handle_wl_pointer_leave(
