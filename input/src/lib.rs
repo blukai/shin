@@ -57,6 +57,7 @@ pub enum CursorShape {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scancode {
     Esc,
+    Backspace,
     W,
     A,
     S,
@@ -67,6 +68,7 @@ pub enum Scancode {
     ArrowLeft,
     ArrowRight,
     ArrowDown,
+    Delete,
 }
 
 impl Hash for Scancode {
@@ -181,6 +183,10 @@ where
         buttons.into_iter().all(|button| self.pressed(button))
     }
 
+    pub fn iter_pressed(&self) -> impl Iterator<Item = B> {
+        self.pressed.iter().copied()
+    }
+
     // just pressed
 
     pub fn just_pressed(&self, button: B) -> bool {
@@ -195,6 +201,10 @@ where
         buttons.into_iter().all(|button| self.just_pressed(button))
     }
 
+    pub fn iter_just_pressed(&self) -> impl Iterator<Item = B> {
+        self.just_pressed.iter().copied()
+    }
+
     // just released
 
     pub fn just_released(&self, button: B) -> bool {
@@ -207,6 +217,10 @@ where
 
     pub fn all_just_released(&self, buttons: impl IntoIterator<Item = B>) -> bool {
         buttons.into_iter().all(|button| self.just_released(button))
+    }
+
+    pub fn iter_just_released(&self) -> impl Iterator<Item = B> {
+        self.just_released.iter().copied()
     }
 }
 

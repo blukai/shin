@@ -1,18 +1,31 @@
 use std::{ops::Range, panic::Location};
 
 use glam::Vec2;
-use input::Scancode;
+use input::{Keycode, Scancode};
 
 use crate::{
-    Context, Externs, Fill, FillTexture, FontHandle, Key, Rect, RectShape, Rgba8, Stroke,
-    TextureKind,
+    Context, Externs, Fill, FillTexture, FontHandle, Key, Rect, RectShape, Rgba8, TextureKind,
 };
 
-// TODO: multiline
+// TODO: multiline / singleline distinction
+// - both likely need to know max width
+// - multiline needs to know max height
+// - both need to be vertically and horizontally scrollable
+//
 // TODO: per-char layout styling
-// TODO: filters / input types (number-only, etc.)
-
+// - should be able to make some fragments of text bold?
+// - should be able to change some elements of appearance (fg, bg)
+//
+// TODO: filters / input types
+// - for example number-only input, etc.
+//
 // TODO: color schemes ?
+//
+// TODO: clarity separation between:
+// - not selectable and not editable (no state and no input)
+// - selectable but not editable (needs state and input)
+// - selectable and editable (needs state and input)
+
 const FG: Rgba8 = Rgba8::WHITE;
 const CURSOR: Rgba8 = Rgba8::from_u32(0x8faf9fff);
 const SELECTION_ACTIVE: Rgba8 = Rgba8::from_u32(0x304a3dff);
@@ -58,7 +71,6 @@ impl TextAppearance {
 
 pub struct TextState {
     key: Key,
-    readonly: bool,
     // if equal, no selection; start may be less than or greater than end (start is where the
     // initial click was).
     cursor: Range<usize>,
@@ -69,8 +81,6 @@ impl Default for TextState {
     fn default() -> Self {
         Self {
             key: Key::new(Location::caller()),
-
-            readonly: Default::default(),
             cursor: Default::default(),
         }
     }
@@ -82,15 +92,16 @@ impl TextState {
         self
     }
 
-    pub fn readonly(mut self, value: bool) -> Self {
-        self.readonly = value;
-        self
-    }
-
     // ----
 
     fn has_selection(&self) -> bool {
         self.cursor.start != self.cursor.end
+    }
+
+    fn normalized_selection(&self) -> Range<usize> {
+        let left = self.cursor.start.min(self.cursor.end);
+        let right = self.cursor.start.max(self.cursor.end);
+        left..right
     }
 
     // TODO: move modifiers (by char, by char type, by word, etc.)
@@ -129,6 +140,41 @@ impl TextState {
         }
     }
 
+    fn delete_selection(&mut self, text: &mut String) {
+        let range = self.normalized_selection();
+        if range.end > range.start {
+            text.replace_range(range, "");
+        }
+        self.cursor.end = self.cursor.end.min(self.cursor.start);
+        self.cursor.start = self.cursor.end;
+    }
+
+    fn delete_left(&mut self, text: &mut String) {
+        if !self.has_selection() {
+            self.cursor.end = self.cursor.start;
+            self.move_cursor_left(text, true);
+        }
+        self.delete_selection(text);
+    }
+
+    fn delete_right(&mut self, text: &mut String) {
+        if !self.has_selection() {
+            self.cursor.end = self.cursor.start;
+            self.move_cursor_right(text, true);
+        }
+        self.delete_selection(text);
+    }
+
+    fn insert_char(&mut self, text: &mut String, ch: char) {
+        if self.has_selection() {
+            self.delete_selection(text);
+        }
+        assert_eq!(self.cursor.start, self.cursor.end);
+        text.insert(self.cursor.start, ch);
+        self.cursor.start += ch.len_utf8();
+        self.cursor.end = self.cursor.start;
+    }
+
     // TODO: mouse selection
 }
 
@@ -147,10 +193,20 @@ impl<'a> TextKind<'a> {
             Self::Editable(s) => s.as_str(),
         }
     }
+
+    #[inline]
+    fn as_string_mut(&mut self) -> Option<&mut String> {
+        match self {
+            Self::Readonly(_) => None,
+            Self::Editable(s) => Some(s),
+        }
+    }
 }
 
+// ----
+
 pub fn draw_text<E: Externs>(
-    text: TextKind,
+    mut text: TextKind,
     // NOTE: if state is None - text is not interactable.
     mut state: Option<&mut TextState>,
     appearance: &TextAppearance,
@@ -174,20 +230,45 @@ pub fn draw_text<E: Externs>(
         ctx.interaction_state
             .maybe_set_hot_or_active(state.key, rect, input);
 
+        // TODO: move state updating (event handling) out
         if ctx.interaction_state.is_active(state.key) {
-            use Scancode::*;
+            // TODO: consider separating selectable-not-mutable and selectable-and-mutable state
+            // updates
+
             let scancodes = &input.keyboard.scancodes;
-            if scancodes.just_pressed(ArrowLeft) {
+            let keycodes = &input.keyboard.keycodes;
+
+            if scancodes.just_pressed(Scancode::ArrowLeft) {
                 state.move_cursor_left(
                     text.as_str(),
-                    scancodes.any_pressed([ShiftLeft, ShiftRight]),
+                    scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]),
                 );
             }
-            if scancodes.just_pressed(ArrowRight) {
+            if scancodes.just_pressed(Scancode::ArrowRight) {
                 state.move_cursor_right(
                     text.as_str(),
-                    scancodes.any_pressed([ShiftLeft, ShiftRight]),
+                    scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]),
                 );
+            }
+
+            if let Some(text) = text.as_string_mut() {
+                if scancodes.just_pressed(Scancode::Backspace) {
+                    state.delete_left(text);
+                }
+                if scancodes.just_pressed(Scancode::Delete) {
+                    state.delete_right(text);
+                }
+                for keycode in keycodes.iter_just_pressed() {
+                    match keycode {
+                        Keycode::Char(ch) => {
+                            let printable = (ch as u32 >= 32) && (ch as u32 != 127);
+                            if printable {
+                                state.insert_char(text, ch);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
             }
         }
     }
@@ -221,7 +302,7 @@ pub fn draw_text<E: Externs>(
             ));
         }
 
-        if !state.readonly && ctx.interaction_state.is_active(state.key) {
+        if ctx.interaction_state.is_active(state.key) {
             let cursor_rect = {
                 let cursor_width: f32 = font_instance_ref.typical_advance_width();
                 let min = position + Vec2::new(cursor_end_x, 0.0);
@@ -288,7 +369,7 @@ pub fn draw_editable_text<E: Externs>(
     ctx: &mut Context<E>,
 ) {
     draw_text(
-        TextKind::Readonly(text),
+        TextKind::Editable(text),
         Some(state),
         appearance,
         position,

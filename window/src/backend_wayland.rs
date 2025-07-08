@@ -65,6 +65,7 @@ fn map_cursor_shape(cursor_shape: CursorShape) -> &'static CStr {
 fn map_keyboard_key(key: u32) -> Option<Scancode> {
     match key {
         1 => Some(Scancode::Esc),
+        14 => Some(Scancode::Backspace),
         17 => Some(Scancode::W),
         30 => Some(Scancode::A),
         31 => Some(Scancode::S),
@@ -75,6 +76,7 @@ fn map_keyboard_key(key: u32) -> Option<Scancode> {
         105 => Some(Scancode::ArrowLeft),
         106 => Some(Scancode::ArrowRight),
         108 => Some(Scancode::ArrowDown),
+        111 => Some(Scancode::Delete),
         _ => None,
     }
 }
