@@ -1,10 +1,9 @@
 use std::{ops::Range, panic::Location};
 
-use glam::Vec2;
 use input::{Keycode, Scancode};
 
 use crate::{
-    Context, Externs, Fill, FillTexture, FontHandle, Key, Rect, RectShape, Rgba8, TextureKind,
+    Context, Externs, Fill, FillTexture, FontHandle, Key, Rect, RectShape, Rgba8, TextureKind, Vec2,
 };
 
 // TODO: multiline / singleline distinction

@@ -1,6 +1,5 @@
 use app::AppHandler;
 use gl::api::Apier as _;
-use glam::Vec2;
 use window::{Event, WindowAttrs, WindowEvent};
 
 const FONT: &[u8] = include_bytes!("../../fixtures/JetBrainsMono-Regular.ttf");
@@ -88,7 +87,7 @@ impl AppHandler for App {
                 self.input_state.pointer.position.1.round()
             ),
             &self.text_appearance,
-            Vec2::new(24.0, 24.0 * 1.0),
+            uhi::Vec2::new(24.0, 24.0 * 1.0),
             &mut self.uhi_context,
         );
 
@@ -96,7 +95,7 @@ impl AppHandler for App {
             &mut self.text_one,
             &mut self.text_one_state,
             &self.text_appearance,
-            Vec2::new(24.0, 24.0 * 3.0),
+            uhi::Vec2::new(24.0, 24.0 * 3.0),
             &self.input_state,
             &mut self.uhi_context,
         );
@@ -105,7 +104,7 @@ impl AppHandler for App {
             &mut self.text_two,
             &mut self.text_two_state,
             &self.text_appearance,
-            Vec2::new(24.0, 24.0 * 5.0),
+            uhi::Vec2::new(24.0, 24.0 * 5.0),
             &self.input_state,
             &mut self.uhi_context,
         );

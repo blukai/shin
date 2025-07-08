@@ -2,11 +2,10 @@ use std::{hash::Hash, mem};
 
 use crate::{
     Externs, Rect, TextureDesc, TextureFormat, TextureHandle, TexturePacker, TextureRegion,
-    TextureService,
+    TextureService, Vec2,
 };
 
 use ab_glyph::{Font as _, FontArc, PxScale, ScaleFont as _};
-use glam::Vec2;
 use nohash::NoHashMap;
 
 // TODO: consider integrating window scale factor into font service (note that this will require a

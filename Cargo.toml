@@ -20,7 +20,6 @@ edition = "2024"
 [workspace.dependencies]
 ab_glyph = "0.2"
 anyhow = "1"
-glam = "0.30" # TODO: do i really need glam here?
 libc = "0.2"
 log = "0.4"
 raw-window-handle = { version = "0.6", features = ["std"] } # TODO: get rid of rwh

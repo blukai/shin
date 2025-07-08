@@ -1,9 +1,8 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-use glam::Vec2;
 use input::PointerButton;
 
-use crate::Rect;
+use crate::{Rect, Vec2};
 
 // watch https://www.youtube.com/watch?v=Z1qyvQsjK5Y.
 
@@ -41,11 +40,7 @@ impl InteractionState {
     }
 
     pub fn maybe_set_hot_or_active(&mut self, key: Key, rect: Rect, input: &input::State) {
-        let pointer_position = Vec2::new(
-            input.pointer.position.0 as f32,
-            input.pointer.position.1 as f32,
-        );
-        let inside = rect.contains(&pointer_position);
+        let inside = rect.contains(&Vec2::from(input.pointer.position));
 
         if self.active_key == Some(key)
             && input.pointer.buttons.just_released(PointerButton::Primary)

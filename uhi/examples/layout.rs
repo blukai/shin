@@ -1,6 +1,5 @@
 use app::AppHandler;
 use gl::api::Apier as _;
-use glam::Vec2;
 use window::{Event, WindowAttrs, WindowEvent};
 
 const FONT: &[u8] = include_bytes!("../../fixtures/JetBrainsMono-Regular.ttf");
@@ -248,8 +247,8 @@ impl AppHandler for App {
             &mut self.uhi_context,
             self.font_handle,
             uhi::Rect::new(
-                Vec2::ZERO,
-                Vec2::new(window_size.0 as f32, window_size.1 as f32),
+                uhi::Vec2::ZERO,
+                uhi::Vec2::new(window_size.0 as f32, window_size.1 as f32),
             ),
         );
 

@@ -1,8 +1,6 @@
 use std::mem;
 
-use glam::Vec2;
-
-use crate::Rect;
+use crate::{Rect, Vec2};
 
 // heavilly inspired by ratatui - <https://ratatui.rs/concepts/layout/>; nearly infinitely simpler.
 

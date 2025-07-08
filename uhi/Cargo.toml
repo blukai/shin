@@ -6,7 +6,6 @@ edition.workspace = true
 [dependencies]
 ab_glyph.workspace = true
 anyhow.workspace = true
-glam.workspace = true
 log.workspace = true
 # workspace
 # gl = { workspace = true, optional = true }
