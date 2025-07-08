@@ -175,7 +175,7 @@ impl TextState {
         self.cursor.end = self.cursor.start;
     }
 
-    // TODO: mouse selection
+    // TODO: mouse selection (sometking like drag or drag_start and drag end?)
 }
 
 // ----
