@@ -141,6 +141,22 @@ impl Vec2 {
             y: self.x,
         }
     }
+
+    #[inline]
+    pub fn min(self, rhs: Self) -> Self {
+        Self {
+            x: if self.x < rhs.x { self.x } else { rhs.x },
+            y: if self.y < rhs.y { self.y } else { rhs.y },
+        }
+    }
+
+    #[inline]
+    pub fn max(self, rhs: Self) -> Self {
+        Self {
+            x: if self.x > rhs.x { self.x } else { rhs.x },
+            y: if self.y > rhs.y { self.y } else { rhs.y },
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq)]

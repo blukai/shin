@@ -31,7 +31,7 @@ impl PointerButton {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum PointerEvent {
     Motion { position: (f64, f64) },
     Press { button: PointerButton },
@@ -217,7 +217,7 @@ impl Hash for Keycode {
 
 impl NoHash for Keycode {}
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum KeyboardEvent {
     Press {
         scancode: Scancode,
@@ -275,7 +275,7 @@ where
         self.just_released.insert(button);
     }
 
-    pub fn clear(&mut self) {
+    pub fn clear_justs(&mut self) {
         self.just_pressed.clear();
         self.just_released.clear();
     }
@@ -345,6 +345,7 @@ pub struct PointerState {
 }
 
 impl PointerState {
+    #[inline]
     pub fn handle_event(&mut self, ev: PointerEvent) {
         use PointerEvent::*;
         match ev {
@@ -363,6 +364,11 @@ impl PointerState {
             }
         }
     }
+
+    #[inline]
+    pub fn end_frame(&mut self) {
+        self.buttons.clear_justs();
+    }
 }
 
 #[derive(Debug, Default)]
@@ -372,6 +378,7 @@ pub struct KeyboardState {
 }
 
 impl KeyboardState {
+    #[inline]
     pub fn handle_event(&mut self, ev: KeyboardEvent) {
         use KeyboardEvent::*;
         match ev {
@@ -387,19 +394,45 @@ impl KeyboardState {
             }
         }
     }
+
+    #[inline]
+    pub fn end_frame(&mut self) {
+        self.scancodes.clear_justs();
+        self.keycodes.clear_justs();
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Event {
+    Pointer(PointerEvent),
+    Keyboard(KeyboardEvent),
 }
 
 #[derive(Debug, Default)]
 pub struct State {
     pub pointer: PointerState,
     pub keyboard: KeyboardState,
+
+    pub events: Vec<Event>,
 }
 
 impl State {
-    pub fn end_frame(&mut self) {
-        self.pointer.buttons.clear();
+    #[inline]
+    pub fn handle_event(&mut self, ev: Event) {
+        use Event::*;
+        match ev.clone() {
+            Pointer(ev) => self.pointer.handle_event(ev),
+            Keyboard(ev) => self.keyboard.handle_event(ev),
+        }
 
-        self.keyboard.scancodes.clear();
-        self.keyboard.keycodes.clear();
+        self.events.push(ev);
+    }
+
+    #[inline]
+    pub fn end_frame(&mut self) {
+        self.pointer.end_frame();
+        self.keyboard.end_frame();
+
+        self.events.clear();
     }
 }

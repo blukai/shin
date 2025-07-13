@@ -18,12 +18,10 @@ struct App {
     input_state: input::State,
 
     text_one: String,
-    text_one_state: uhi::TextState,
+    text_one_selection: uhi::TextSelection,
 
     text_two: String,
-    text_two_state: uhi::TextState,
-
-    text_appearance: uhi::TextAppearance,
+    text_two_selection: uhi::TextSelection,
 }
 
 impl AppHandler for App {
@@ -44,12 +42,10 @@ impl AppHandler for App {
             input_state: input::State::default(),
 
             text_one: "hello, sailor!".to_string(),
-            text_one_state: uhi::TextState::default(),
+            text_one_selection: uhi::TextSelection::default(),
 
             text_two: "こんにちは".to_string(),
-            text_two_state: uhi::TextState::default(),
-
-            text_appearance: uhi::TextAppearance::new(font_handle, 14.0),
+            text_two_selection: uhi::TextSelection::default(),
         }
     }
 
@@ -61,10 +57,10 @@ impl AppHandler for App {
                     .set_scale_factor(scale_factor, &mut self.uhi_context.texture_service);
             }
             Event::Pointer(ev) => {
-                self.input_state.pointer.handle_event(ev);
+                self.input_state.handle_event(input::Event::Pointer(ev));
             }
             Event::Keyboard(ev) => {
-                self.input_state.keyboard.handle_event(ev);
+                self.input_state.handle_event(input::Event::Keyboard(ev));
             }
             _ => {}
         }
@@ -75,44 +71,61 @@ impl AppHandler for App {
 
         // ----
 
-        unsafe { ctx.gl_api.clear_color(0.0, 0.0, 0.3, 1.0) };
+        unsafe { ctx.gl_api.clear_color(0.0, 0.0, 0.8, 1.0) };
         unsafe { ctx.gl_api.clear(gl::api::COLOR_BUFFER_BIT) };
 
         let window_size = ctx.window.size();
         let area = uhi::Rect::new(
             uhi::Vec2::ZERO,
             uhi::Vec2::from(uhi::U32Vec2::from(window_size)),
+        );
+
+        let pointer_position_text = format!(
+            "{:04}, {:04}",
+            self.input_state.pointer.position.0.round(),
+            self.input_state.pointer.position.1.round()
+        );
+
+        uhi::Text::new(
+            pointer_position_text.as_str(),
+            self.font_handle,
+            14.0,
+            area.clone().shrink(&uhi::Vec2::new(24.0, 24.0 * 1.0)),
         )
-        .shrink(&uhi::Vec2::splat(24.0));
+        .singleline()
+        .draw(&mut self.uhi_context);
 
-        uhi::draw_readonly_text(
-            &format!(
-                "{:04}, {:04}",
-                self.input_state.pointer.position.0.round(),
-                self.input_state.pointer.position.1.round()
-            ),
-            &self.text_appearance,
-            area.clone().shrink(&uhi::Vec2::new(0.0, 24.0 * 0.0)),
+        uhi::Text::new(
+            self.text_one.as_str(),
+            self.font_handle,
+            14.0,
+            area.clone().shrink(&uhi::Vec2::new(24.0, 24.0 * 3.0)),
+        )
+        .singleline()
+        .selectable(&mut self.text_one_selection)
+        .maybe_set_hot_or_active(
+            uhi::Key::from_location(),
             &mut self.uhi_context,
-        );
-
-        uhi::draw_editable_text(
-            &mut self.text_one,
-            &mut self.text_one_state,
-            &self.text_appearance,
-            area.clone().shrink(&uhi::Vec2::new(0.0, 24.0 * 2.0)),
             &self.input_state,
-            &mut self.uhi_context,
-        );
+        )
+        .update_if(|this| this.active, &mut self.uhi_context, &self.input_state)
+        .draw(&mut self.uhi_context);
 
-        uhi::draw_editable_text(
-            &mut self.text_two,
-            &mut self.text_two_state,
-            &self.text_appearance,
-            area.shrink(&uhi::Vec2::new(0.0, 24.0 * 4.0)),
-            &self.input_state,
+        uhi::Text::new(
+            self.text_two.as_str(),
+            self.font_handle,
+            14.0,
+            area.clone().shrink(&uhi::Vec2::new(24.0, 24.0 * 5.0)),
+        )
+        .singleline()
+        .selectable(&mut self.text_two_selection)
+        .maybe_set_hot_or_active(
+            uhi::Key::from_location(),
             &mut self.uhi_context,
-        );
+            &self.input_state,
+        )
+        .update_if(|this| this.active, &mut self.uhi_context, &self.input_state)
+        .draw(&mut self.uhi_context);
 
         self.uhi_renderer
             .render(&mut self.uhi_context, ctx.gl_api, window_size)
@@ -120,9 +133,8 @@ impl AppHandler for App {
 
         // ----
 
-        self.uhi_context.interaction_state.end_frame();
         self.uhi_context.draw_buffer.clear();
-
+        self.uhi_context.interaction_state.end_frame();
         self.input_state.end_frame();
     }
 }

@@ -21,6 +21,7 @@ struct TexturePage {
     tex_handle: TextureHandle,
 }
 
+// TODO: should this be called something-something glyph? not char? is the a proper term for this?
 #[derive(Debug)]
 struct RasterizedChar {
     tex_page_idx: usize,
@@ -150,7 +151,7 @@ pub struct CharRef<'a> {
 
 impl<'a> CharRef<'a> {
     #[inline]
-    pub fn bounds(&self) -> Rect {
+    pub fn bounding_rect(&self) -> Rect {
         self.rasterized_char.bounds.clone()
     }
 
@@ -186,39 +187,30 @@ struct FontInstance {
     scale: PxScale,
     rasterized_chars: NoHashMap<u32, RasterizedChar>,
 
-    // TODO: is there a more proper name for this? i don't want to get this confused with css
-    // line-height - it's not exactly that.
-    line_height: f32,
+    height: f32,
     ascent: f32,
-    // width of the glyph 0.
-    // see https://developer.mozilla.org/en-US/docs/Web/CSS/length#ch
+    /// see https://developer.mozilla.org/en-US/docs/Web/CSS/length#ch
     typical_advance_width: f32,
 }
 
 impl FontInstance {
     fn new(font: &FontArc, pt_size: f32, window_scale_factor: Option<f64>) -> Self {
         // NOTE: see https://github.com/alexheretic/ab-glyph/issues/14 for details.
-        let font_scale_factor = font
+        let scale_factor = font
             .units_per_em()
             .map(|units_per_em| font.height_unscaled() / units_per_em)
             .unwrap_or(1.0);
         let scale =
-            PxScale::from(pt_size * window_scale_factor.unwrap_or(1.0) as f32 * font_scale_factor);
-
+            PxScale::from(pt_size * window_scale_factor.unwrap_or(1.0) as f32 * scale_factor);
         let scaled = font.as_scaled(scale);
-        let ascent = scaled.ascent();
-        let descent = scaled.descent();
-        let line_gap = scaled.line_gap();
-        let line_height = ascent - descent + line_gap;
-        let typical_advance_width = scaled.h_advance(font.glyph_id('0'));
 
         Self {
             scale,
             rasterized_chars: NoHashMap::default(),
 
-            line_height,
-            ascent,
-            typical_advance_width,
+            height: scaled.ascent() - scaled.descent() + scaled.line_gap(),
+            ascent: scaled.ascent(),
+            typical_advance_width: scaled.h_advance(font.glyph_id('0')),
         }
     }
 }
@@ -233,8 +225,8 @@ pub struct FontInstanceRefMut<'a> {
 
 impl<'a> FontInstanceRefMut<'a> {
     #[inline]
-    pub fn line_height(&self) -> f32 {
-        self.font_instance.line_height
+    pub fn height(&self) -> f32 {
+        self.font_instance.height
     }
 
     #[inline]
@@ -287,16 +279,6 @@ impl<'a> FontInstanceRefMut<'a> {
             width += char_ref.rasterized_char.advance_width;
         }
         width
-    }
-
-    // TODO: consider renaming compute_text_size into compute_text_bounds?
-    pub fn compute_text_size<E: Externs>(
-        &mut self,
-        text: &str,
-        texture_service: &mut TextureService<E>,
-    ) -> Vec2 {
-        let text_width = self.compute_text_width(text, texture_service);
-        Vec2::new(text_width, self.font_instance.line_height)
     }
 }
 

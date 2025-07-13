@@ -3,7 +3,7 @@ use std::{ffi::c_void, mem::offset_of, ptr::null};
 use anyhow::{Context as _, anyhow};
 use gl::api::Apier as _;
 
-use crate::{Context, Externs, TextureKind, TextureService, Vertex};
+use crate::{Context, DrawCommand, Externs, TextureKind, TextureService, Vertex};
 
 use super::Renderer;
 
@@ -316,11 +316,17 @@ impl GlRenderer {
                 gl::api::STREAM_DRAW,
             );
 
-            for draw_command in draw_data.commands.iter() {
+            for DrawCommand {
+                // TODO: make use of clip rect (apply scissor).
+                clip_rect,
+                index_range,
+                texture,
+            } in draw_data.commands.iter()
+            {
                 gl_api.active_texture(gl::api::TEXTURE0);
                 gl_api.bind_texture(
                     gl::api::TEXTURE_2D,
-                    Some(draw_command.texture.as_ref().map_or_else(
+                    Some(texture.as_ref().map_or_else(
                         || self.default_white_tex,
                         |tex_kind| match tex_kind {
                             TextureKind::Internal(internal) => *ctx.texture_service.get(*internal),
@@ -331,10 +337,9 @@ impl GlRenderer {
 
                 gl_api.draw_elements(
                     gl::api::TRIANGLES,
-                    (draw_command.index_range.end - draw_command.index_range.start)
-                        as gl::api::GLsizei,
+                    (index_range.end - index_range.start) as gl::api::GLsizei,
                     gl::api::UNSIGNED_INT,
-                    (draw_command.index_range.start * size_of::<u32>() as u32) as *const c_void,
+                    (index_range.start * size_of::<u32>() as u32) as *const c_void,
                 );
             }
         }

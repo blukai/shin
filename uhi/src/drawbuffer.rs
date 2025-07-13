@@ -175,12 +175,9 @@ fn compute_line_width_offset(a: &Vec2, b: &Vec2, width: f32) -> Vec2 {
     offset
 }
 
-// TODO: introduce DrawData struct that DrawBuffer would need to expose without exposing its
-// internal vertices, indices and draw commands.
-
-// TODO: do Primitive instead of DrawCommand?
 #[derive(Debug)]
 pub struct DrawCommand<E: Externs> {
+    pub clip_rect: Option<Rect>,
     pub index_range: Range<u32>,
     pub texture: Option<TextureKind<E>>,
 }
@@ -194,6 +191,7 @@ pub struct DrawData<'a, E: Externs> {
 
 #[derive(Debug)]
 pub struct DrawBuffer<E: Externs> {
+    clip_rect: Option<Rect>,
     vertices: Vec<Vertex>,
     indices: Vec<u32>,
     pending_indices: usize,
@@ -203,6 +201,7 @@ pub struct DrawBuffer<E: Externs> {
 impl<E: Externs> Default for DrawBuffer<E> {
     fn default() -> Self {
         Self {
+            clip_rect: None,
             vertices: Vec::new(),
             indices: Vec::new(),
             pending_indices: 0,
@@ -217,6 +216,10 @@ impl<E: Externs> DrawBuffer<E> {
         self.vertices.clear();
         self.indices.clear();
         self.draw_commands.clear();
+    }
+
+    pub fn set_clip_rect(&mut self, clip_rect: Option<Rect>) {
+        self.clip_rect = clip_rect;
     }
 
     fn push_vertex(&mut self, vertex: Vertex) {
@@ -237,6 +240,7 @@ impl<E: Externs> DrawBuffer<E> {
         let start_index = (self.indices.len() - self.pending_indices) as u32;
         let end_index = self.indices.len() as u32;
         self.draw_commands.push(DrawCommand {
+            clip_rect: self.clip_rect.clone(),
             index_range: start_index..end_index,
             texture,
         });

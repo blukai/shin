@@ -185,12 +185,15 @@ fn draw<E: uhi::Externs>(ctx: &mut uhi::Context<E>, font_handle: uhi::FontHandle
         }
     }
 
-    uhi::draw_readonly_text(
+    uhi::Text::new(
         "Tableau I, by Piet Mondriaan",
-        &uhi::TextAppearance::new(font_handle, 14.0).fg(uhi::Rgba8::FUCHSIA),
+        font_handle,
+        14.0,
         area.shrink(&Vec2::splat(24.0)),
-        ctx,
-    );
+    )
+    .with_fg(uhi::Rgba8::FUCHSIA)
+    .singleline()
+    .draw(ctx);
 }
 
 struct App {
@@ -238,30 +241,30 @@ impl AppHandler for App {
     }
 
     fn update(&mut self, ctx: app::AppContext) {
+        self.uhi_context.interaction_state.begin_frame();
+
+        // ----
+
         unsafe { ctx.gl_api.clear_color(0.0, 0.0, 0.3, 1.0) };
         unsafe { ctx.gl_api.clear(gl::api::COLOR_BUFFER_BIT) };
 
         let window_size = ctx.window.size();
-
-        draw(
-            &mut self.uhi_context,
-            self.font_handle,
-            uhi::Rect::new(
-                uhi::Vec2::ZERO,
-                uhi::Vec2::from(uhi::U32Vec2::from(window_size)),
-            ),
+        let area = uhi::Rect::new(
+            uhi::Vec2::ZERO,
+            uhi::Vec2::from(uhi::U32Vec2::from(window_size)),
         );
+
+        draw(&mut self.uhi_context, self.font_handle, area);
 
         self.uhi_renderer
             .render(&mut self.uhi_context, ctx.gl_api, window_size)
             .expect("uhi renderer fucky wucky");
-        self.uhi_context.draw_buffer.clear();
 
-        // TODO: make input state clearing better. find a better place for it? make less manual?
-        // idk. make it better somehow.
-        self.input_state.pointer.buttons.clear();
-        self.input_state.keyboard.scancodes.clear();
-        self.input_state.keyboard.keycodes.clear();
+        // ----
+
+        self.uhi_context.draw_buffer.clear();
+        self.uhi_context.interaction_state.end_frame();
+        self.input_state.end_frame();
     }
 }
 

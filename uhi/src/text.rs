@@ -1,15 +1,13 @@
-use std::{ops::Range, panic::Location};
+use std::ops::Range;
 
-use input::{Keycode, Scancode};
+use input::{Event, KeyboardEvent, KeyboardState, PointerButton, PointerEvent, Scancode};
 
 use crate::{
-    Context, Externs, Fill, FillTexture, FontHandle, Key, Rect, RectShape, Rgba8, TextureKind, Vec2,
+    Context, Externs, F64Vec2, Fill, FillTexture, FontHandle, FontInstanceRefMut, Key, Rect,
+    RectShape, Rgba8, TextureKind, TextureService, Vec2,
 };
 
-// TODO: multiline / singleline distinction
-// - both likely need to know max width
-// - multiline needs to know max height
-// - both need to be vertically and horizontally scrollable
+// TODO: vertically and horizontally scrollable editors
 //
 // TODO: per-char layout styling
 // - should be able to make some fragments of text bold?
@@ -19,94 +17,28 @@ use crate::{
 // - for example number-only input, etc.
 //
 // TODO: color schemes ?
-//
-// TODO: clarity separation between:
-// - not selectable and not editable (no state and no input)
-// - selectable but not editable (needs state and input)
-// - selectable and editable (needs state and input)
 
 const FG: Rgba8 = Rgba8::WHITE;
-const CURSOR: Rgba8 = Rgba8::from_u32(0x8faf9fff);
 const SELECTION_ACTIVE: Rgba8 = Rgba8::from_u32(0x304a3dff);
 const SELECTION_INACTIVE: Rgba8 = Rgba8::from_u32(0x484848ff);
+const CURSOR: Rgba8 = Rgba8::from_u32(0x8faf9fff);
 
-pub struct TextAppearance {
-    pub font_handle: FontHandle,
-    pub font_size: f32,
-
-    pub fg: Option<Rgba8>,
-    pub cursor_active: Option<Rgba8>,
-    pub cursor_inactive: Option<Rgba8>,
-    pub selection_active: Option<Rgba8>,
-    pub selection_inactive: Option<Rgba8>,
-    // pub container_bg: Option<Rgba8>,
-    // pub container_stroke: Option<Rgba8>,
-    // pub container_padding: Option<Vec2>,
-}
-
-impl TextAppearance {
-    pub fn new(font_handle: FontHandle, font_size: f32) -> Self {
-        Self {
-            font_handle,
-            font_size,
-
-            fg: None,
-            cursor_active: None,
-            cursor_inactive: None,
-            selection_active: None,
-            selection_inactive: None,
-        }
-    }
-
-    pub fn fg(mut self, fg: Rgba8) -> Self {
-        self.fg = Some(fg);
-        self
-    }
-
-    // TODO: more builder methods
-}
-
-// ----
-
-pub struct TextState {
-    key: Key,
+#[derive(Default)]
+pub struct TextSelection {
     // if equal, no selection; start may be less than or greater than end (start is where the
     // initial click was).
     cursor: Range<usize>,
 }
 
-impl Default for TextState {
-    #[track_caller]
-    fn default() -> Self {
-        Self {
-            key: Key::new(Location::caller()),
-            cursor: Default::default(),
-        }
-    }
-}
-
-impl TextState {
-    pub fn key(mut self, value: Key) -> Self {
-        self.key = value;
-        self
-    }
-
-    // ----
-
-    fn has_selection(&self) -> bool {
-        self.cursor.start != self.cursor.end
-    }
-
-    fn normalized_selection(&self) -> Range<usize> {
-        let left = self.cursor.start.min(self.cursor.end);
-        let right = self.cursor.start.max(self.cursor.end);
-        left..right
+impl TextSelection {
+    fn is_empty(&self) -> bool {
+        self.cursor.start == self.cursor.end
     }
 
     // TODO: move modifiers (by char, by char type, by word, etc.)
 
     fn move_cursor_left(&mut self, text: &str, extend_selection: bool) {
-        if self.has_selection() && !extend_selection {
+        if !self.is_empty() && !extend_selection {
             self.cursor.end = self.cursor.end.min(self.cursor.start);
             self.cursor.start = self.cursor.end;
             return;
@@ -123,7 +55,7 @@ impl TextState {
     }
 
     fn move_cursor_right(&mut self, text: &str, extend_selection: bool) {
-        if self.has_selection() && !extend_selection {
+        if !self.is_empty() && !extend_selection {
             self.cursor.end = self.cursor.end.max(self.cursor.start);
             self.cursor.start = self.cursor.end;
             return;
@@ -139,159 +71,288 @@ impl TextState {
         }
     }
 
-    fn delete_selection(&mut self, text: &mut String) {
-        let range = self.normalized_selection();
-        if range.end > range.start {
-            text.replace_range(range, "");
-        }
-        self.cursor.end = self.cursor.end.min(self.cursor.start);
-        self.cursor.start = self.cursor.end;
-    }
-
-    fn delete_left(&mut self, text: &mut String) {
-        if !self.has_selection() {
-            self.cursor.end = self.cursor.start;
-            self.move_cursor_left(text, true);
-        }
-        self.delete_selection(text);
-    }
-
-    fn delete_right(&mut self, text: &mut String) {
-        if !self.has_selection() {
-            self.cursor.end = self.cursor.start;
-            self.move_cursor_right(text, true);
-        }
-        self.delete_selection(text);
-    }
-
-    fn insert_char(&mut self, text: &mut String, ch: char) {
-        if self.has_selection() {
-            self.delete_selection(text);
-        }
-        assert_eq!(self.cursor.start, self.cursor.end);
-        text.insert(self.cursor.start, ch);
-        self.cursor.start += ch.len_utf8();
-        self.cursor.end = self.cursor.start;
-    }
-
     // TODO: mouse selection (sometking like drag or drag_start and drag end?)
 }
 
-// ----
-
-pub enum TextKind<'a> {
-    Readonly(&'a str),
-    Editable(&'a mut String),
-}
-
-impl<'a> TextKind<'a> {
-    #[inline]
-    fn as_str(&self) -> &str {
-        match self {
-            Self::Readonly(s) => s,
-            Self::Editable(s) => s.as_str(),
-        }
-    }
-
-    #[inline]
-    fn as_string_mut(&mut self) -> Option<&mut String> {
-        match self {
-            Self::Readonly(_) => None,
-            Self::Editable(s) => Some(s),
-        }
-    }
-}
-
-// ----
-
-pub fn draw_text<E: Externs>(
-    mut text: TextKind,
-    // NOTE: if state is None - text is not interactable.
-    mut state: Option<&mut TextState>,
-    appearance: &TextAppearance,
+pub struct Text<'a> {
+    text: &'a str,
+    font_handle: FontHandle,
+    font_size: f32,
     rect: Rect,
-    input: Option<&input::State>,
-    ctx: &mut Context<E>,
-) {
-    let mut font_instance_ref = ctx
-        .font_service
-        .get_font_instance_mut(appearance.font_handle, appearance.font_size);
 
-    if let (Some(state), Some(input)) = (state.as_deref_mut(), input) {
-        // TODO: text rect must take into account container's padding
-        let text_rect = Rect::new(
-            rect.min,
-            rect.min + font_instance_ref.compute_text_size(text.as_str(), &mut ctx.texture_service),
-        );
-        ctx.interaction_state
-            .maybe_set_hot_or_active(state.key, text_rect, input);
+    pub fg: Rgba8,
+}
 
-        // TODO: move state updating (event handling) out
-        if ctx.interaction_state.is_active(state.key) {
-            // TODO: consider separating selectable-not-mutable and selectable-and-mutable state
-            // updates
+impl<'a> Text<'a> {
+    pub fn new(text: &'a str, font_handle: FontHandle, font_size: f32, rect: Rect) -> Self {
+        Self {
+            text,
+            font_handle,
+            font_size,
+            rect,
 
-            let scancodes = &input.keyboard.scancodes;
-            let keycodes = &input.keyboard.keycodes;
+            fg: FG,
+        }
+    }
 
-            if scancodes.just_pressed(Scancode::ArrowLeft) {
-                state.move_cursor_left(
-                    text.as_str(),
-                    scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]),
-                );
-            }
-            if scancodes.just_pressed(Scancode::ArrowRight) {
-                state.move_cursor_right(
-                    text.as_str(),
-                    scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]),
-                );
-            }
+    pub fn with_fg(mut self, value: Rgba8) -> Self {
+        self.fg = value;
+        self
+    }
 
-            if let Some(text) = text.as_string_mut() {
-                if scancodes.just_pressed(Scancode::Backspace) {
-                    state.delete_left(text);
+    pub fn singleline(self) -> TextSingleline<'a> {
+        TextSingleline::new(self)
+    }
+}
+
+pub struct TextSingleline<'a> {
+    base: Text<'a>,
+}
+
+impl<'a> TextSingleline<'a> {
+    pub fn new(base: Text<'a>) -> Self {
+        Self { base }
+    }
+
+    pub fn draw<E: Externs>(self, ctx: &mut Context<E>) {
+        let Text {
+            text,
+            font_handle,
+            font_size,
+            rect,
+            fg,
+        } = self.base;
+
+        let mut font_instance_ref = ctx
+            .font_service
+            .get_font_instance_mut(font_handle, font_size);
+        let ascent = font_instance_ref.ascent();
+
+        let mut offset_x: f32 = rect.min.x;
+        for ch in text.chars() {
+            let char_ref = font_instance_ref.get_char(ch, &mut ctx.texture_service);
+
+            ctx.draw_buffer.push_rect(RectShape::with_fill(
+                char_ref
+                    .bounding_rect()
+                    .translate_by(&Vec2::new(offset_x, rect.min.y + ascent)),
+                Fill::new(
+                    fg,
+                    FillTexture {
+                        kind: TextureKind::Internal(char_ref.tex_handle()),
+                        coords: char_ref.tex_coords(),
+                    },
+                ),
+            ));
+
+            offset_x += char_ref.advance_width();
+        }
+    }
+
+    pub fn selectable(self, selection: &'a mut TextSelection) -> TextSinglelineSelectable<'a> {
+        TextSinglelineSelectable::new(self, selection)
+    }
+}
+
+pub struct TextSinglelineSelectable<'a> {
+    singleline: TextSingleline<'a>,
+    selection: &'a mut TextSelection,
+
+    pub selection_active: Rgba8,
+    pub selection_inactive: Rgba8,
+    pub hot: bool,
+    pub active: bool,
+}
+
+impl<'a> TextSinglelineSelectable<'a> {
+    pub fn new(singleline: TextSingleline<'a>, selection: &'a mut TextSelection) -> Self {
+        Self {
+            singleline,
+            selection,
+            selection_active: SELECTION_ACTIVE,
+            selection_inactive: SELECTION_INACTIVE,
+            hot: false,
+            active: false,
+        }
+    }
+
+    pub fn with_selection_active(mut self, value: Rgba8) -> Self {
+        self.selection_active = value;
+        self
+    }
+
+    pub fn with_selection_inactive(mut self, value: Rgba8) -> Self {
+        self.selection_inactive = value;
+        self
+    }
+
+    pub fn with_hot(mut self, value: bool) -> Self {
+        self.hot = value;
+        self
+    }
+
+    pub fn with_active(mut self, value: bool) -> Self {
+        self.active = value;
+        self
+    }
+
+    pub fn compute_size<E: Externs>(&self, ctx: &mut Context<E>) -> Vec2 {
+        let Text {
+            text,
+            font_handle,
+            font_size,
+            ..
+        } = self.singleline.base;
+        let mut font_instance_ref = ctx
+            .font_service
+            .get_font_instance_mut(font_handle, font_size);
+        let width = font_instance_ref.compute_text_width(text, &mut ctx.texture_service);
+        let height = font_instance_ref.height();
+        Vec2::new(width, height)
+    }
+
+    // returns(if some) byte offset(not char index)
+    fn locate_char<E: Externs>(&self, position: Vec2, ctx: &mut Context<E>) -> Option<usize> {
+        let Text {
+            text,
+            font_handle,
+            font_size,
+            ref rect,
+            ..
+        } = self.singleline.base;
+
+        let mut font_instance_ref = ctx
+            .font_service
+            .get_font_instance_mut(font_handle, font_size);
+
+        let mut byte_offset: usize = 0;
+        let mut offset_x: f32 = rect.min.x;
+
+        for ch in text.chars() {
+            let char_ref = font_instance_ref.get_char(ch, &mut ctx.texture_service);
+
+            let start_x = offset_x;
+            let end_x = start_x + char_ref.advance_width();
+            if position.x >= start_x && position.x <= end_x {
+                // NOTE: it seems like everyone consider char selected only if you're reaching past
+                // half of it.
+                let mid_x = start_x + char_ref.advance_width() / 2.0;
+                if position.x < mid_x {
+                    return Some(byte_offset);
+                } else {
+                    return Some(byte_offset + ch.len_utf8());
                 }
-                if scancodes.just_pressed(Scancode::Delete) {
-                    state.delete_right(text);
+            }
+
+            byte_offset += ch.len_utf8();
+            offset_x += char_ref.advance_width();
+        }
+
+        None
+    }
+
+    pub fn update<E: Externs>(self, ctx: &mut Context<E>, input: &input::State) -> Self {
+        let Text { text, .. } = self.singleline.base;
+        let KeyboardState { ref scancodes, .. } = input.keyboard;
+        for event in input.events.iter() {
+            match event {
+                Event::Keyboard(KeyboardEvent::Press {
+                    scancode: Scancode::ArrowLeft,
+                    ..
+                }) if scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]) => {
+                    self.selection.move_cursor_left(text, true);
                 }
-                for keycode in keycodes.iter_just_pressed() {
-                    match keycode {
-                        Keycode::Char(ch) => {
-                            let printable = (ch as u32 >= 32) && (ch as u32 != 127);
-                            if printable {
-                                state.insert_char(text, ch);
-                            }
-                        }
-                        _ => {}
+                Event::Keyboard(KeyboardEvent::Press {
+                    scancode: Scancode::ArrowRight,
+                    ..
+                }) if scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]) => {
+                    self.selection.move_cursor_right(text, true);
+                }
+
+                Event::Pointer(PointerEvent::Press {
+                    button: PointerButton::Primary,
+                }) if self.hot /* NOTE: we want to react only to "inside" presses. */ => {
+                    let position = Vec2::from(F64Vec2::from(input.pointer.position));
+                    if let Some(byte_offset) = self.locate_char(position, ctx) {
+                        self.selection.cursor = byte_offset..byte_offset;
                     }
                 }
+                Event::Pointer(PointerEvent::Motion { .. })
+                    if input.pointer.buttons.pressed(PointerButton::Primary) =>
+                {
+                    let position = Vec2::from(F64Vec2::from(input.pointer.position));
+                    if let Some(byte_offset) = self.locate_char(position, ctx) {
+                        self.selection.cursor.end = byte_offset;
+                    }
+                }
+                _ => {}
             }
+        }
+
+        self
+    }
+
+    pub fn maybe_set_hot_or_active<E: Externs>(
+        mut self,
+        key: Key,
+        ctx: &mut Context<E>,
+        input: &input::State,
+    ) -> Self {
+        let Text { ref rect, .. } = self.singleline.base;
+        let interaction_rect = Rect::new(rect.min, rect.min + self.compute_size(ctx));
+        ctx.interaction_state
+            .maybe_set_hot_or_active(key, interaction_rect, input);
+        self.hot = ctx.interaction_state.is_hot(key);
+        self.active = ctx.interaction_state.is_active(key);
+        self
+    }
+
+    pub fn update_if<E: Externs, F: FnOnce(&Self) -> bool>(
+        self,
+        f: F,
+        ctx: &mut Context<E>,
+        input: &input::State,
+    ) -> Self {
+        if f(&self) {
+            self.update(ctx, input)
+        } else {
+            self
         }
     }
 
-    // ----
+    pub fn draw<E: Externs>(self, ctx: &mut Context<E>) {
+        let Text {
+            text,
+            font_handle,
+            font_size,
+            ref rect,
+            ..
+        } = self.singleline.base;
 
-    let text = text.as_str();
+        let mut font_instance_ref = ctx
+            .font_service
+            .get_font_instance_mut(font_handle, font_size);
 
-    if let Some(state) = state {
         let cursor_end_x = font_instance_ref
-            .compute_text_width(&text[..state.cursor.end], &mut ctx.texture_service);
+            .compute_text_width(&text[..self.selection.cursor.end], &mut ctx.texture_service);
 
-        if state.has_selection() {
-            let cursor_start_x = font_instance_ref
-                .compute_text_width(&text[..state.cursor.start], &mut ctx.texture_service);
+        if !self.selection.is_empty() {
+            let cursor_start_x = font_instance_ref.compute_text_width(
+                &text[..self.selection.cursor.start],
+                &mut ctx.texture_service,
+            );
             let left = cursor_start_x.min(cursor_end_x);
             let right = cursor_start_x.max(cursor_end_x);
             let selection_rect = {
                 // TODO: multiline text support
                 let min = rect.min + Vec2::new(left, 0.0);
-                let size = Vec2::new(right - left, font_instance_ref.line_height());
+                let size = Vec2::new(right - left, font_instance_ref.height());
                 Rect::new(min, min + size)
             };
 
             ctx.draw_buffer.push_rect(RectShape::with_fill(
                 selection_rect,
-                Fill::with_color(if ctx.interaction_state.is_active(state.key) {
+                Fill::with_color(if self.active {
                     SELECTION_ACTIVE
                 } else {
                     SELECTION_INACTIVE
@@ -299,72 +360,48 @@ pub fn draw_text<E: Externs>(
             ));
         }
 
-        if ctx.interaction_state.is_active(state.key) {
-            let cursor_rect = {
-                let cursor_width: f32 = font_instance_ref.typical_advance_width();
-                // TODO: multiline text support
-                let min = rect.min + Vec2::new(cursor_end_x, 0.0);
-                let size = Vec2::new(cursor_width, font_instance_ref.line_height());
-                Rect::new(min, min + size)
-            };
-
-            ctx.draw_buffer
-                .push_rect(RectShape::with_fill(cursor_rect, Fill::with_color(CURSOR)));
-        }
-    }
-
-    let fg = appearance.fg.unwrap_or(FG);
-    let mut offset_x = rect.min.x;
-    let mut offset_y = rect.min.y;
-    let ascent = font_instance_ref.ascent();
-    for ch in text.chars() {
-        // TODO: multiline wrapping (max width)
-        // if ch == '\n' {
-        //     offset_x = position.x;
-        //     offset_y += font_instance_ref.line_height();
-        //     continue;
-        // }
-
-        let char_ref = font_instance_ref.get_char(ch, &mut ctx.texture_service);
-        let char_bounds = char_ref.bounds().clone();
-
-        ctx.draw_buffer.push_rect(RectShape::with_fill(
-            char_bounds.translate_by(&Vec2::new(offset_x, offset_y + ascent)),
-            Fill::new(
-                fg,
-                FillTexture {
-                    kind: TextureKind::Internal(char_ref.tex_handle()),
-                    coords: char_ref.tex_coords(),
-                },
-            ),
-        ));
-        offset_x += char_ref.advance_width();
+        self.singleline.draw(ctx);
     }
 }
 
-pub fn draw_readonly_text<E: Externs>(
-    text: &str,
-    appearance: &TextAppearance,
-    rect: Rect,
-    ctx: &mut Context<E>,
-) {
-    draw_text(TextKind::Readonly(text), None, appearance, rect, None, ctx)
-}
+// ----
 
-pub fn draw_editable_text<E: Externs>(
-    text: &mut String,
-    state: &mut TextState,
-    appearance: &TextAppearance,
-    rect: Rect,
-    input: &input::State,
-    ctx: &mut Context<E>,
-) {
-    draw_text(
-        TextKind::Editable(text),
-        Some(state),
-        appearance,
-        rect,
-        Some(input),
-        ctx,
-    )
-}
+// fn compute_multiline_text_height<E: Externs>(
+//     text: &str,
+//     font_handle: FontHandle,
+//     font_size: f32,
+//     container_width: Option<f32>,
+//     ctx: &mut Context<E>,
+// ) -> f32 {
+//     let mut font_instance_ref = ctx
+//         .font_service
+//         .get_font_instance_mut(font_handle, font_size);
+//
+//     let mut line_count: usize = 1;
+//     let mut offset_x: f32 = 0.0;
+//
+//     for ch in text.chars() {
+//         match ch {
+//             '\r' => continue,
+//             '\n' => {
+//                 line_count += 1;
+//                 offset_x = 0.0;
+//             }
+//             _ => {}
+//         }
+//
+//         let char_ref = font_instance_ref.get_char(ch, &mut ctx.texture_service);
+//
+//         if let Some(container_width) = container_width {
+//             let offset_x_end = offset_x + char_ref.advance_width();
+//             if offset_x_end > container_width {
+//                 line_count += 1;
+//                 offset_x = 0.0;
+//             }
+//         }
+//
+//         offset_x += char_ref.advance_width();
+//     }
+//
+//     line_count as f32 * font_instance_ref.height()
+// }

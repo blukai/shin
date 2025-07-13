@@ -14,6 +14,9 @@ use crate::{
     libwayland_cursor, xkb,
 };
 
+// TODO: hardcode thos within the match; and move closet ot keyboard stuff (cursor sits in between
+// atm).
+//
 // https://github.com/torvalds/linux/blob/231825b2e1ff6ba799c5eaf396d3ab2354e37c6b/include/uapi/linux/input-event-codes.h#L356
 const BTN_LEFT: u32 = 0x110;
 const BTN_RIGHT: u32 = 0x111;
@@ -29,6 +32,9 @@ fn map_pointer_button(button: u32) -> Option<PointerButton> {
     }
 }
 
+// TODO: hookup cursor shape - https://wayland.app/protocols/cursor-shape-v1;
+// maybe don't completely throw away current cursor shaping implementation?
+
 // NOTE: it seems like people on the internet default to 24.
 const CURSOR_SIZE: u32 = 24;
 
@@ -43,7 +49,7 @@ const CURSOR_SCALE_FLOORING_THRESHOLD: f64 = 0.2;
 // non-integer scales to integer scaled images so that the cursor is displayed correctly.
 //
 // stolen from chrome (wayland_cursor_factory.cc)
-fn get_cursor_scale(scale_factor: f64) -> u32 {
+fn get_cursor_rounded_scale(scale_factor: f64) -> u32 {
     (scale_factor - CURSOR_SCALE_FLOORING_THRESHOLD).ceil() as u32
 }
 
@@ -1032,41 +1038,14 @@ impl WaylandBackend {
         Ok(boxed)
     }
 
-    fn maybe_resize_viewport(&mut self, logical_size: (u32, u32)) {
-        if self.wp_viewport.is_null() {
-            return;
-        }
-        unsafe {
-            libwayland_client::wp_viewport_set_destination(
-                &self.libwayland_client,
-                self.wp_viewport,
-                logical_size.0 as i32,
-                logical_size.1 as i32,
-            );
-            assert!(!self.wl_surface.is_null());
-            libwayland_client::wl_surface_commit(&self.libwayland_client, self.wl_surface);
-        }
-    }
-
     fn load_cursor_theme_for_scale(&mut self, scale_factor: f64) {
-        let cursor_scale = get_cursor_scale(scale_factor);
+        let rounded_scale = get_cursor_rounded_scale(scale_factor);
+        let scaled_size = CURSOR_SIZE * rounded_scale;
         self.cursor_theme = unsafe {
             assert!(!self.wl_shm.is_null());
-            (self.libwayland_cursor.wl_cursor_theme_load)(
-                null(),
-                (CURSOR_SIZE * cursor_scale) as c_int,
-                self.wl_shm,
-            )
+            (self.libwayland_cursor.wl_cursor_theme_load)(null(), scaled_size as c_int, self.wl_shm)
         };
         assert!(!self.cursor_theme.is_null());
-        unsafe {
-            libwayland_client::wl_surface_set_buffer_scale(
-                &self.libwayland_client,
-                self.cursor_surface,
-                cursor_scale as i32,
-            );
-            libwayland_client::wl_surface_commit(&self.libwayland_client, self.cursor_surface);
-        }
     }
 
     fn maybe_resize(&mut self, logical_size: Option<(u32, u32)>, scale_factor: Option<f64>) {
@@ -1078,7 +1057,16 @@ impl WaylandBackend {
             if logical_size_changed {
                 self.logical_size = Some(logical_size);
 
-                self.maybe_resize_viewport(logical_size);
+                if !self.wp_viewporter.is_null() {
+                    unsafe {
+                        libwayland_client::wp_viewport_set_destination(
+                            &self.libwayland_client,
+                            self.wp_viewport,
+                            logical_size.0 as i32,
+                            logical_size.1 as i32,
+                        )
+                    };
+                }
             }
         }
 
@@ -1249,7 +1237,17 @@ impl Window for WaylandBackend {
             return Err(anyhow!("could not get cursor image buffer"));
         }
 
+        // TODO: is this correct (correct enough? seems fine on scale_factor = 1.5)?
+        let rounded_scale = get_cursor_rounded_scale(self.scale_factor()) as f64;
+        let hotspot_x = (cursor_image.hotspot_x as f64 / rounded_scale).round() as i32;
+        let hotspot_y = (cursor_image.hotspot_y as f64 / rounded_scale).round() as i32;
+
         unsafe {
+            libwayland_client::wl_surface_set_buffer_scale(
+                &self.libwayland_client,
+                self.cursor_surface,
+                rounded_scale as i32,
+            );
             libwayland_client::wl_surface_attach(
                 &self.libwayland_client,
                 self.cursor_surface,
@@ -1271,16 +1269,17 @@ impl Window for WaylandBackend {
                 cursor_image.width as i32,
                 cursor_image.height as i32,
             );
-            libwayland_client::wl_surface_commit(&self.libwayland_client, self.cursor_surface);
 
             libwayland_client::wl_pointer_set_cursor(
                 &self.libwayland_client,
                 self.wl_pointer,
                 serial,
                 self.cursor_surface,
-                cursor_image.hotspot_x as i32,
-                cursor_image.hotspot_y as i32,
+                hotspot_x,
+                hotspot_y,
             );
+
+            libwayland_client::wl_surface_commit(&self.libwayland_client, self.cursor_surface);
         }
 
         self.cursor_shape = Some(cursor_shape);

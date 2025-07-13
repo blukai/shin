@@ -18,6 +18,11 @@ impl Key {
         hashable.hash(&mut hasher);
         Self(hasher.finish())
     }
+
+    #[track_caller]
+    pub fn from_location() -> Self {
+        Self::new(std::panic::Location::caller())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -42,6 +47,8 @@ impl InteractionState {
     pub fn maybe_set_hot_or_active(&mut self, key: Key, rect: Rect, input: &input::State) {
         let inside = rect.contains(&Vec2::from(F64Vec2::from(input.pointer.position)));
 
+        // TODO: consider setting things inactive on press (not on release). doing that on press
+        // seem too feel more natural, but i am not completely sure yet...
         if self.active_key == Some(key)
             && input.pointer.buttons.just_released(PointerButton::Primary)
             && !inside
