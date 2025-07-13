@@ -47,10 +47,13 @@ impl InteractionState {
     pub fn maybe_set_hot_or_active(&mut self, key: Key, rect: Rect, input: &input::State) {
         let inside = rect.contains(&Vec2::from(F64Vec2::from(input.pointer.position)));
 
-        // TODO: consider setting things inactive on press (not on release). doing that on press
-        // seem too feel more natural, but i am not completely sure yet...
+        // TODO: setting thing inactive on press (not on release) seem too feel more natural, but i
+        // am not completely sure yet.
+        //
+        // NOTE: setting thing inactive on release makes things weird with for example text
+        // selection.
         if self.active_key == Some(key)
-            && input.pointer.buttons.just_released(PointerButton::Primary)
+            && input.pointer.buttons.just_pressed(PointerButton::Primary)
             && !inside
         {
             self.active_key = None;

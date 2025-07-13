@@ -14,20 +14,13 @@ use crate::{
     libwayland_cursor, xkb,
 };
 
-// TODO: hardcode thos within the match; and move closet ot keyboard stuff (cursor sits in between
-// atm).
-//
 // https://github.com/torvalds/linux/blob/231825b2e1ff6ba799c5eaf396d3ab2354e37c6b/include/uapi/linux/input-event-codes.h#L356
-const BTN_LEFT: u32 = 0x110;
-const BTN_RIGHT: u32 = 0x111;
-const BTN_MIDDLE: u32 = 0x112;
-
 #[inline]
 fn map_pointer_button(button: u32) -> Option<PointerButton> {
     match button {
-        BTN_LEFT => Some(PointerButton::Primary),
-        BTN_RIGHT => Some(PointerButton::Secondary),
-        BTN_MIDDLE => Some(PointerButton::Tertiary),
+        0x110 => Some(PointerButton::Primary),
+        0x111 => Some(PointerButton::Secondary),
+        0x112 => Some(PointerButton::Tertiary),
         _ => None,
     }
 }
@@ -53,6 +46,25 @@ fn get_cursor_rounded_scale(scale_factor: f64) -> u32 {
     (scale_factor - CURSOR_SCALE_FLOORING_THRESHOLD).ceil() as u32
 }
 
+fn load_cursor_theme(
+    libwayland_cursor: &libwayland_cursor::Lib,
+    wl_shm: *mut libwayland_client::wl_shm,
+    scale_factor: f64,
+) -> anyhow::Result<*mut libwayland_cursor::wl_cursor_theme> {
+    assert!(!wl_shm.is_null());
+
+    let rounded_scale = get_cursor_rounded_scale(scale_factor);
+    let scaled_size = CURSOR_SIZE * rounded_scale;
+
+    let cursor_theme =
+        unsafe { (libwayland_cursor.wl_cursor_theme_load)(null(), scaled_size as c_int, wl_shm) };
+    if cursor_theme.is_null() {
+        return Err(anyhow!("could not load cursor theme"));
+    }
+
+    Ok(cursor_theme)
+}
+
 // https://gitlab.freedesktop.org/wayland/wayland/-/blob/827d0c30adc4519fafa7a9c725ff355b1d4fa3bd/cursor/cursor-data.h
 // reference https://www.freedesktop.org/wiki/Specifications/cursor-spec/
 //
@@ -63,6 +75,148 @@ fn map_cursor_shape(cursor_shape: CursorShape) -> &'static CStr {
     match cursor_shape {
         CursorShape::Default => c"default",
         CursorShape::Pointer => c"pointer",
+    }
+}
+
+struct Cursor {
+    libwayland_cursor: libwayland_cursor::Lib,
+    wl_cursor_theme: *mut libwayland_cursor::wl_cursor_theme,
+    wl_surface: *mut libwayland_client::wl_surface,
+    scale: f64,
+}
+
+impl Cursor {
+    fn init(
+        libwayland_client: &libwayland_client::Lib,
+        wl_compositor: *mut libwayland_client::wl_compositor,
+        wl_shm: *mut libwayland_client::wl_shm,
+        scale: f64,
+    ) -> anyhow::Result<Self> {
+        assert!(!wl_compositor.is_null());
+
+        let libwayland_cursor = libwayland_cursor::Lib::load()?;
+
+        let wl_surface = unsafe {
+            libwayland_client::wl_compositor_create_surface(libwayland_client, wl_compositor)
+        };
+        if wl_surface.is_null() {
+            return Err(anyhow!("could not create wl_surface for cursor"));
+        }
+
+        let wl_cursor_theme = load_cursor_theme(&libwayland_cursor, wl_shm, scale)?;
+
+        Ok(Self {
+            libwayland_cursor,
+            wl_cursor_theme,
+            wl_surface,
+            scale,
+        })
+    }
+
+    #[expect(dead_code, reason = "TODO: consider deininting wayland xd")]
+    fn deinit(self, libwayland_client: &libwayland_client::Lib) {
+        if !self.wl_surface.is_null() {
+            unsafe { libwayland_client::wl_surface_destroy(libwayland_client, self.wl_surface) };
+        }
+        if !self.wl_cursor_theme.is_null() {
+            unsafe { (self.libwayland_cursor.wl_cursor_theme_destroy)(self.wl_cursor_theme) };
+        }
+    }
+
+    /// NOTE: should call set_shape right after. this function will not update shape to scale.
+    fn set_scale(
+        &mut self,
+        wl_shm: *mut libwayland_client::wl_shm,
+        scale: f64,
+    ) -> anyhow::Result<()> {
+        if !self.wl_cursor_theme.is_null() {
+            unsafe { (self.libwayland_cursor.wl_cursor_theme_destroy)(self.wl_cursor_theme) };
+            self.wl_cursor_theme = null_mut();
+        }
+
+        self.wl_cursor_theme = load_cursor_theme(&self.libwayland_cursor, wl_shm, scale)?;
+        self.scale = scale;
+
+        Ok(())
+    }
+
+    fn set_shape(
+        &mut self,
+        libwayland_client: &libwayland_client::Lib,
+        wl_pointer: *mut libwayland_client::wl_pointer,
+        shape: CursorShape,
+        serial: u32,
+    ) -> anyhow::Result<()> {
+        assert!(!wl_pointer.is_null());
+        assert!(serial != 0); // NOTE: pretty certain that 0 is not a valid serial.
+
+        let name = map_cursor_shape(shape);
+        let cursor = unsafe {
+            (self.libwayland_cursor.wl_cursor_theme_get_cursor)(self.wl_cursor_theme, name.as_ptr())
+        };
+        if cursor.is_null() {
+            return Err(anyhow!("could not get cursor {name:?}"));
+        };
+
+        let cursor = unsafe { &*cursor };
+        let images = unsafe { slice::from_raw_parts(cursor.images, cursor.image_count as usize) };
+
+        let image_ptr = images[0];
+        let image = unsafe { &*image_ptr };
+        let image_buffer =
+            unsafe { (self.libwayland_cursor.wl_cursor_image_get_buffer)(image_ptr) };
+        if image_buffer.is_null() {
+            return Err(anyhow!("could not get image buffer"));
+        }
+
+        // TODO: is this correct (correct enough? seems fine on scale_factor = 1.5)?
+        let rounded_scale = get_cursor_rounded_scale(self.scale) as f64;
+        let hotspot_x = (image.hotspot_x as f64 / rounded_scale).round() as i32;
+        let hotspot_y = (image.hotspot_y as f64 / rounded_scale).round() as i32;
+
+        unsafe {
+            libwayland_client::wl_surface_set_buffer_scale(
+                libwayland_client,
+                self.wl_surface,
+                rounded_scale as i32,
+            );
+
+            libwayland_client::wl_surface_attach(
+                libwayland_client,
+                self.wl_surface,
+                image_buffer,
+                0,
+                0,
+            );
+
+            // NOTE: pre version 4 wl_surface::damage must be used instead.
+            let wl_surface_version = (libwayland_client.wl_proxy_get_version)(
+                self.wl_surface as *mut libwayland_client::wl_proxy,
+            );
+            assert!(wl_surface_version >= 4);
+
+            libwayland_client::wl_surface_damage_buffer(
+                libwayland_client,
+                self.wl_surface,
+                0,
+                0,
+                image.width as i32,
+                image.height as i32,
+            );
+
+            libwayland_client::wl_pointer_set_cursor(
+                libwayland_client,
+                wl_pointer,
+                serial,
+                self.wl_surface,
+                hotspot_x,
+                hotspot_y,
+            );
+
+            libwayland_client::wl_surface_commit(libwayland_client, self.wl_surface);
+        }
+
+        Ok(())
     }
 }
 
@@ -282,7 +436,6 @@ impl TimerFD {
 
 pub struct WaylandBackend {
     libwayland_client: libwayland_client::Lib,
-    libwayland_cursor: libwayland_cursor::Lib,
 
     wl_display: NonNull<libwayland_client::wl_display>,
 
@@ -308,14 +461,15 @@ pub struct WaylandBackend {
     scale_factor: Option<f64>,
 
     // pointer
-    cursor_shape: Option<CursorShape>,
+    wl_pointer: *mut libwayland_client::wl_pointer,
     // NOTE: currently i care only about movement and button press/release events. but other kinds
     // of events will most likely require to store different kind of frame data that PointerEvent
     // would not be capable of describing?
     pointer_frame_events: VecDeque<PointerEvent>,
-    wl_pointer: *mut libwayland_client::wl_pointer,
-    cursor_theme: *mut libwayland_cursor::wl_cursor_theme,
-    cursor_surface: *mut libwayland_client::wl_surface,
+    cursor: Option<Cursor>,
+    // NOTE: cursor_shape is stored here so that it can be set back to what was requested when
+    // pointer re-enders the surface.
+    cursor_shape: Option<CursorShape>,
 
     // keyboard
     wl_keyboard: *mut libwayland_client::wl_keyboard,
@@ -535,7 +689,9 @@ unsafe extern "C" fn handle_wl_pointer_enter(
 
     evl.serial_tracker
         .update_serial(SerialType::PointerEnter, serial);
-    if let Err(err) = evl.set_cursor_shape(evl.cursor_shape.unwrap_or(CursorShape::Default)) {
+
+    let cursor_shape = evl.cursor_shape.unwrap_or(CursorShape::Default);
+    if let Err(err) = evl.set_cursor_shape(cursor_shape) {
         log::error!("could not set cursor shape (pointer enter): {err:?}");
     }
 
@@ -562,7 +718,6 @@ unsafe extern "C" fn handle_wl_pointer_leave(
 
     let evl = unsafe { &mut *(data as *mut WaylandBackend) };
     evl.serial_tracker.reset_serial(SerialType::PointerEnter);
-    evl.cursor_shape = None;
 }
 
 unsafe extern "C" fn handle_wl_pointer_button(
@@ -792,24 +947,24 @@ const WL_KEYBOARD_LISTENER: libwayland_client::wl_keyboard_listener =
 impl WaylandBackend {
     pub fn new_boxed(attrs: WindowAttrs) -> anyhow::Result<Box<Self>> {
         let libwayland_client = libwayland_client::Lib::load()?;
-        let libwayland_cursor = libwayland_cursor::Lib::load()?;
 
         let wl_display =
             NonNull::new(unsafe { (libwayland_client.wl_display_connect)(null_mut()) })
                 .context("could not connect to wayland display")?;
 
-        // TODO: do i need to call wl_display_disconnect here?
-        let key_repeat_timerfd = unsafe {
+        let Ok(key_repeat_timerfd) = (unsafe {
             TimerFD::new(
                 libc::CLOCK_MONOTONIC,
                 libc::TFD_CLOEXEC | libc::TFD_NONBLOCK,
             )
-        }
-        .context("could not create key repeat timer fd")?;
+        }) else {
+            unsafe { (libwayland_client.wl_display_disconnect)(wl_display.as_ptr()) };
+
+            return Err(anyhow!("could not create key repeat timer fd"));
+        };
 
         let mut boxed = Box::new(WaylandBackend {
             libwayland_client,
-            libwayland_cursor,
 
             wl_display,
 
@@ -831,11 +986,10 @@ impl WaylandBackend {
             logical_size: None,
             scale_factor: None,
 
-            cursor_shape: None,
-            pointer_frame_events: VecDeque::new(),
             wl_pointer: null_mut(),
-            cursor_theme: null_mut(),
-            cursor_surface: null_mut(),
+            pointer_frame_events: VecDeque::new(),
+            cursor: None,
+            cursor_shape: None,
 
             wl_keyboard: null_mut(),
             xkb_context: None,
@@ -994,15 +1148,14 @@ impl WaylandBackend {
             )
         };
 
-        boxed.cursor_surface = unsafe {
-            libwayland_client::wl_compositor_create_surface(
-                &boxed.libwayland_client,
-                boxed.wl_compositor,
-            )
-        };
-        assert!(!boxed.cursor_surface.is_null());
-        assert!(boxed.scale_factor.is_none());
-        boxed.load_cursor_theme_for_scale(1.0);
+        let cursor = Cursor::init(
+            &boxed.libwayland_client,
+            boxed.wl_compositor,
+            boxed.wl_shm,
+            boxed.scale_factor(),
+        )
+        .context("could not init cursor")?;
+        boxed.cursor = Some(cursor);
 
         // keyboard
 
@@ -1038,16 +1191,6 @@ impl WaylandBackend {
         Ok(boxed)
     }
 
-    fn load_cursor_theme_for_scale(&mut self, scale_factor: f64) {
-        let rounded_scale = get_cursor_rounded_scale(scale_factor);
-        let scaled_size = CURSOR_SIZE * rounded_scale;
-        self.cursor_theme = unsafe {
-            assert!(!self.wl_shm.is_null());
-            (self.libwayland_cursor.wl_cursor_theme_load)(null(), scaled_size as c_int, self.wl_shm)
-        };
-        assert!(!self.cursor_theme.is_null());
-    }
-
     fn maybe_resize(&mut self, logical_size: Option<(u32, u32)>, scale_factor: Option<f64>) {
         assert!(logical_size.is_some() || scale_factor.is_some());
 
@@ -1076,11 +1219,20 @@ impl WaylandBackend {
             if scale_factor_changed {
                 self.scale_factor = Some(scale_factor);
 
-                self.load_cursor_theme_for_scale(scale_factor);
-                if let Err(err) =
-                    self.set_cursor_shape(self.cursor_shape.unwrap_or(CursorShape::Default))
-                {
-                    log::error!("could not set cursor shape (rescaled): {err:?}");
+                // NOTE: i don't like this part, but rust wouldn't let me call set_cursor_shape
+                // within the Some(ref mut cursor) scope.
+                let mut cursor_set_scale_err = false;
+                if let Some(ref mut cursor) = self.cursor {
+                    if let Err(err) = cursor.set_scale(self.wl_shm, scale_factor) {
+                        log::error!("could not set cursor scale (during rescale): {err:?}");
+                        cursor_set_scale_err = false;
+                    }
+                }
+                if !cursor_set_scale_err {
+                    let shape = self.cursor_shape.unwrap_or(CursorShape::Default);
+                    if let Err(err) = self.set_cursor_shape(shape) {
+                        log::error!("could not set cursor shape (during rescale): {err:?}");
+                    }
                 }
             }
         }
@@ -1200,89 +1352,17 @@ impl Window for WaylandBackend {
         self.events.pop_front()
     }
 
-    fn set_cursor_shape(&mut self, cursor_shape: CursorShape) -> anyhow::Result<()> {
-        assert!(!self.cursor_theme.is_null());
-        assert!(!self.cursor_surface.is_null());
-
-        if self.cursor_shape.is_some_and(|cs| cs == cursor_shape) {
-            return Ok(());
-        }
-
+    fn set_cursor_shape(&mut self, shape: CursorShape) -> anyhow::Result<()> {
         let Some(serial) = self.serial_tracker.get_serial(SerialType::PointerEnter) else {
             log::warn!("no pointer enter serial found");
             return Ok(());
         };
 
-        let cursor_name = map_cursor_shape(cursor_shape);
-        let cursor = unsafe {
-            (self.libwayland_cursor.wl_cursor_theme_get_cursor)(
-                self.cursor_theme,
-                cursor_name.as_ptr(),
-            )
-        };
-        if cursor.is_null() {
-            log::warn!("could not find {cursor_name:?} cursor");
-            return Ok(());
-        };
-        let cursor = unsafe { &*cursor };
+        let cursor = self.cursor.as_mut().context("cursor is uninitialized")?;
+        cursor.set_shape(&self.libwayland_client, self.wl_pointer, shape, serial)?;
 
-        let cursor_images =
-            unsafe { slice::from_raw_parts(cursor.images, cursor.image_count as usize) };
-        let cursor_image_ptr = cursor_images[0];
-        let cursor_image = unsafe { &*cursor_image_ptr };
+        self.cursor_shape = Some(shape);
 
-        let cursor_image_buffer =
-            unsafe { (self.libwayland_cursor.wl_cursor_image_get_buffer)(cursor_image_ptr) };
-        if cursor_image_buffer.is_null() {
-            return Err(anyhow!("could not get cursor image buffer"));
-        }
-
-        // TODO: is this correct (correct enough? seems fine on scale_factor = 1.5)?
-        let rounded_scale = get_cursor_rounded_scale(self.scale_factor()) as f64;
-        let hotspot_x = (cursor_image.hotspot_x as f64 / rounded_scale).round() as i32;
-        let hotspot_y = (cursor_image.hotspot_y as f64 / rounded_scale).round() as i32;
-
-        unsafe {
-            libwayland_client::wl_surface_set_buffer_scale(
-                &self.libwayland_client,
-                self.cursor_surface,
-                rounded_scale as i32,
-            );
-            libwayland_client::wl_surface_attach(
-                &self.libwayland_client,
-                self.cursor_surface,
-                cursor_image_buffer,
-                0,
-                0,
-            );
-
-            // NOTE: pre version 4 wl_surface::damage must be used instead.
-            let wl_surface_version = (self.libwayland_client.wl_proxy_get_version)(
-                self.cursor_surface as *mut libwayland_client::wl_proxy,
-            );
-            assert!(wl_surface_version >= 4);
-            libwayland_client::wl_surface_damage_buffer(
-                &self.libwayland_client,
-                self.cursor_surface,
-                0,
-                0,
-                cursor_image.width as i32,
-                cursor_image.height as i32,
-            );
-
-            libwayland_client::wl_pointer_set_cursor(
-                &self.libwayland_client,
-                self.wl_pointer,
-                serial,
-                self.cursor_surface,
-                hotspot_x,
-                hotspot_y,
-            );
-
-            libwayland_client::wl_surface_commit(&self.libwayland_client, self.cursor_surface);
-        }
-
-        self.cursor_shape = Some(cursor_shape);
         Ok(())
     }
 

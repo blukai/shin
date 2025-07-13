@@ -271,7 +271,7 @@ impl<'a> TextSinglelineSelectable<'a> {
 
                 Event::Pointer(PointerEvent::Press {
                     button: PointerButton::Primary,
-                }) if self.hot /* NOTE: we want to react only to "inside" presses. */ => {
+                }) => {
                     let position = Vec2::from(F64Vec2::from(input.pointer.position));
                     if let Some(byte_offset) = self.locate_char(position, ctx) {
                         self.selection.cursor = byte_offset..byte_offset;
