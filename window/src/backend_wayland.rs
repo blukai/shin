@@ -70,11 +70,17 @@ fn load_cursor_theme(
 //
 // https://wayland.app/protocols/cursor-shape-v1, which is not completely relevant reference
 // https://drafts.csswg.org/css-ui/#cursor
-#[inline]
-fn map_cursor_shape(cursor_shape: CursorShape) -> &'static CStr {
-    match cursor_shape {
+fn map_cursor_shape_to_name(shape: CursorShape) -> &'static CStr {
+    match shape {
         CursorShape::Default => c"default",
         CursorShape::Pointer => c"pointer",
+    }
+}
+
+fn map_cursor_shape_to_enum(shape: CursorShape) -> u32 {
+    match shape {
+        CursorShape::Default => libwayland_client::WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT,
+        CursorShape::Pointer => libwayland_client::WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_POINTER,
     }
 }
 
@@ -141,7 +147,7 @@ impl Cursor {
     }
 
     fn set_shape(
-        &mut self,
+        &self,
         libwayland_client: &libwayland_client::Lib,
         wl_pointer: *mut libwayland_client::wl_pointer,
         shape: CursorShape,
@@ -150,7 +156,7 @@ impl Cursor {
         assert!(!wl_pointer.is_null());
         assert!(serial != 0); // NOTE: pretty certain that 0 is not a valid serial.
 
-        let name = map_cursor_shape(shape);
+        let name = map_cursor_shape_to_name(shape);
         let cursor = unsafe {
             (self.libwayland_cursor.wl_cursor_theme_get_cursor)(self.wl_cursor_theme, name.as_ptr())
         };
@@ -443,6 +449,7 @@ pub struct WaylandBackend {
     wl_compositor: *mut libwayland_client::wl_compositor,
     wl_seat: *mut libwayland_client::wl_seat,
     wl_shm: *mut libwayland_client::wl_shm,
+    wp_cursor_shape_manager_v1: *mut libwayland_client::wp_cursor_shape_manager_v1,
     wp_fractional_scale_manager_v1: *mut libwayland_client::wp_fractional_scale_manager_v1,
     wp_viewporter: *mut libwayland_client::wp_viewporter,
     xdg_wm_base: *mut libwayland_client::xdg_wm_base,
@@ -470,6 +477,7 @@ pub struct WaylandBackend {
     // NOTE: cursor_shape is stored here so that it can be set back to what was requested when
     // pointer re-enders the surface.
     cursor_shape: Option<CursorShape>,
+    wp_cursor_shape_device_v1: *mut libwayland_client::wp_cursor_shape_device_v1,
 
     // keyboard
     wl_keyboard: *mut libwayland_client::wl_keyboard,
@@ -522,6 +530,15 @@ unsafe extern "C" fn handle_wl_registry_global(
                     name,
                     &libwayland_client::wl_shm_interface,
                     2.min(version),
+                ) as _;
+            }
+            "wp_cursor_shape_manager_v1" => {
+                evl.wp_cursor_shape_manager_v1 = libwayland_client::wl_registry_bind(
+                    &evl.libwayland_client,
+                    wl_registry,
+                    name,
+                    &libwayland_client::wp_cursor_shape_manager_v1_interface,
+                    1.min(version),
                 ) as _;
             }
             "wp_fractional_scale_manager_v1" => {
@@ -971,6 +988,7 @@ impl WaylandBackend {
             wl_compositor: null_mut(),
             wl_seat: null_mut(),
             wl_shm: null_mut(),
+            wp_cursor_shape_manager_v1: null_mut(),
             wp_fractional_scale_manager_v1: null_mut(),
             wp_viewporter: null_mut(),
             xdg_wm_base: null_mut(),
@@ -990,6 +1008,7 @@ impl WaylandBackend {
             pointer_frame_events: VecDeque::new(),
             cursor: None,
             cursor_shape: None,
+            wp_cursor_shape_device_v1: null_mut(),
 
             wl_keyboard: null_mut(),
             xkb_context: None,
@@ -1148,14 +1167,28 @@ impl WaylandBackend {
             )
         };
 
-        let cursor = Cursor::init(
-            &boxed.libwayland_client,
-            boxed.wl_compositor,
-            boxed.wl_shm,
-            boxed.scale_factor(),
-        )
-        .context("could not init cursor")?;
-        boxed.cursor = Some(cursor);
+        if !boxed.wp_cursor_shape_manager_v1.is_null() {
+            assert!(!boxed.wl_pointer.is_null());
+            boxed.wp_cursor_shape_device_v1 = unsafe {
+                libwayland_client::wp_cursor_shape_manager_v1_get_pointer(
+                    &boxed.libwayland_client,
+                    boxed.wp_cursor_shape_manager_v1,
+                    boxed.wl_pointer,
+                )
+            };
+            if boxed.wp_cursor_shape_device_v1.is_null() {
+                return Err(anyhow!("could not get cursor shape device"));
+            }
+        } else {
+            boxed.cursor = Cursor::init(
+                &boxed.libwayland_client,
+                boxed.wl_compositor,
+                boxed.wl_shm,
+                boxed.scale_factor(),
+            )
+            .map(Some)
+            .context("could not init cursor")?;
+        }
 
         // keyboard
 
@@ -1219,19 +1252,20 @@ impl WaylandBackend {
             if scale_factor_changed {
                 self.scale_factor = Some(scale_factor);
 
-                // NOTE: i don't like this part, but rust wouldn't let me call set_cursor_shape
-                // within the Some(ref mut cursor) scope.
-                let mut cursor_set_scale_err = false;
+                // NOTE: if we're using old cursor stuff (not wp_cursor_shape_manager_v1) - cursor
+                // needs to be re-scaled.
                 if let Some(ref mut cursor) = self.cursor {
-                    if let Err(err) = cursor.set_scale(self.wl_shm, scale_factor) {
-                        log::error!("could not set cursor scale (during rescale): {err:?}");
-                        cursor_set_scale_err = false;
-                    }
-                }
-                if !cursor_set_scale_err {
-                    let shape = self.cursor_shape.unwrap_or(CursorShape::Default);
-                    if let Err(err) = self.set_cursor_shape(shape) {
-                        log::error!("could not set cursor shape (during rescale): {err:?}");
+                    match cursor.set_scale(self.wl_shm, scale_factor) {
+                        Err(err) => {
+                            log::error!("could not set cursor scale (during rescale): {err:?}");
+                        }
+                        Ok(_) => {
+                            // NOTE: cursor needs to be updated after re-scaling.
+                            let shape = self.cursor_shape.unwrap_or(CursorShape::Default);
+                            if let Err(err) = self.set_cursor_shape(shape) {
+                                log::error!("could not set cursor shape (during rescale): {err:?}");
+                            }
+                        }
                     }
                 }
             }
@@ -1358,8 +1392,22 @@ impl Window for WaylandBackend {
             return Ok(());
         };
 
-        let cursor = self.cursor.as_mut().context("cursor is uninitialized")?;
-        cursor.set_shape(&self.libwayland_client, self.wl_pointer, shape, serial)?;
+        if !self.wp_cursor_shape_device_v1.is_null() {
+            unsafe {
+                libwayland_client::wp_cursor_shape_device_v1_set_shape(
+                    &self.libwayland_client,
+                    self.wp_cursor_shape_device_v1,
+                    serial,
+                    map_cursor_shape_to_enum(shape),
+                )
+            };
+        } else if let Some(ref cursor) = self.cursor {
+            cursor.set_shape(&self.libwayland_client, self.wl_pointer, shape, serial)?;
+        } else {
+            return Err(anyhow!(
+                "cursor shape proto is unavailable and cursor is uninitialized"
+            ));
+        }
 
         self.cursor_shape = Some(shape);
 

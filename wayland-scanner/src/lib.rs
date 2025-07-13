@@ -271,6 +271,13 @@ enum MessageKind {
     Event,
 }
 
+fn normalize_message_name(name: &str) -> &str {
+    match name {
+        "type" => "r#type",
+        other => other,
+    }
+}
+
 fn emit_structs<W: io::Write>(
     w: &mut W,
     interface: &Interface,
@@ -296,7 +303,8 @@ fn emit_structs<W: io::Write>(
 
     write!(w, "pub struct {}_listener {{\n", interface.name)?;
     for msg in messages.iter() {
-        write!(w, "    pub {}: unsafe extern \"C\" fn(\n", msg.name)?;
+        let name = normalize_message_name(msg.name);
+        write!(w, "    pub {name}: unsafe extern \"C\" fn(\n")?;
         write!(w, "        data: *mut std::ffi::c_void,\n")?;
         write!(w, "        {}: *mut {},\n", interface.name, interface.name)?;
         for arg in msg.args.iter() {
