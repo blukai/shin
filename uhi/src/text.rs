@@ -221,6 +221,11 @@ impl<'a> TextSinglelineSelectable<'a> {
             ..
         } = self.singleline.base;
 
+        // maybe we're dragging and the pointer is before beginning of the line.
+        if position.x < rect.min.x {
+            return Some(0);
+        }
+
         let mut font_instance_ref = ctx
             .font_service
             .get_font_instance_mut(font_handle, font_size);
@@ -248,7 +253,9 @@ impl<'a> TextSinglelineSelectable<'a> {
             offset_x += char_ref.advance_width();
         }
 
-        None
+        // the pointer is after end of the line.
+        assert!(position.x > offset_x);
+        Some(text.len())
     }
 
     pub fn update<E: Externs>(self, ctx: &mut Context<E>, input: &input::State) -> Self {
