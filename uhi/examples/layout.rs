@@ -191,7 +191,7 @@ fn draw<E: uhi::Externs>(ctx: &mut uhi::Context<E>, font_handle: uhi::FontHandle
         14.0,
         area.shrink(&Vec2::splat(24.0)),
     )
-    .with_fg(uhi::Rgba8::FUCHSIA)
+    .with_palette(uhi::TextPalette::default().with_fg(uhi::Rgba8::FUCHSIA))
     .singleline()
     .draw(ctx);
 }

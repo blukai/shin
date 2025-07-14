@@ -17,11 +17,11 @@ struct App {
     font_handle: uhi::FontHandle,
     input_state: input::State,
 
-    text_one: String,
-    text_one_selection: uhi::TextSelection,
+    text_cjk: String,
+    text_cjk_selection: uhi::TextSelection,
 
-    text_two: String,
-    text_two_selection: uhi::TextSelection,
+    text_editable: String,
+    text_editable_selection: uhi::TextSelection,
 }
 
 impl AppHandler for App {
@@ -41,11 +41,11 @@ impl AppHandler for App {
             font_handle,
             input_state: input::State::default(),
 
-            text_one: "hello, sailor!".to_string(),
-            text_one_selection: uhi::TextSelection::default(),
+            text_cjk: "こんにちは".to_string(),
+            text_cjk_selection: uhi::TextSelection::default(),
 
-            text_two: "こんにちは".to_string(),
-            text_two_selection: uhi::TextSelection::default(),
+            text_editable: "editable".to_string(),
+            text_editable_selection: uhi::TextSelection::default(),
         }
     }
 
@@ -96,35 +96,35 @@ impl AppHandler for App {
         .draw(&mut self.uhi_context);
 
         uhi::Text::new(
-            self.text_one.as_str(),
+            self.text_cjk.as_str(),
             self.font_handle,
             14.0,
             area.clone().shrink(&uhi::Vec2::new(24.0, 24.0 * 3.0)),
         )
         .singleline()
-        .selectable(&mut self.text_one_selection)
+        .selectable(&mut self.text_cjk_selection)
         .maybe_set_hot_or_active(
             uhi::Key::from_location(),
             &mut self.uhi_context,
             &self.input_state,
         )
-        .update_if(|this| this.active, &mut self.uhi_context, &self.input_state)
+        .update_if(|t| t.is_active(), &mut self.uhi_context, &self.input_state)
         .draw(&mut self.uhi_context);
 
         uhi::Text::new(
-            self.text_two.as_str(),
+            &mut self.text_editable,
             self.font_handle,
             14.0,
             area.clone().shrink(&uhi::Vec2::new(24.0, 24.0 * 5.0)),
         )
         .singleline()
-        .selectable(&mut self.text_two_selection)
+        .editable(&mut self.text_editable_selection)
         .maybe_set_hot_or_active(
             uhi::Key::from_location(),
             &mut self.uhi_context,
             &self.input_state,
         )
-        .update_if(|this| this.active, &mut self.uhi_context, &self.input_state)
+        .update_if(|t| t.is_active(), &mut self.uhi_context, &self.input_state)
         .draw(&mut self.uhi_context);
 
         self.uhi_renderer

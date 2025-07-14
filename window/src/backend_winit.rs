@@ -238,8 +238,8 @@ impl winit::application::ApplicationHandler for App {
             }
             KeyboardInput { event, .. } => {
                 if let Some(scancode) = map_keyboard_physical_key(event.physical_key) {
-                    let keycode = match event.logical_key {
-                        winit::keyboard::Key::Character(str) if str.chars().count() == 1 => {
+                    let keycode = match event.logical_key.to_text() {
+                        Some(str) if str.chars().count() == 1 => {
                             Keycode::Char(str.chars().next().unwrap())
                         }
                         _ => Keycode::Unhandled,
