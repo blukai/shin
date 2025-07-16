@@ -67,17 +67,18 @@ impl AppHandler for App {
     }
 
     fn update(&mut self, ctx: app::AppContext) {
-        self.uhi_context.interaction_state.begin_frame();
+        self.uhi_context.begin_frame();
 
         // ----
 
         unsafe { ctx.gl_api.clear_color(0.0, 0.0, 0.8, 1.0) };
         unsafe { ctx.gl_api.clear(gl::api::COLOR_BUFFER_BIT) };
 
-        let window_size = ctx.window.size();
-        let area = uhi::Rect::new(
+        let physical_window_size = ctx.window.size();
+        let scale_factor = ctx.window.scale_factor();
+        let logical_window_rect = uhi::Rect::new(
             uhi::Vec2::ZERO,
-            uhi::Vec2::from(uhi::U32Vec2::from(window_size)),
+            uhi::Vec2::from(uhi::U32Vec2::from(physical_window_size)) / scale_factor as f32,
         );
 
         let pointer_position_text = format!(
@@ -90,7 +91,9 @@ impl AppHandler for App {
             pointer_position_text.as_str(),
             self.font_handle,
             14.0,
-            area.clone().shrink(&uhi::Vec2::new(24.0, 24.0 * 1.0)),
+            logical_window_rect
+                .clone()
+                .shrink(&uhi::Vec2::new(16.0, 16.0 * 1.0)),
         )
         .singleline()
         .draw(&mut self.uhi_context);
@@ -99,7 +102,9 @@ impl AppHandler for App {
             self.text_cjk.as_str(),
             self.font_handle,
             14.0,
-            area.clone().shrink(&uhi::Vec2::new(24.0, 24.0 * 3.0)),
+            logical_window_rect
+                .clone()
+                .shrink(&uhi::Vec2::new(16.0, 16.0 * 3.0)),
         )
         .singleline()
         .selectable(&mut self.text_cjk_selection)
@@ -115,7 +120,9 @@ impl AppHandler for App {
             &mut self.text_editable,
             self.font_handle,
             14.0,
-            area.clone().shrink(&uhi::Vec2::new(24.0, 24.0 * 5.0)),
+            logical_window_rect
+                .clone()
+                .shrink(&uhi::Vec2::new(16.0, 16.0 * 5.0)),
         )
         .singleline()
         .editable(&mut self.text_editable_selection)
@@ -128,13 +135,17 @@ impl AppHandler for App {
         .draw(&mut self.uhi_context);
 
         self.uhi_renderer
-            .render(&mut self.uhi_context, ctx.gl_api, window_size)
+            .render(
+                &mut self.uhi_context,
+                ctx.gl_api,
+                physical_window_size,
+                scale_factor,
+            )
             .expect("uhi renderer fucky wucky");
 
         // ----
 
-        self.uhi_context.draw_buffer.clear();
-        self.uhi_context.interaction_state.end_frame();
+        self.uhi_context.end_frame();
         self.input_state.end_frame();
     }
 }

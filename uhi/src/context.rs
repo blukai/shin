@@ -17,3 +17,14 @@ impl<E: Externs> Default for Context<E> {
         }
     }
 }
+
+impl<E: Externs> Context<E> {
+    pub fn begin_frame(&mut self) {
+        self.interaction_state.begin_frame();
+    }
+
+    pub fn end_frame(&mut self) {
+        self.draw_buffer.clear();
+        self.interaction_state.end_frame();
+    }
+}

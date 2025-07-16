@@ -221,7 +221,10 @@ impl winit::application::ApplicationHandler for App {
                 }))
             }
             CursorMoved { position, .. } => {
-                let position = (position.x, position.y);
+                // NOTE: sdl, wayland provide positions in logical pixels. i kind of want to
+                // conform to that across the board.
+                let scale_factor = window.scale_factor();
+                let position = (position.x / scale_factor, position.y / scale_factor);
                 Some(Event::Pointer(PointerEvent::Motion { position }))
             }
             MouseInput { button, state, .. } => {

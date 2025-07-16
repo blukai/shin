@@ -241,29 +241,34 @@ impl AppHandler for App {
     }
 
     fn update(&mut self, ctx: app::AppContext) {
-        self.uhi_context.interaction_state.begin_frame();
+        self.uhi_context.begin_frame();
 
         // ----
 
         unsafe { ctx.gl_api.clear_color(0.0, 0.0, 0.3, 1.0) };
         unsafe { ctx.gl_api.clear(gl::api::COLOR_BUFFER_BIT) };
 
-        let window_size = ctx.window.size();
-        let area = uhi::Rect::new(
+        let physical_window_size = ctx.window.size();
+        let scale_factor = ctx.window.scale_factor();
+        let logical_window_rect = uhi::Rect::new(
             uhi::Vec2::ZERO,
-            uhi::Vec2::from(uhi::U32Vec2::from(window_size)),
+            uhi::Vec2::from(uhi::U32Vec2::from(physical_window_size)) / scale_factor as f32,
         );
 
-        draw(&mut self.uhi_context, self.font_handle, area);
+        draw(&mut self.uhi_context, self.font_handle, logical_window_rect);
 
         self.uhi_renderer
-            .render(&mut self.uhi_context, ctx.gl_api, window_size)
+            .render(
+                &mut self.uhi_context,
+                ctx.gl_api,
+                physical_window_size,
+                scale_factor,
+            )
             .expect("uhi renderer fucky wucky");
 
         // ----
 
-        self.uhi_context.draw_buffer.clear();
-        self.uhi_context.interaction_state.end_frame();
+        self.uhi_context.end_frame();
         self.input_state.end_frame();
     }
 }

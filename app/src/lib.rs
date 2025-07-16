@@ -7,6 +7,8 @@ pub struct AppContext<'a> {
 
 pub trait AppHandler {
     fn create(ctx: AppContext) -> Self;
+    // TODO: consider combining handle_event + update into a single `iterate` method that would
+    // allow to poll events or something?
     fn handle_event(&mut self, ctx: AppContext, event: Event);
     fn update(&mut self, ctx: AppContext);
 }

@@ -8,9 +8,6 @@ use crate::{
 use ab_glyph::{Font as _, FontArc, PxScale, ScaleFont as _};
 use nohash::NoHashMap;
 
-// TODO: consider integrating window scale factor into font service (note that this will require a
-// need for being able to remove existing resources).
-
 const TEXTURE_WIDTH: u32 = 256;
 const TEXTURE_HEIGHT: u32 = 256;
 const TEXTURE_GAP: u32 = 1;
@@ -36,12 +33,13 @@ struct RasterizedChar {
 fn rasterize_char<E: Externs>(
     ch: char,
     font: &FontArc,
-    scale: PxScale,
+    px_scale: PxScale,
+    scale_factor: f32,
     texture_pages: &mut Vec<TexturePage>,
     texture_service: &mut TextureService<E>,
 ) -> RasterizedChar {
     let glyph_id = font.glyph_id(ch);
-    let glyph = glyph_id.with_scale(scale);
+    let glyph = glyph_id.with_scale(px_scale);
     let outlined_glyph = font.outline_glyph(glyph);
 
     let bounds = outlined_glyph
@@ -113,22 +111,22 @@ fn rasterize_char<E: Externs>(
         assert_eq!(&bounds, &ab_glyph::Rect::default());
     }
 
-    let size = Vec2::new(
-        tex_packer_entry.w as f32 / TEXTURE_WIDTH as f32,
-        tex_packer_entry.h as f32 / TEXTURE_HEIGHT as f32,
-    );
     let min = Vec2::new(
         tex_packer_entry.x as f32 / TEXTURE_WIDTH as f32,
         tex_packer_entry.y as f32 / TEXTURE_HEIGHT as f32,
+    );
+    let size = Vec2::new(
+        tex_packer_entry.w as f32 / TEXTURE_WIDTH as f32,
+        tex_packer_entry.h as f32 / TEXTURE_HEIGHT as f32,
     );
     let max = min + size;
     let tex_coords = Rect::new(min, max);
 
     let bounds = Rect::new(
-        Vec2::new(bounds.min.x, bounds.min.y),
-        Vec2::new(bounds.max.x, bounds.max.y),
+        Vec2::new(bounds.min.x, bounds.min.y) / scale_factor,
+        Vec2::new(bounds.max.x, bounds.max.y) / scale_factor,
     );
-    let advance_width = font.as_scaled(scale).h_advance(glyph_id);
+    let advance_width = font.as_scaled(px_scale).h_advance(glyph_id) / scale_factor;
 
     RasterizedChar {
         tex_page_idx,
@@ -184,8 +182,10 @@ fn make_font_instance_key(font_handle: FontHandle, pt_size: f32) -> u64 {
 
 #[derive(Debug)]
 struct FontInstance {
-    scale: PxScale,
     rasterized_chars: NoHashMap<u32, RasterizedChar>,
+
+    px_scale: PxScale,
+    scale_factor: f32,
 
     height: f32,
     ascent: f32,
@@ -194,23 +194,30 @@ struct FontInstance {
 }
 
 impl FontInstance {
-    fn new(font: &FontArc, pt_size: f32, window_scale_factor: Option<f64>) -> Self {
+    fn new(font: &FontArc, pt_size: f32, scale_factor: f32) -> Self {
         // NOTE: see https://github.com/alexheretic/ab-glyph/issues/14 for details.
-        let scale_factor = font
+        let font_scale = font
             .units_per_em()
             .map(|units_per_em| font.height_unscaled() / units_per_em)
             .unwrap_or(1.0);
-        let scale =
-            PxScale::from(pt_size * window_scale_factor.unwrap_or(1.0) as f32 * scale_factor);
-        let scaled = font.as_scaled(scale);
+        let px_scale = PxScale::from(pt_size * scale_factor * font_scale);
+        let scaled = font.as_scaled(px_scale);
+
+        let ascent = scaled.ascent() / scale_factor;
+        let descent = scaled.descent() / scale_factor;
+        let line_gap = scaled.line_gap() / scale_factor;
+        // see https://developer.mozilla.org/en-US/docs/Web/CSS/length#ch
+        let typical_advance_width = scaled.h_advance(font.glyph_id('0')) / scale_factor;
 
         Self {
-            scale,
             rasterized_chars: NoHashMap::default(),
 
-            height: scaled.ascent() - scaled.descent() + scaled.line_gap(),
-            ascent: scaled.ascent(),
-            typical_advance_width: scaled.h_advance(font.glyph_id('0')),
+            px_scale,
+            scale_factor,
+
+            height: ascent - descent + line_gap,
+            ascent,
+            typical_advance_width,
         }
     }
 }
@@ -255,7 +262,8 @@ impl<'a> FontInstanceRefMut<'a> {
                 rasterize_char(
                     ch,
                     self.font,
-                    self.font_instance.scale,
+                    self.font_instance.px_scale,
+                    self.font_instance.scale_factor,
                     &mut self.tex_pages,
                     texture_service,
                 )
@@ -330,7 +338,9 @@ impl FontService {
         let font_instance = self
             .font_instances
             .entry(make_font_instance_key(font_handle, pt_size))
-            .or_insert_with(|| FontInstance::new(font, pt_size, self.scale_factor));
+            .or_insert_with(|| {
+                FontInstance::new(font, pt_size, self.scale_factor.unwrap_or(1.0) as f32)
+            });
         FontInstanceRefMut {
             font,
             font_instance,

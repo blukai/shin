@@ -279,7 +279,8 @@ impl GlRenderer {
         &self,
         ctx: &mut Context<E>,
         gl_api: &gl::api::Api,
-        view_size: (u32, u32),
+        physical_view_size: (u32, u32),
+        scale_factor: f64,
     ) -> anyhow::Result<()>
     where
         E: Externs<TextureHandle = <Self as Renderer>::TextureHandle>,
@@ -293,14 +294,14 @@ impl GlRenderer {
             gl_api.viewport(
                 0,
                 0,
-                view_size.0 as gl::api::GLsizei,
-                view_size.1 as gl::api::GLsizei,
+                physical_view_size.0 as gl::api::GLsizei,
+                physical_view_size.1 as gl::api::GLsizei,
             );
 
             gl_api.uniform_2f(
                 self.u_view_size_location,
-                view_size.0 as gl::api::GLfloat,
-                view_size.1 as gl::api::GLfloat,
+                (physical_view_size.0 as f64 / scale_factor) as gl::api::GLfloat,
+                (physical_view_size.1 as f64 / scale_factor) as gl::api::GLfloat,
             );
 
             gl_api.buffer_data(
