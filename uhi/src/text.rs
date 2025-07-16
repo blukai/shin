@@ -72,8 +72,12 @@ pub struct TextSelection {
 }
 
 impl TextSelection {
-    fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.cursor.start == self.cursor.end
+    }
+
+    pub fn clear(&mut self) {
+        self.cursor = 0..0;
     }
 
     // TODO: move modifiers (by char, by char type, by word, etc.)
@@ -223,6 +227,8 @@ impl<'a> Text<'a> {
         TextSingleline::new(self)
     }
 }
+
+// ----
 
 fn compute_singleline_text_size<E: Externs>(text: &Text, ctx: &mut Context<E>) -> Vec2 {
     let mut font_instance_ref = ctx
@@ -391,7 +397,11 @@ impl<'a> TextSingleline<'a> {
     }
 
     pub fn draw<E: Externs>(self, ctx: &mut Context<E>) {
+        ctx.draw_buffer.set_clip_rect(Some(self.text.rect.clone()));
+
         draw_singleline_text(&self.text, ctx);
+
+        ctx.draw_buffer.set_clip_rect(None);
     }
 
     pub fn selectable(self, selection: &'a mut TextSelection) -> TextSinglelineSelectable<'a> {
@@ -507,12 +517,14 @@ impl<'a> TextSinglelineSelectable<'a> {
     }
 
     pub fn draw<E: Externs>(self, ctx: &mut Context<E>) {
+        ctx.draw_buffer.set_clip_rect(Some(self.text.rect.clone()));
+
         maybe_draw_singleline_text_selection(&self.text, self.selection, self.active, ctx);
         draw_singleline_text(&self.text, ctx);
+
+        ctx.draw_buffer.set_clip_rect(None);
     }
 }
-
-// ----
 
 // TODO: x axis scroll
 pub struct TextSinglelineEditable<'a> {
@@ -645,9 +657,13 @@ impl<'a> TextSinglelineEditable<'a> {
     }
 
     pub fn draw<E: Externs>(self, ctx: &mut Context<E>) {
+        ctx.draw_buffer.set_clip_rect(Some(self.text.rect.clone()));
+
         maybe_draw_singleline_text_selection(&self.text, self.selection, self.active, ctx);
         maybe_draw_singleline_text_cursor(&self.text, self.selection, self.active, ctx);
         draw_singleline_text(&self.text, ctx);
+
+        ctx.draw_buffer.set_clip_rect(None);
     }
 }
 

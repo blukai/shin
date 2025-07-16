@@ -66,6 +66,7 @@ pub trait Apier {
     unsafe fn delete_shader(&self, shader: Self::Shader);
     unsafe fn delete_texture(&self, texture: Self::Texture);
     unsafe fn detach_shader(&self, program: Self::Program, shader: Self::Shader);
+    unsafe fn disable(&self, cap: GLenum);
     unsafe fn draw_elements(
         &self,
         mode: GLenum,
@@ -85,6 +86,7 @@ pub trait Apier {
     unsafe fn get_uniform_location(&self, program: Self::Program, name: &CStr) -> Option<GLint>;
     unsafe fn link_program(&self, program: Self::Program);
     unsafe fn pixel_storei(&self, pname: GLenum, param: GLint);
+    unsafe fn scissor(&self, x: GLint, y: GLint, width: GLsizei, height: GLsizei);
     unsafe fn shader_source(&self, shader: Self::Shader, source: &str);
     unsafe fn tex_image_2d(
         &self,

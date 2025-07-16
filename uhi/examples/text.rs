@@ -54,7 +54,7 @@ impl AppHandler for App {
             Event::Window(WindowEvent::ScaleFactorChanged { scale_factor }) => {
                 self.uhi_context
                     .font_service
-                    .set_scale_factor(scale_factor, &mut self.uhi_context.texture_service);
+                    .set_scale_factor(scale_factor as f32, &mut self.uhi_context.texture_service);
             }
             Event::Pointer(ev) => {
                 self.input_state.handle_event(input::Event::Pointer(ev));
@@ -139,7 +139,7 @@ impl AppHandler for App {
                 &mut self.uhi_context,
                 ctx.gl_api,
                 physical_window_size,
-                scale_factor,
+                scale_factor as f32,
             )
             .expect("uhi renderer fucky wucky");
 

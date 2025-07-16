@@ -292,7 +292,7 @@ impl<'a> FontInstanceRefMut<'a> {
 
 #[derive(Default)]
 pub struct FontService {
-    scale_factor: Option<f64>,
+    scale_factor: Option<f32>,
     // NOTE: i don't need an Arc, but whatever. FontArc makes it convenient because it wraps both
     // FontRef and FontVec.
     fonts: Vec<FontArc>,
@@ -303,7 +303,7 @@ pub struct FontService {
 impl FontService {
     pub fn set_scale_factor<E: Externs>(
         &mut self,
-        scale_factor: f64,
+        scale_factor: f32,
         texture_service: &mut TextureService<E>,
     ) {
         self.scale_factor = Some(scale_factor);

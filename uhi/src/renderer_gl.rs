@@ -280,7 +280,7 @@ impl GlRenderer {
         ctx: &mut Context<E>,
         gl_api: &gl::api::Api,
         physical_view_size: (u32, u32),
-        scale_factor: f64,
+        scale_factor: f32,
     ) -> anyhow::Result<()>
     where
         E: Externs<TextureHandle = <Self as Renderer>::TextureHandle>,
@@ -300,8 +300,8 @@ impl GlRenderer {
 
             gl_api.uniform_2f(
                 self.u_view_size_location,
-                (physical_view_size.0 as f64 / scale_factor) as gl::api::GLfloat,
-                (physical_view_size.1 as f64 / scale_factor) as gl::api::GLfloat,
+                (physical_view_size.0 as f32 / scale_factor) as gl::api::GLfloat,
+                (physical_view_size.1 as f32 / scale_factor) as gl::api::GLfloat,
             );
 
             gl_api.buffer_data(
@@ -318,12 +318,22 @@ impl GlRenderer {
             );
 
             for DrawCommand {
-                // TODO: make use of clip rect (apply scissor).
                 clip_rect,
                 index_range,
                 texture,
             } in draw_data.commands.iter()
             {
+                if let Some(clip_rect) = clip_rect {
+                    gl_api.enable(gl::api::SCISSOR_TEST);
+
+                    let x = (clip_rect.min.x * scale_factor).round() as i32;
+                    let y = physical_view_size.1 as i32
+                        - (clip_rect.max.y * scale_factor).round() as i32;
+                    let width = (clip_rect.width() * scale_factor).round() as i32;
+                    let height = (clip_rect.height() * scale_factor).round() as i32;
+                    gl_api.scissor(x, y, width, height);
+                }
+
                 gl_api.active_texture(gl::api::TEXTURE0);
                 gl_api.bind_texture(
                     gl::api::TEXTURE_2D,
@@ -342,6 +352,10 @@ impl GlRenderer {
                     gl::api::UNSIGNED_INT,
                     (index_range.start * size_of::<u32>() as u32) as *const c_void,
                 );
+
+                if let Some(_) = clip_rect {
+                    gl_api.disable(gl::api::SCISSOR_TEST);
+                }
             }
         }
 

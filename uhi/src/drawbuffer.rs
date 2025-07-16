@@ -2,6 +2,9 @@ use std::{mem, ops::Range};
 
 use crate::{Externs, Rect, TextureKind, Vec2};
 
+// TODO: consider offloading vertex generation and stuff for the gpu (or maybe for software
+// renderer?) to the renderer. accumulate shapes, not verticies.
+
 // NOTE: repr(C) is here to ensure that ordering is correct in into_array transmutation.
 #[repr(C)]
 // NOTE: Copy is derived simply because it's cheap. size of u32.

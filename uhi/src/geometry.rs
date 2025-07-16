@@ -199,6 +199,7 @@ impl U32Vec2 {
 
 // ----
 
+// TODO: Rect should be Copy.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Rect {
     pub min: Vec2,

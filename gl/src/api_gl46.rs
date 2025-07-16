@@ -169,6 +169,11 @@ impl Apier for Api {
     }
 
     #[inline]
+    unsafe fn disable(&self, cap: GLenum) {
+        unsafe { self.api.Disable(cap) };
+    }
+
+    #[inline]
     unsafe fn draw_elements(
         &self,
         mode: GLenum,
@@ -275,6 +280,11 @@ impl Apier for Api {
     #[inline]
     unsafe fn pixel_storei(&self, pname: GLenum, param: GLint) {
         unsafe { self.api.PixelStorei(pname, param) };
+    }
+
+    #[inline]
+    unsafe fn scissor(&self, x: GLint, y: GLint, width: GLsizei, height: GLsizei) {
+        unsafe { self.api.Scissor(x, y, width, height) };
     }
 
     #[inline]
