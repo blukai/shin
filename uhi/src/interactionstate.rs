@@ -44,7 +44,9 @@ impl InteractionState {
         self.hot_key_last_frame = self.hot_key;
     }
 
-    pub fn maybe_set_hot_or_active(&mut self, key: Key, rect: Rect, input: &input::State) {
+    pub fn maybe_set_hot_or_active(&mut self, key: Key, rect: Rect, input: &input::State) -> bool {
+        let mut ret = false;
+
         let inside = rect.contains(&Vec2::from(F64Vec2::from(input.pointer.position)));
 
         // TODO: setting thing inactive on press (not on release) seem too feel more natural, but i
@@ -64,11 +66,14 @@ impl InteractionState {
             && inside
         {
             self.active_key = Some(key);
+            ret = true;
         }
 
         if inside {
             self.hot_key = Some(key);
         }
+
+        ret
     }
 
     pub fn is_hot(&self, key: Key) -> bool {
