@@ -225,6 +225,7 @@ impl FontInstance {
 // NOTE: font instance != font. a single font may parent multiple font instances.
 #[derive(Debug)]
 pub struct FontInstanceRefMut<'a> {
+    // TODO: consider clonning FontArc to get rid of extra layer of indirection?
     font: &'a FontArc,
     font_instance: &'a mut FontInstance,
     tex_pages: &'a mut Vec<TexturePage>,

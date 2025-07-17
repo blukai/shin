@@ -3,8 +3,8 @@ use std::ops::Range;
 use input::{Event, KeyboardEvent, KeyboardState, Keycode, PointerButton, PointerEvent, Scancode};
 
 use crate::{
-    Context, Externs, F64Vec2, Fill, FillTexture, FontHandle, Key, Rect, RectShape, Rgba8,
-    TextureKind, Vec2,
+    Context, DrawBuffer, Externs, F64Vec2, Fill, FillTexture, FontHandle, FontInstanceRefMut, Key,
+    Rect, RectShape, Rgba8, TextureKind, TextureService, Vec2,
 };
 
 // TODO: vertically and horizontally scrollable editors
@@ -69,6 +69,9 @@ pub struct TextSelection {
     // if equal, no selection; start may be less than or greater than end (start is where the
     // initial click was).
     cursor: Range<usize>,
+    // used only in editors.
+    // TODO: consider animating scroll.
+    scroll_x: f32,
 }
 
 impl TextSelection {
@@ -226,28 +229,35 @@ impl<'a> Text<'a> {
     pub fn singleline(self) -> TextSingleline<'a> {
         TextSingleline::new(self)
     }
+
+    pub fn multiline(self) -> TextMultiline<'a> {
+        TextMultiline::new(self)
+    }
 }
 
 // ----
+// update-related functions for singleline text
 
 fn compute_singleline_text_size<E: Externs>(text: &Text, ctx: &mut Context<E>) -> Vec2 {
     let mut font_instance_ref = ctx
         .font_service
         .get_font_instance_mut(text.font_handle, text.font_size);
-    let width =
+    let text_width =
         font_instance_ref.compute_text_width(text.buffer.as_str(), &mut ctx.texture_service);
-    let height = font_instance_ref.height();
-    Vec2::new(width, height)
+    Vec2::new(text_width, font_instance_ref.height())
 }
 
 // returns byte offset(not char index)
 fn locate_singleline_text_char<E: Externs>(
     text: &Text,
     position: Vec2,
+    scroll_x: f32,
     ctx: &mut Context<E>,
 ) -> usize {
+    let min_x = text.rect.min.x - scroll_x;
+
     // maybe we're dragging and the pointer is before beginning of the line.
-    if position.x < text.rect.min.x {
+    if position.x < min_x {
         return 0;
     }
 
@@ -256,7 +266,7 @@ fn locate_singleline_text_char<E: Externs>(
         .get_font_instance_mut(text.font_handle, text.font_size);
 
     let mut byte_offset: usize = 0;
-    let mut offset_x: f32 = text.rect.min.x;
+    let mut offset_x: f32 = min_x;
 
     for ch in text.buffer.as_str().chars() {
         let char_ref = font_instance_ref.get_char(ch, &mut ctx.texture_service);
@@ -283,94 +293,53 @@ fn locate_singleline_text_char<E: Externs>(
     text.buffer.as_str().len()
 }
 
-fn maybe_draw_singleline_text_selection<E: Externs>(
+// ----
+// draw-related functions
+
+fn draw_singleline_text_selection<E: Externs>(
     text: &Text,
     selection: &TextSelection,
+    selection_start_x: f32,
+    selection_end_x: f32,
     active: bool,
-    ctx: &mut Context<E>,
+    font_instance_ref: &mut FontInstanceRefMut,
+    draw_buffer: &mut DrawBuffer<E>,
 ) {
-    if selection.is_empty() {
-        return;
-    }
+    // NOTE: end is where the cursor is. for example in `hello, sailor` selection may have started
+    // at `,` and moved left to `e`.
+    let left = selection_start_x.min(selection_end_x);
+    let right = selection_start_x.max(selection_end_x);
 
-    let mut font_instance_ref = ctx
-        .font_service
-        .get_font_instance_mut(text.font_handle, text.font_size);
-
-    let start_x = font_instance_ref.compute_text_width(
-        &text.buffer.as_str()[..selection.cursor.start],
-        &mut ctx.texture_service,
-    );
-    let end_x = font_instance_ref.compute_text_width(
-        &text.buffer.as_str()[..selection.cursor.end],
-        &mut ctx.texture_service,
-    );
-    let left = start_x.min(end_x);
-    let right = start_x.max(end_x);
-    let min = text.rect.min + Vec2::new(left, 0.0);
+    let min = text.rect.min - Vec2::new(selection.scroll_x, 0.0) + Vec2::new(left, 0.0);
     let size = Vec2::new(right - left, font_instance_ref.height());
-
-    let selection_rect = Rect::new(min, min + size);
-    let selection_fill = if active {
+    let rect = Rect::new(min, min + size);
+    let fill = if active {
         text.palette
             .as_ref()
-            .map(|a| a.selection_active)
-            .unwrap_or(SELECTION_ACTIVE)
+            .map_or_else(|| SELECTION_ACTIVE, |a| a.selection_active)
     } else {
         text.palette
             .as_ref()
-            .map(|a| a.selection_inactive)
-            .unwrap_or(SELECTION_INACTIVE)
+            .map_or_else(|| SELECTION_INACTIVE, |a| a.selection_inactive)
     };
-    ctx.draw_buffer.push_rect(RectShape::with_fill(
-        selection_rect,
-        Fill::with_color(selection_fill),
-    ));
+    draw_buffer.push_rect(RectShape::with_fill(rect, Fill::with_color(fill)));
 }
 
-fn maybe_draw_singleline_text_cursor<E: Externs>(
+fn draw_singleline_text<E: Externs>(
     text: &Text,
-    selection: &TextSelection,
-    active: bool,
-    ctx: &mut Context<E>,
+    scroll_x: f32,
+    font_instance_ref: &mut FontInstanceRefMut,
+    texture_service: &mut TextureService<E>,
+    draw_buffer: &mut DrawBuffer<E>,
 ) {
-    if !active {
-        return;
-    }
-
-    let mut font_instance_ref = ctx
-        .font_service
-        .get_font_instance_mut(text.font_handle, text.font_size);
-
-    let end_x = font_instance_ref.compute_text_width(
-        &text.buffer.as_str()[..selection.cursor.end],
-        &mut ctx.texture_service,
-    );
-    let min = text.rect.min + Vec2::new(end_x, 0.0);
-    let width = font_instance_ref.typical_advance_width();
-    let size = Vec2::new(width, font_instance_ref.height());
-
-    let cursor_rect = Rect::new(min, min + size);
-    let cursor_fill = text.palette.as_ref().map(|a| a.cursor).unwrap_or(CURSOR);
-    ctx.draw_buffer.push_rect(RectShape::with_fill(
-        cursor_rect,
-        Fill::with_color(cursor_fill),
-    ));
-}
-
-fn draw_singleline_text<E: Externs>(text: &Text, ctx: &mut Context<E>) {
-    let mut font_instance_ref = ctx
-        .font_service
-        .get_font_instance_mut(text.font_handle, text.font_size);
     let ascent = font_instance_ref.ascent();
-
     let fg = text.palette.as_ref().map(|a| a.fg).unwrap_or(FG);
 
-    let mut offset_x: f32 = text.rect.min.x;
+    let mut offset_x: f32 = text.rect.min.x - scroll_x;
     for ch in text.buffer.as_str().chars() {
-        let char_ref = font_instance_ref.get_char(ch, &mut ctx.texture_service);
+        let char_ref = font_instance_ref.get_char(ch, texture_service);
 
-        ctx.draw_buffer.push_rect(RectShape::with_fill(
+        draw_buffer.push_rect(RectShape::with_fill(
             char_ref
                 .bounding_rect()
                 .translate_by(&Vec2::new(offset_x, text.rect.min.y + ascent)),
@@ -387,6 +356,9 @@ fn draw_singleline_text<E: Externs>(text: &Text, ctx: &mut Context<E>) {
     }
 }
 
+// ----
+// singleline text
+
 pub struct TextSingleline<'a> {
     text: Text<'a>,
 }
@@ -399,7 +371,16 @@ impl<'a> TextSingleline<'a> {
     pub fn draw<E: Externs>(self, ctx: &mut Context<E>) {
         ctx.draw_buffer.set_clip_rect(Some(self.text.rect.clone()));
 
-        draw_singleline_text(&self.text, ctx);
+        let mut font_instance_ref = ctx
+            .font_service
+            .get_font_instance_mut(self.text.font_handle, self.text.font_size);
+        draw_singleline_text(
+            &self.text,
+            0.0,
+            &mut font_instance_ref,
+            &mut ctx.texture_service,
+            &mut ctx.draw_buffer,
+        );
 
         ctx.draw_buffer.set_clip_rect(None);
     }
@@ -487,14 +468,24 @@ impl<'a> TextSinglelineSelectable<'a> {
                     button: PointerButton::Primary,
                 }) => {
                     let position = Vec2::from(F64Vec2::from(input.pointer.position));
-                    let byte_offset = locate_singleline_text_char(&self.text, position, ctx);
+                    let byte_offset = locate_singleline_text_char(
+                        &self.text,
+                        position,
+                        self.selection.scroll_x,
+                        ctx,
+                    );
                     self.selection.cursor = byte_offset..byte_offset;
                 }
                 Event::Pointer(PointerEvent::Motion { .. })
                     if input.pointer.buttons.pressed(PointerButton::Primary) =>
                 {
                     let position = Vec2::from(F64Vec2::from(input.pointer.position));
-                    let byte_offset = locate_singleline_text_char(&self.text, position, ctx);
+                    let byte_offset = locate_singleline_text_char(
+                        &self.text,
+                        position,
+                        self.selection.scroll_x,
+                        ctx,
+                    );
                     self.selection.cursor.end = byte_offset;
                 }
                 _ => {}
@@ -519,14 +510,42 @@ impl<'a> TextSinglelineSelectable<'a> {
     pub fn draw<E: Externs>(self, ctx: &mut Context<E>) {
         ctx.draw_buffer.set_clip_rect(Some(self.text.rect.clone()));
 
-        maybe_draw_singleline_text_selection(&self.text, self.selection, self.active, ctx);
-        draw_singleline_text(&self.text, ctx);
+        let mut font_instance_ref = ctx
+            .font_service
+            .get_font_instance_mut(self.text.font_handle, self.text.font_size);
+
+        if !self.selection.is_empty() {
+            let selection_start_x = font_instance_ref.compute_text_width(
+                &self.text.buffer.as_str()[..self.selection.cursor.start],
+                &mut ctx.texture_service,
+            );
+            let selection_end_x = font_instance_ref.compute_text_width(
+                &self.text.buffer.as_str()[..self.selection.cursor.end],
+                &mut ctx.texture_service,
+            );
+            draw_singleline_text_selection(
+                &self.text,
+                self.selection,
+                selection_start_x,
+                selection_end_x,
+                self.active,
+                &mut font_instance_ref,
+                &mut ctx.draw_buffer,
+            );
+        }
+
+        draw_singleline_text(
+            &self.text,
+            0.0,
+            &mut font_instance_ref,
+            &mut ctx.texture_service,
+            &mut ctx.draw_buffer,
+        );
 
         ctx.draw_buffer.set_clip_rect(None);
     }
 }
 
-// TODO: x axis scroll
 pub struct TextSinglelineEditable<'a> {
     text: Text<'a>,
     selection: &'a mut TextSelection,
@@ -627,14 +646,24 @@ impl<'a> TextSinglelineEditable<'a> {
                     button: PointerButton::Primary,
                 }) => {
                     let position = Vec2::from(F64Vec2::from(input.pointer.position));
-                    let byte_offset = locate_singleline_text_char(&self.text, position, ctx);
+                    let byte_offset = locate_singleline_text_char(
+                        &self.text,
+                        position,
+                        self.selection.scroll_x,
+                        ctx,
+                    );
                     self.selection.cursor = byte_offset..byte_offset;
                 }
                 Event::Pointer(PointerEvent::Motion { .. })
                     if input.pointer.buttons.pressed(PointerButton::Primary) =>
                 {
                     let position = Vec2::from(F64Vec2::from(input.pointer.position));
-                    let byte_offset = locate_singleline_text_char(&self.text, position, ctx);
+                    let byte_offset = locate_singleline_text_char(
+                        &self.text,
+                        position,
+                        self.selection.scroll_x,
+                        ctx,
+                    );
                     self.selection.cursor.end = byte_offset;
                 }
                 _ => {}
@@ -659,15 +688,149 @@ impl<'a> TextSinglelineEditable<'a> {
     pub fn draw<E: Externs>(self, ctx: &mut Context<E>) {
         ctx.draw_buffer.set_clip_rect(Some(self.text.rect.clone()));
 
-        maybe_draw_singleline_text_selection(&self.text, self.selection, self.active, ctx);
-        maybe_draw_singleline_text_cursor(&self.text, self.selection, self.active, ctx);
-        draw_singleline_text(&self.text, ctx);
+        let mut font_instance_ref = ctx
+            .font_service
+            .get_font_instance_mut(self.text.font_handle, self.text.font_size);
+
+        let rect_width = self.text.rect.width();
+        let text_width = font_instance_ref
+            .compute_text_width(&self.text.buffer.as_str(), &mut ctx.texture_service);
+        let cursor_width = font_instance_ref.typical_advance_width();
+
+        let selection_start_x = font_instance_ref.compute_text_width(
+            &self.text.buffer.as_str()[..self.selection.cursor.start],
+            &mut ctx.texture_service,
+        );
+        let selection_end_x = font_instance_ref.compute_text_width(
+            &self.text.buffer.as_str()[..self.selection.cursor.end],
+            &mut ctx.texture_service,
+        );
+
+        let mut scroll_x = self.selection.scroll_x;
+        // right edge. scroll to show cursor + overscroll for cursor width.
+        if selection_end_x + cursor_width - scroll_x > rect_width {
+            scroll_x = selection_end_x + cursor_width - rect_width;
+        }
+        // left edge. scroll to show cursor.
+        if selection_end_x < scroll_x {
+            scroll_x = selection_end_x;
+        }
+        // undo overscroll when cursor moves back. if we can show all text without overscrolling,
+        // do that.
+        if selection_end_x + cursor_width <= text_width && text_width > rect_width {
+            scroll_x = scroll_x.min(text_width - rect_width);
+        }
+        self.selection.scroll_x = scroll_x;
+
+        if !self.selection.is_empty() {
+            draw_singleline_text_selection(
+                &self.text,
+                self.selection,
+                selection_start_x,
+                selection_end_x,
+                self.active,
+                &mut font_instance_ref,
+                &mut ctx.draw_buffer,
+            );
+        }
+
+        if self.active {
+            let min = self.text.rect.min - Vec2::new(self.selection.scroll_x, 0.0)
+                + Vec2::new(selection_end_x, 0.0);
+            let size = Vec2::new(cursor_width, font_instance_ref.height());
+            let rect = Rect::new(min, min + size);
+            let fill = self
+                .text
+                .palette
+                .as_ref()
+                .map_or_else(|| CURSOR, |a| a.cursor);
+            ctx.draw_buffer
+                .push_rect(RectShape::with_fill(rect, Fill::with_color(fill)));
+        }
+
+        draw_singleline_text(
+            &self.text,
+            scroll_x,
+            &mut font_instance_ref,
+            &mut ctx.texture_service,
+            &mut ctx.draw_buffer,
+        );
 
         ctx.draw_buffer.set_clip_rect(None);
     }
 }
 
 // ----
+// reusable update-related functions for multline text
+
+// TODO: y scroll or something. i want to be able to "scroll to bottom".
+fn draw_multiline_text<E: Externs>(text: &Text, ctx: &mut Context<E>) {
+    let mut font_instance_ref = ctx
+        .font_service
+        .get_font_instance_mut(text.font_handle, text.font_size);
+    let ascent = font_instance_ref.ascent();
+
+    let fg = text.palette.as_ref().map(|a| a.fg).unwrap_or(FG);
+
+    let mut offset_x: f32 = text.rect.min.x;
+    let mut offset_y: f32 = text.rect.min.y;
+    for ch in text.buffer.as_str().chars() {
+        if ch == '\r' {
+            continue;
+        }
+        if ch == '\n' {
+            offset_x = text.rect.min.x;
+            offset_y += font_instance_ref.height();
+            continue;
+        }
+
+        let char_ref = font_instance_ref.get_char(ch, &mut ctx.texture_service);
+
+        ctx.draw_buffer.push_rect(RectShape::with_fill(
+            char_ref
+                .bounding_rect()
+                .translate_by(&Vec2::new(offset_x, offset_y + ascent)),
+            Fill::new(
+                fg,
+                FillTexture {
+                    kind: TextureKind::Internal(char_ref.tex_handle()),
+                    coords: char_ref.tex_coords(),
+                },
+            ),
+        ));
+
+        offset_x += char_ref.advance_width();
+    }
+}
+
+// ----
+// multiline text
+
+pub struct TextMultiline<'a> {
+    text: Text<'a>,
+}
+
+impl<'a> TextMultiline<'a> {
+    fn new(text: Text<'a>) -> Self {
+        Self { text }
+    }
+
+    pub fn draw<E: Externs>(self, ctx: &mut Context<E>) {
+        ctx.draw_buffer.set_clip_rect(Some(self.text.rect.clone()));
+
+        draw_multiline_text(&self.text, ctx);
+
+        ctx.draw_buffer.set_clip_rect(None);
+    }
+
+    // pub fn selectable(self, selection: &'a mut TextSelection) -> TextSinglelineSelectable<'a> {
+    //     todo!()
+    // }
+    //
+    // pub fn editable(self, selection: &'a mut TextSelection) -> TextSinglelineEditable<'a> {
+    //     todo!()
+    // }
+}
 
 // fn compute_multiline_text_height<E: Externs>(
 //     text: &str,
