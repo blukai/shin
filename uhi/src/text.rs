@@ -199,26 +199,31 @@ impl<'a> From<&'a mut String> for TextBuffer<'a> {
 
 pub struct Text<'a> {
     buffer: TextBuffer<'a>,
-    font_handle: FontHandle,
-    font_size: f32,
     rect: Rect,
+    font_handle: Option<FontHandle>,
+    font_size: Option<f32>,
     palette: Option<TextPalette>,
 }
 
 impl<'a> Text<'a> {
-    pub fn new<B: Into<TextBuffer<'a>>>(
-        text: B,
-        font_handle: FontHandle,
-        font_size: f32,
-        rect: Rect,
-    ) -> Self {
+    pub fn new<B: Into<TextBuffer<'a>>>(text: B, rect: Rect) -> Self {
         Self {
             buffer: text.into(),
-            font_handle,
-            font_size,
             rect,
+            font_handle: None,
+            font_size: None,
             palette: None,
         }
+    }
+
+    pub fn with_font_handle(mut self, value: FontHandle) -> Self {
+        self.font_handle = Some(value);
+        self
+    }
+
+    pub fn with_font_size(mut self, value: f32) -> Self {
+        self.font_size = Some(value);
+        self
     }
 
     pub fn with_palette(mut self, value: TextPalette) -> Self {
@@ -239,9 +244,10 @@ impl<'a> Text<'a> {
 // update singleline stuff
 
 fn compute_singleline_text_size<E: Externs>(text: &Text, ctx: &mut Context<E>) -> Vec2 {
-    let mut font_instance = ctx
-        .font_service
-        .get_font_instance(text.font_handle, text.font_size);
+    let mut font_instance = ctx.font_service.get_font_instance(
+        text.font_handle.unwrap_or(ctx.default_font_handle),
+        text.font_size.unwrap_or(ctx.default_font_size),
+    );
     let text_width =
         font_instance.compute_text_width(text.buffer.as_str(), &mut ctx.texture_service);
     Vec2::new(text_width, font_instance.height())
@@ -365,9 +371,10 @@ impl<'a> TextSingleline<'a> {
     pub fn draw<E: Externs>(self, ctx: &mut Context<E>) {
         ctx.draw_buffer.set_clip_rect(Some(self.text.rect.clone()));
 
-        let font_instance = ctx
-            .font_service
-            .get_font_instance(self.text.font_handle, self.text.font_size);
+        let font_instance = ctx.font_service.get_font_instance(
+            self.text.font_handle.unwrap_or(ctx.default_font_handle),
+            self.text.font_size.unwrap_or(ctx.default_font_size),
+        );
         draw_singleline_text(
             &self.text,
             0.0,
@@ -466,9 +473,10 @@ impl<'a> TextSinglelineSelectable<'a> {
                 | Event::Pointer(pe @ PointerEvent::Motion { .. })
                     if input.pointer.buttons.pressed(PointerButton::Primary) =>
                 {
-                    let font_instance = ctx
-                        .font_service
-                        .get_font_instance(self.text.font_handle, self.text.font_size);
+                    let font_instance = ctx.font_service.get_font_instance(
+                        self.text.font_handle.unwrap_or(ctx.default_font_handle),
+                        self.text.font_size.unwrap_or(ctx.default_font_size),
+                    );
                     let byte_offset = locate_singleline_text_coord(
                         self.text.buffer.as_str(),
                         self.text.rect.min.x - self.selection.scroll_x,
@@ -504,9 +512,10 @@ impl<'a> TextSinglelineSelectable<'a> {
     pub fn draw<E: Externs>(self, ctx: &mut Context<E>) {
         ctx.draw_buffer.set_clip_rect(Some(self.text.rect.clone()));
 
-        let mut font_instance = ctx
-            .font_service
-            .get_font_instance(self.text.font_handle, self.text.font_size);
+        let mut font_instance = ctx.font_service.get_font_instance(
+            self.text.font_handle.unwrap_or(ctx.default_font_handle),
+            self.text.font_size.unwrap_or(ctx.default_font_size),
+        );
 
         if !self.selection.is_empty() {
             let s = self.text.buffer.as_str();
@@ -641,9 +650,10 @@ impl<'a> TextSinglelineEditable<'a> {
                 | Event::Pointer(ev @ PointerEvent::Motion { .. })
                     if input.pointer.buttons.pressed(PointerButton::Primary) =>
                 {
-                    let font_instance = ctx
-                        .font_service
-                        .get_font_instance(self.text.font_handle, self.text.font_size);
+                    let font_instance = ctx.font_service.get_font_instance(
+                        self.text.font_handle.unwrap_or(ctx.default_font_handle),
+                        self.text.font_size.unwrap_or(ctx.default_font_size),
+                    );
                     let byte_offset = locate_singleline_text_coord(
                         self.text.buffer.as_str(),
                         self.text.rect.min.x - self.selection.scroll_x,
@@ -680,9 +690,10 @@ impl<'a> TextSinglelineEditable<'a> {
         ctx.draw_buffer.set_clip_rect(Some(self.text.rect.clone()));
 
         let s = self.text.buffer.as_str();
-        let mut font_instance = ctx
-            .font_service
-            .get_font_instance(self.text.font_handle, self.text.font_size);
+        let mut font_instance = ctx.font_service.get_font_instance(
+            self.text.font_handle.unwrap_or(ctx.default_font_handle),
+            self.text.font_size.unwrap_or(ctx.default_font_size),
+        );
 
         let rect_width = self.text.rect.width();
         let text_width = font_instance.compute_text_width(s, &mut ctx.texture_service);
@@ -755,9 +766,10 @@ fn compute_multiline_text_height<E: Externs>(
     // container_width: Option<f32>,
     ctx: &mut Context<E>,
 ) -> f32 {
-    let font_instance = ctx
-        .font_service
-        .get_font_instance(text.font_handle, text.font_size);
+    let font_instance = ctx.font_service.get_font_instance(
+        text.font_handle.unwrap_or(ctx.default_font_handle),
+        text.font_size.unwrap_or(ctx.default_font_size),
+    );
 
     let mut line_count: usize = 1;
     // let mut offset_x: f32 = 0.0;
@@ -793,9 +805,10 @@ fn locate_multiline_text_coord<E: Externs>(
     ctx: &mut Context<E>,
 ) -> usize {
     let s = text.buffer.as_str();
-    let font_instance = ctx
-        .font_service
-        .get_font_instance(text.font_handle, text.font_size);
+    let font_instance = ctx.font_service.get_font_instance(
+        text.font_handle.unwrap_or(ctx.default_font_handle),
+        text.font_size.unwrap_or(ctx.default_font_size),
+    );
 
     let mut line_start_idx: usize = 0;
     let mut offset_y: f32 = text.rect.min.y;
@@ -843,10 +856,6 @@ fn locate_multiline_text_coord<E: Externs>(
 
 // ----
 // draw multline stuff
-
-fn draw_multiline_text_selection() {
-    unimplemented!();
-}
 
 // TODO: y scroll or something. i want to be able to "scroll to bottom".
 fn draw_multiline_text<E: Externs>(
@@ -904,9 +913,10 @@ impl<'a> TextMultiline<'a> {
     pub fn draw<E: Externs>(self, ctx: &mut Context<E>) {
         ctx.draw_buffer.set_clip_rect(Some(self.text.rect.clone()));
 
-        let font_instance = ctx
-            .font_service
-            .get_font_instance(self.text.font_handle, self.text.font_size);
+        let font_instance = ctx.font_service.get_font_instance(
+            self.text.font_handle.unwrap_or(ctx.default_font_handle),
+            self.text.font_size.unwrap_or(ctx.default_font_size),
+        );
         draw_multiline_text(
             &self.text,
             font_instance,
@@ -1042,9 +1052,10 @@ impl<'a> TextMultilineSelectable<'a> {
     pub fn draw<E: Externs>(self, ctx: &mut Context<E>) {
         ctx.draw_buffer.set_clip_rect(Some(self.text.rect.clone()));
 
-        let mut font_instance = ctx
-            .font_service
-            .get_font_instance(self.text.font_handle, self.text.font_size);
+        let mut font_instance = ctx.font_service.get_font_instance(
+            self.text.font_handle.unwrap_or(ctx.default_font_handle),
+            self.text.font_size.unwrap_or(ctx.default_font_size),
+        );
 
         // TODO: extract draw_multiline_text_selection
         if !self.selection.is_empty() {

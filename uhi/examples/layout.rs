@@ -2,15 +2,13 @@ use app::AppHandler;
 use gl::api::Apier as _;
 use window::{Event, WindowAttrs, WindowEvent};
 
-const FONT: &[u8] = include_bytes!("../../fixtures/JetBrainsMono-Regular.ttf");
-
 struct UhiExterns;
 
 impl uhi::Externs for UhiExterns {
     type TextureHandle = <uhi::GlRenderer as uhi::Renderer>::TextureHandle;
 }
 
-fn draw<E: uhi::Externs>(ctx: &mut uhi::Context<E>, font_handle: uhi::FontHandle, area: uhi::Rect) {
+fn draw<E: uhi::Externs>(ctx: &mut uhi::Context<E>, area: uhi::Rect) {
     use uhi::*;
 
     // Tableau I, by Piet Mondriaan
@@ -187,8 +185,6 @@ fn draw<E: uhi::Externs>(ctx: &mut uhi::Context<E>, font_handle: uhi::FontHandle
 
     uhi::Text::new(
         "Tableau I, by Piet Mondriaan",
-        font_handle,
-        14.0,
         area.shrink(&Vec2::splat(24.0)),
     )
     .with_palette(uhi::TextPalette::default().with_fg(uhi::Rgba8::FUCHSIA))
@@ -200,25 +196,15 @@ struct App {
     uhi_context: uhi::Context<UhiExterns>,
     uhi_renderer: uhi::GlRenderer,
 
-    font_handle: uhi::FontHandle,
     input_state: input::State,
 }
 
 impl AppHandler for App {
     fn create(ctx: app::AppContext) -> Self {
-        let mut uhi_context = uhi::Context::default();
-        let uhi_renderer = uhi::GlRenderer::new(ctx.gl_api).expect("uhi gl renderer fucky wucky");
-
-        let font_handle = uhi_context
-            .font_service
-            .register_font_slice(FONT)
-            .expect("invalid font");
-
         Self {
-            uhi_context,
-            uhi_renderer,
+            uhi_context: uhi::Context::default(),
+            uhi_renderer: uhi::GlRenderer::new(ctx.gl_api).expect("uhi gl renderer fucky wucky"),
 
-            font_handle,
             input_state: input::State::default(),
         }
     }
@@ -255,7 +241,7 @@ impl AppHandler for App {
             uhi::Vec2::from(uhi::U32Vec2::from(physical_window_size)) / scale_factor as f32,
         );
 
-        draw(&mut self.uhi_context, self.font_handle, logical_window_rect);
+        draw(&mut self.uhi_context, logical_window_rect);
 
         self.uhi_renderer
             .render(

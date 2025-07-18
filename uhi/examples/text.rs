@@ -2,8 +2,6 @@ use app::AppHandler;
 use gl::api::Apier as _;
 use window::{Event, WindowAttrs, WindowEvent};
 
-const FONT: &[u8] = include_bytes!("../../fixtures/JetBrainsMono-Regular.ttf");
-
 struct UhiExterns;
 
 impl uhi::Externs for UhiExterns {
@@ -14,7 +12,6 @@ struct App {
     uhi_context: uhi::Context<UhiExterns>,
     uhi_renderer: uhi::GlRenderer,
 
-    font_handle: uhi::FontHandle,
     input_state: input::State,
 
     text_singleline_selection: uhi::TextSelection,
@@ -27,19 +24,10 @@ struct App {
 
 impl AppHandler for App {
     fn create(ctx: app::AppContext) -> Self {
-        let mut uhi_context = uhi::Context::default();
-        let uhi_renderer = uhi::GlRenderer::new(ctx.gl_api).expect("uhi gl renderer fucky wucky");
-
-        let font_handle = uhi_context
-            .font_service
-            .register_font_slice(FONT)
-            .expect("invalid font");
-
         Self {
-            uhi_context,
-            uhi_renderer,
+            uhi_context: uhi::Context::default(),
+            uhi_renderer: uhi::GlRenderer::new(ctx.gl_api).expect("uhi gl renderer fucky wucky"),
 
-            font_handle,
             input_state: input::State::default(),
 
             text_singleline_selection: uhi::TextSelection::default(),
@@ -91,8 +79,6 @@ impl AppHandler for App {
 
         uhi::Text::new(
             pointer_position_text.as_str(),
-            self.font_handle,
-            14.0,
             logical_window_rect
                 .clone()
                 .shrink(&uhi::Vec2::new(16.0, 16.0 * 1.0)),
@@ -102,8 +88,6 @@ impl AppHandler for App {
 
         uhi::Text::new(
             "こんにちは",
-            self.font_handle,
-            14.0,
             logical_window_rect
                 .clone()
                 .shrink(&uhi::Vec2::new(16.0, 16.0 * 3.0)),
@@ -120,8 +104,6 @@ impl AppHandler for App {
 
         uhi::Text::new(
             &mut self.text_singleline_editable,
-            self.font_handle,
-            14.0,
             logical_window_rect
                 .clone()
                 .shrink(&uhi::Vec2::new(16.0, 16.0 * 5.0)),
@@ -138,8 +120,6 @@ impl AppHandler for App {
 
         uhi::Text::new(
             "With no bamboo hat\nDoes the drizzle fall on me?\nWhat care I of that?",
-            self.font_handle,
-            14.0,
             logical_window_rect
                 .clone()
                 .shrink(&uhi::Vec2::new(16.0, 16.0 * 7.0)),
