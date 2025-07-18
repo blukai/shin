@@ -17,11 +17,12 @@ struct App {
     font_handle: uhi::FontHandle,
     input_state: input::State,
 
-    text_cjk: String,
-    text_cjk_selection: uhi::TextSelection,
+    text_singleline_selection: uhi::TextSelection,
 
-    text_editable: String,
-    text_editable_selection: uhi::TextSelection,
+    text_singleline_editable: String,
+    text_singleline_editable_selection: uhi::TextSelection,
+
+    text_multiline_selection: uhi::TextSelection,
 }
 
 impl AppHandler for App {
@@ -41,11 +42,12 @@ impl AppHandler for App {
             font_handle,
             input_state: input::State::default(),
 
-            text_cjk: "こんにちは".to_string(),
-            text_cjk_selection: uhi::TextSelection::default(),
+            text_singleline_selection: uhi::TextSelection::default(),
 
-            text_editable: "editable".to_string(),
-            text_editable_selection: uhi::TextSelection::default(),
+            text_singleline_editable: "editable".to_string(),
+            text_singleline_editable_selection: uhi::TextSelection::default(),
+
+            text_multiline_selection: uhi::TextSelection::default(),
         }
     }
 
@@ -99,7 +101,7 @@ impl AppHandler for App {
         .draw(&mut self.uhi_context);
 
         uhi::Text::new(
-            self.text_cjk.as_str(),
+            "こんにちは",
             self.font_handle,
             14.0,
             logical_window_rect
@@ -107,7 +109,7 @@ impl AppHandler for App {
                 .shrink(&uhi::Vec2::new(16.0, 16.0 * 3.0)),
         )
         .singleline()
-        .selectable(&mut self.text_cjk_selection)
+        .selectable(&mut self.text_singleline_selection)
         .maybe_set_hot_or_active(
             uhi::Key::from_location(),
             &mut self.uhi_context,
@@ -117,7 +119,7 @@ impl AppHandler for App {
         .draw(&mut self.uhi_context);
 
         uhi::Text::new(
-            &mut self.text_editable,
+            &mut self.text_singleline_editable,
             self.font_handle,
             14.0,
             logical_window_rect
@@ -125,7 +127,25 @@ impl AppHandler for App {
                 .shrink(&uhi::Vec2::new(16.0, 16.0 * 5.0)),
         )
         .singleline()
-        .editable(&mut self.text_editable_selection)
+        .editable(&mut self.text_singleline_editable_selection)
+        .maybe_set_hot_or_active(
+            uhi::Key::from_location(),
+            &mut self.uhi_context,
+            &self.input_state,
+        )
+        .update_if(|t| t.is_active(), &mut self.uhi_context, &self.input_state)
+        .draw(&mut self.uhi_context);
+
+        uhi::Text::new(
+            "With no bamboo hat\nDoes the drizzle fall on me?\nWhat care I of that?",
+            self.font_handle,
+            14.0,
+            logical_window_rect
+                .clone()
+                .shrink(&uhi::Vec2::new(16.0, 16.0 * 7.0)),
+        )
+        .multiline()
+        .selectable(&mut self.text_multiline_selection)
         .maybe_set_hot_or_active(
             uhi::Key::from_location(),
             &mut self.uhi_context,
