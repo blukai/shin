@@ -18,9 +18,8 @@ struct TexturePage {
     tex_handle: TextureHandle,
 }
 
-// TODO: should this be called something-something glyph? not char? is the a proper term for this?
 #[derive(Debug)]
-struct RasterizedChar {
+struct Glyph {
     tex_page_idx: usize,
     tex_packer_entry_idx: usize,
 
@@ -30,14 +29,14 @@ struct RasterizedChar {
     advance_width: f32,
 }
 
-fn rasterize_char<E: Externs>(
+fn rasterize_glyph<E: Externs>(
     ch: char,
     font: &FontArc,
     px_scale: PxScale,
     scale_factor: f32,
     texture_pages: &mut Vec<TexturePage>,
     texture_service: &mut TextureService<E>,
-) -> RasterizedChar {
+) -> Glyph {
     let glyph_id = font.glyph_id(ch);
     let glyph = glyph_id.with_scale(px_scale);
     let outlined_glyph = font.outline_glyph(glyph);
@@ -128,7 +127,7 @@ fn rasterize_char<E: Externs>(
     );
     let advance_width = font.as_scaled(px_scale).h_advance(glyph_id) / scale_factor;
 
-    RasterizedChar {
+    Glyph {
         tex_page_idx,
         tex_packer_entry_idx,
 
@@ -139,23 +138,21 @@ fn rasterize_char<E: Externs>(
     }
 }
 
-// TODO: consider renaming CharRef into RasterizedCharRef or RasterizedChar into Char or
-// RasterizedChar into Glyph and CharRef into GlyphRef?
 #[derive(Debug)]
-pub struct CharRef<'a> {
-    rasterized_char: &'a RasterizedChar,
+pub struct GlyphRef<'a> {
+    glyph: &'a Glyph,
     tex_page: &'a TexturePage,
 }
 
-impl<'a> CharRef<'a> {
+impl<'a> GlyphRef<'a> {
     #[inline]
     pub fn bounding_rect(&self) -> Rect {
-        self.rasterized_char.bounds.clone()
+        self.glyph.bounds.clone()
     }
 
     #[inline]
     pub fn advance_width(&self) -> f32 {
-        self.rasterized_char.advance_width
+        self.glyph.advance_width
     }
 
     #[inline]
@@ -165,7 +162,7 @@ impl<'a> CharRef<'a> {
 
     #[inline]
     pub fn tex_coords(&self) -> Rect {
-        self.rasterized_char.tex_coords.clone()
+        self.glyph.tex_coords.clone()
     }
 }
 
@@ -182,7 +179,7 @@ fn make_font_instance_key(font_handle: FontHandle, pt_size: f32) -> u64 {
 
 #[derive(Debug)]
 struct FontInstance {
-    rasterized_chars: NoHashMap<u32, RasterizedChar>,
+    glyphs: NoHashMap<u32, Glyph>,
 
     px_scale: PxScale,
     scale_factor: f32,
@@ -210,7 +207,7 @@ impl FontInstance {
         let typical_advance_width = scaled.h_advance(font.glyph_id('0')) / scale_factor;
 
         Self {
-            rasterized_chars: NoHashMap::default(),
+            glyphs: NoHashMap::default(),
 
             px_scale,
             scale_factor,
@@ -225,7 +222,6 @@ impl FontInstance {
 // NOTE: font instance != font. a single font may parent multiple font instances.
 #[derive(Debug)]
 pub struct FontInstanceRefMut<'a> {
-    // TODO: consider clonning FontArc to get rid of extra layer of indirection?
     font: &'a FontArc,
     font_instance: &'a mut FontInstance,
     tex_pages: &'a mut Vec<TexturePage>,
@@ -247,20 +243,20 @@ impl<'a> FontInstanceRefMut<'a> {
         self.font_instance.typical_advance_width
     }
 
-    /// gets a char, rasterizing and caching it if not already cached.
-    /// chars are cached per font instance (font + size combination) for subsequent lookups.
-    pub fn get_char<E: Externs>(
+    /// gets a glyph for a given character, rasterizing and caching it if not already cached.
+    /// glyphs are cached per font instance (font + size combination) for subsequent lookups.
+    pub fn get_or_rasterize_glyph<E: Externs>(
         &mut self,
         ch: char,
         texture_service: &mut TextureService<E>,
-    ) -> CharRef {
-        let rasterized_char = self
+    ) -> GlyphRef {
+        let glyph = self
             .font_instance
-            .rasterized_chars
+            .glyphs
             .entry(ch as u32)
-            // char does not exist
+            // glyph does not exist
             .or_insert_with(|| {
-                rasterize_char(
+                rasterize_glyph(
                     ch,
                     self.font,
                     self.font_instance.px_scale,
@@ -269,12 +265,8 @@ impl<'a> FontInstanceRefMut<'a> {
                     texture_service,
                 )
             });
-        let tex_page = &self.tex_pages[rasterized_char.tex_page_idx];
-
-        CharRef {
-            rasterized_char,
-            tex_page,
-        }
+        let tex_page = &self.tex_pages[glyph.tex_page_idx];
+        GlyphRef { glyph, tex_page }
     }
 
     pub fn compute_text_width<E: Externs>(
@@ -284,8 +276,8 @@ impl<'a> FontInstanceRefMut<'a> {
     ) -> f32 {
         let mut width: f32 = 0.0;
         for ch in text.chars() {
-            let char_ref = self.get_char(ch, texture_service);
-            width += char_ref.rasterized_char.advance_width;
+            let glyph = self.get_or_rasterize_glyph(ch, texture_service);
+            width += glyph.glyph.advance_width;
         }
         width
     }
@@ -328,7 +320,7 @@ impl FontService {
         Ok(FontHandle { idx: idx as u32 })
     }
 
-    pub fn get_font_instance_mut(
+    pub fn get_font_instance(
         &mut self,
         font_handle: FontHandle,
         pt_size: f32,
