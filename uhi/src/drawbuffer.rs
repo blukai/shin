@@ -243,7 +243,7 @@ impl<E: Externs> DrawBuffer<E> {
         let start_index = (self.indices.len() - self.pending_indices) as u32;
         let end_index = self.indices.len() as u32;
         self.draw_commands.push(DrawCommand {
-            clip_rect: self.clip_rect.clone(),
+            clip_rect: self.clip_rect,
             index_range: start_index..end_index,
             texture,
         });
@@ -270,19 +270,19 @@ impl<E: Externs> DrawBuffer<E> {
         self.push_vertex(Vertex {
             position: a - perp,
             tex_coord: Vec2::new(0.0, 0.0),
-            color: color.clone(),
+            color,
         });
         // top right
         self.push_vertex(Vertex {
             position: b - perp,
             tex_coord: Vec2::new(1.0, 0.0),
-            color: color.clone(),
+            color,
         });
         // bottom right
         self.push_vertex(Vertex {
             position: b + perp,
             tex_coord: Vec2::new(1.0, 1.0),
-            color: color.clone(),
+            color,
         });
         // bottom left
         self.push_vertex(Vertex {
@@ -319,7 +319,7 @@ impl<E: Externs> DrawBuffer<E> {
                 .as_ref()
                 .map(|tc| tc.top_left())
                 .unwrap_or(Vec2::new(0.0, 0.0)),
-            color: color.clone(),
+            color,
         });
         // top right
         self.push_vertex(Vertex {
@@ -328,7 +328,7 @@ impl<E: Externs> DrawBuffer<E> {
                 .as_ref()
                 .map(|tc| tc.top_right())
                 .unwrap_or(Vec2::new(1.0, 0.0)),
-            color: color.clone(),
+            color,
         });
         // bottom right
         self.push_vertex(Vertex {
@@ -337,7 +337,7 @@ impl<E: Externs> DrawBuffer<E> {
                 .as_ref()
                 .map(|tc| tc.bottom_right())
                 .unwrap_or(Vec2::new(1.0, 1.0)),
-            color: color.clone(),
+            color,
         });
         // bottom left
         self.push_vertex(Vertex {
@@ -398,7 +398,7 @@ impl<E: Externs> DrawBuffer<E> {
 
     pub fn push_rect(&mut self, rect: RectShape<E>) {
         if let Some(fill) = rect.fill {
-            self.push_rect_filled(rect.coords.clone(), fill);
+            self.push_rect_filled(rect.coords, fill);
         }
         if let Some(stroke) = rect.stroke {
             self.push_rect_stroked(rect.coords, stroke);

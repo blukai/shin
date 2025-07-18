@@ -28,14 +28,12 @@ fn draw<E: uhi::Externs>(ctx: &mut uhi::Context<E>, area: uhi::Rect) {
         GAP,
         Constraint::Percentage(BOTTOM_HEIGHT / SIZE.y),
     ])
-    .split(area.clone());
+    .split(area);
 
     // top
     {
-        ctx.draw_buffer.push_rect(RectShape::with_fill(
-            top.clone(),
-            Fill::with_color(Rgba8::WHITE),
-        ));
+        ctx.draw_buffer
+            .push_rect(RectShape::with_fill(top, Fill::with_color(Rgba8::WHITE)));
 
         {
             let [left, lgap, mid, rgap, right] = hstack([
@@ -97,10 +95,8 @@ fn draw<E: uhi::Externs>(ctx: &mut uhi::Context<E>, area: uhi::Rect) {
 
     // bottom
     {
-        ctx.draw_buffer.push_rect(RectShape::with_fill(
-            bottom.clone(),
-            Fill::with_color(Rgba8::WHITE),
-        ));
+        ctx.draw_buffer
+            .push_rect(RectShape::with_fill(bottom, Fill::with_color(Rgba8::WHITE)));
 
         {
             let [left, lgap, _, rgap, right] = hstack([
@@ -120,7 +116,7 @@ fn draw<E: uhi::Externs>(ctx: &mut uhi::Context<E>, area: uhi::Rect) {
                     Constraint::Fill(1.0),
                 ])
                 .split(left);
-                lmgap = gap.clone();
+                lmgap = gap;
                 ctx.draw_buffer
                     .push_rect(RectShape::with_fill(gap, Fill::with_color(Rgba8::BLACK)));
 
@@ -138,14 +134,10 @@ fn draw<E: uhi::Externs>(ctx: &mut uhi::Context<E>, area: uhi::Rect) {
                 }
             }
 
-            ctx.draw_buffer.push_rect(RectShape::with_fill(
-                lgap.clone(),
-                Fill::with_color(Rgba8::BLACK),
-            ));
-            ctx.draw_buffer.push_rect(RectShape::with_fill(
-                rgap.clone(),
-                Fill::with_color(Rgba8::BLACK),
-            ));
+            ctx.draw_buffer
+                .push_rect(RectShape::with_fill(lgap, Fill::with_color(Rgba8::BLACK)));
+            ctx.draw_buffer
+                .push_rect(RectShape::with_fill(rgap, Fill::with_color(Rgba8::BLACK)));
             ctx.draw_buffer
                 .push_rect(RectShape::with_fill(right, Fill::with_color(Rgba8::ORANGE)));
 

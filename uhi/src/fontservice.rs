@@ -147,7 +147,7 @@ pub struct GlyphRef<'a> {
 impl<'a> GlyphRef<'a> {
     #[inline]
     pub fn bounding_rect(&self) -> Rect {
-        self.glyph.bounds.clone()
+        self.glyph.bounds
     }
 
     #[inline]
@@ -162,7 +162,7 @@ impl<'a> GlyphRef<'a> {
 
     #[inline]
     pub fn tex_coords(&self) -> Rect {
-        self.glyph.tex_coords.clone()
+        self.glyph.tex_coords
     }
 }
 

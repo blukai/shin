@@ -369,7 +369,7 @@ impl<'a> TextSingleline<'a> {
     }
 
     pub fn draw<E: Externs>(self, ctx: &mut Context<E>) {
-        ctx.draw_buffer.set_clip_rect(Some(self.text.rect.clone()));
+        ctx.draw_buffer.set_clip_rect(Some(self.text.rect));
 
         let font_instance = ctx.font_service.get_font_instance(
             self.text.font_handle.unwrap_or(ctx.default_font_handle),
@@ -510,7 +510,7 @@ impl<'a> TextSinglelineSelectable<'a> {
     }
 
     pub fn draw<E: Externs>(self, ctx: &mut Context<E>) {
-        ctx.draw_buffer.set_clip_rect(Some(self.text.rect.clone()));
+        ctx.draw_buffer.set_clip_rect(Some(self.text.rect));
 
         let mut font_instance = ctx.font_service.get_font_instance(
             self.text.font_handle.unwrap_or(ctx.default_font_handle),
@@ -687,7 +687,7 @@ impl<'a> TextSinglelineEditable<'a> {
     }
 
     pub fn draw<E: Externs>(self, ctx: &mut Context<E>) {
-        ctx.draw_buffer.set_clip_rect(Some(self.text.rect.clone()));
+        ctx.draw_buffer.set_clip_rect(Some(self.text.rect));
 
         let s = self.text.buffer.as_str();
         let mut font_instance = ctx.font_service.get_font_instance(
@@ -911,7 +911,7 @@ impl<'a> TextMultiline<'a> {
     }
 
     pub fn draw<E: Externs>(self, ctx: &mut Context<E>) {
-        ctx.draw_buffer.set_clip_rect(Some(self.text.rect.clone()));
+        ctx.draw_buffer.set_clip_rect(Some(self.text.rect));
 
         let font_instance = ctx.font_service.get_font_instance(
             self.text.font_handle.unwrap_or(ctx.default_font_handle),
@@ -1050,7 +1050,7 @@ impl<'a> TextMultilineSelectable<'a> {
     }
 
     pub fn draw<E: Externs>(self, ctx: &mut Context<E>) {
-        ctx.draw_buffer.set_clip_rect(Some(self.text.rect.clone()));
+        ctx.draw_buffer.set_clip_rect(Some(self.text.rect));
 
         let mut font_instance = ctx.font_service.get_font_instance(
             self.text.font_handle.unwrap_or(ctx.default_font_handle),

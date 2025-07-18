@@ -71,26 +71,21 @@ impl AppHandler for App {
             uhi::Vec2::from(uhi::U32Vec2::from(physical_window_size)) / scale_factor as f32,
         );
 
-        let pointer_position_text = format!(
-            "{:04}, {:04}",
-            self.input_state.pointer.position.0.round(),
-            self.input_state.pointer.position.1.round()
-        );
-
         uhi::Text::new(
-            pointer_position_text.as_str(),
-            logical_window_rect
-                .clone()
-                .shrink(&uhi::Vec2::new(16.0, 16.0 * 1.0)),
+            format!(
+                "pointer position: {:04}, {:04}.",
+                self.input_state.pointer.position.0.round(),
+                self.input_state.pointer.position.1.round()
+            )
+            .as_str(),
+            logical_window_rect.shrink(&uhi::Vec2::new(16.0, 16.0 * 1.0)),
         )
         .singleline()
         .draw(&mut self.uhi_context);
 
         uhi::Text::new(
             "こんにちは",
-            logical_window_rect
-                .clone()
-                .shrink(&uhi::Vec2::new(16.0, 16.0 * 3.0)),
+            logical_window_rect.shrink(&uhi::Vec2::new(16.0, 16.0 * 3.0)),
         )
         .singleline()
         .selectable(&mut self.text_singleline_selection)
@@ -104,9 +99,7 @@ impl AppHandler for App {
 
         uhi::Text::new(
             &mut self.text_singleline_editable,
-            logical_window_rect
-                .clone()
-                .shrink(&uhi::Vec2::new(16.0, 16.0 * 5.0)),
+            logical_window_rect.shrink(&uhi::Vec2::new(16.0, 16.0 * 5.0)),
         )
         .singleline()
         .editable(&mut self.text_singleline_editable_selection)
@@ -120,9 +113,7 @@ impl AppHandler for App {
 
         uhi::Text::new(
             "With no bamboo hat\nDoes the drizzle fall on me?\nWhat care I of that?",
-            logical_window_rect
-                .clone()
-                .shrink(&uhi::Vec2::new(16.0, 16.0 * 7.0)),
+            logical_window_rect.shrink(&uhi::Vec2::new(16.0, 16.0 * 7.0)),
         )
         .multiline()
         .selectable(&mut self.text_multiline_selection)
