@@ -13,18 +13,25 @@ const TEXTURE_HEIGHT: u32 = 256;
 const TEXTURE_GAP: u32 = 1;
 
 #[derive(Debug)]
-struct TexturePage {
+pub struct TexturePage {
     tex_packer: TexturePacker,
     tex_handle: TextureHandle,
+}
+
+impl TexturePage {
+    pub fn size(&self) -> (u32, u32) {
+        self.tex_packer.texture_size()
+    }
+
+    pub fn handle(&self) -> TextureHandle {
+        self.tex_handle
+    }
 }
 
 #[derive(Debug)]
 struct Glyph {
     tex_page_idx: usize,
-    tex_packer_entry_idx: usize,
-
     tex_coords: Rect,
-
     bounds: Rect,
     advance_width: f32,
 }
@@ -129,10 +136,7 @@ fn rasterize_glyph<E: Externs>(
 
     Glyph {
         tex_page_idx,
-        tex_packer_entry_idx,
-
         tex_coords,
-
         bounds,
         advance_width,
     }
@@ -339,5 +343,10 @@ impl FontService {
             font_instance,
             tex_pages: &mut self.tex_pages,
         }
+    }
+
+    /// allows to view font texture atlases.
+    pub fn iter_texture_pages(&self) -> impl Iterator<Item = &TexturePage> {
+        self.tex_pages.iter()
     }
 }

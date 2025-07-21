@@ -24,6 +24,7 @@ const SELECTION_ACTIVE: Rgba8 = Rgba8::from_u32(0x304a3dff);
 const SELECTION_INACTIVE: Rgba8 = Rgba8::from_u32(0x484848ff);
 const CURSOR: Rgba8 = Rgba8::from_u32(0x8faf9fff);
 
+#[derive(Clone)]
 pub struct TextPalette {
     pub fg: Rgba8,
     pub selection_active: Rgba8,

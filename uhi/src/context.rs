@@ -44,7 +44,7 @@ impl<E: Externs> Context<E> {
 
 impl<E: Externs> Default for Context<E> {
     fn default() -> Self {
-        Self::with_default_font_slice(DEFAULT_FONT_DATA, 14.0)
+        Self::with_default_font_slice(DEFAULT_FONT_DATA, 16.0)
             .expect("somebody fucked things up; default font is invalid?")
     }
 }

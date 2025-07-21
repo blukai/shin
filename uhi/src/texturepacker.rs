@@ -258,7 +258,7 @@ impl TexturePacker {
         &self.tree.get_node(index).value
     }
 
-    pub fn get_texture_size(&self) -> (u32, u32) {
+    pub fn texture_size(&self) -> (u32, u32) {
         (self.w, self.h)
     }
 }
