@@ -108,6 +108,10 @@ impl Lib {
 
 #[allow(non_upper_case_globals)]
 mod generated {
+    // NOTE: this hack is stolen from github.com/Smithay/wayland-rs.
+    struct SyncWrapper<T>(T);
+    unsafe impl<T> Sync for SyncWrapper<T> {}
+
     include!(concat!(env!("OUT_DIR"), "/wayland_generated.rs"));
 }
 pub use generated::*;

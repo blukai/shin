@@ -218,11 +218,6 @@ fn is_arg_type_nullable(arg_type: ArgType) -> bool {
     arg_type == ArgType::String || arg_type == ArgType::Object
 }
 
-// from emit_types_forward_declarations
-fn is_arg_null(arg: &Arg) -> bool {
-    !(arg.interface.is_some() && (arg.r#type == ArgType::Object || arg.r#type == ArgType::NewId))
-}
-
 // from emit_messages
 fn emit_message_signature<W: io::Write>(w: &mut W, msg: &Message) -> io::Result<()> {
     if msg.since.is_some_and(|since| since > 1) {
@@ -337,6 +332,29 @@ fn emit_messages<W: io::Write>(
         return Ok(());
     }
 
+    for msg in messages.iter() {
+        write!(
+            w,
+            "static {}_{}_types: SyncWrapper<[*const super::wl_interface; {}]> = SyncWrapper([\n",
+            interface.name,
+            msg.name,
+            msg.args.len(),
+        )?;
+        for arg in msg.args.iter() {
+            match arg.r#type {
+                ArgType::NewId | ArgType::Object if arg.interface.is_some() => {
+                    write!(
+                        w,
+                        "    &{}_interface as *const super::wl_interface,\n",
+                        arg.interface.unwrap()
+                    )?;
+                }
+                _ => write!(w, "    std::ptr::null(),\n")?,
+            }
+        }
+        write!(w, "]);\n\n")?;
+    }
+
     write!(
         w,
         "static {}_{kind_name}: [super::wl_message; {}] = [\n",
@@ -352,26 +370,11 @@ fn emit_messages<W: io::Write>(
         emit_message_signature(w, msg)?;
         write!(w, "\".as_ptr(),\n",)?;
 
-        if msg.args.iter().all(is_arg_null) {
-            write!(w, "        types: std::ptr::null(),\n")?;
-        } else {
-            write!(w, "        types: [\n")?;
-            for arg in msg.args.iter() {
-                match arg.r#type {
-                    ArgType::NewId | ArgType::Object if arg.interface.is_some() => {
-                        write!(
-                            w,
-                            "            &{}_interface as *const super::wl_interface,\n",
-                            arg.interface.unwrap()
-                        )?;
-                    }
-                    _ => {
-                        write!(w, "            std::ptr::null(),\n")?;
-                    }
-                }
-            }
-            write!(w, "        ].as_ptr(),\n",)?;
-        }
+        write!(
+            w,
+            "        types: {}_{}_types.0.as_ptr(),\n",
+            interface.name, msg.name
+        )?;
 
         write!(w, "    }},\n")?;
     }
@@ -575,9 +578,14 @@ fn emit_interface<W: io::Write>(w: &mut W, interface: &Interface) -> io::Result<
     Ok(())
 }
 
+// TODO: consider introducing some kind of generate_header or something method that would write,
+// well, header. with:
+//     struct SyncWrapper<T>(T);
+//     unsafe impl<T> Sync for SyncWrapper<T> {}
 pub fn generate_protocol<W: io::Write>(w: &mut W, protocol: &Protocol) -> io::Result<()> {
     for interface in protocol.interfaces.iter() {
         emit_interface(w, interface)?;
     }
+
     Ok(())
 }
