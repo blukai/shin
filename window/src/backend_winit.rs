@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, anyhow};
 use input::{CursorShape, KeyboardEvent, Keycode, PointerButton, PointerEvent, Scancode};
@@ -275,7 +276,7 @@ impl winit::application::ApplicationHandler for App {
 
 impl WinitBackend {
     pub fn new(attrs: WindowAttrs) -> anyhow::Result<Self> {
-        let this = Self {
+        Ok(Self {
             event_loop: winit::event_loop::EventLoop::new()?,
             app: App {
                 window_attrs: attrs,
@@ -285,8 +286,7 @@ impl WinitBackend {
 
                 events: VecDeque::new(),
             },
-        };
-        Ok(this)
+        })
     }
 }
 
@@ -308,6 +308,13 @@ impl rwh::HasWindowHandle for WinitBackend {
 
 impl Window for WinitBackend {
     fn pump_events(&mut self) -> anyhow::Result<()> {
+        // NOTE: passing timeout to appear to pump_app_events appear to do absolutely nothing
+        // (tested only on wayland). thus control flow "hack"?
+        //
+        // TODO: support timeout arg that would allow to set different control flows.
+        use winit::event_loop::ControlFlow;
+        self.event_loop.set_control_flow(ControlFlow::Poll);
+
         use winit::platform::pump_events::PumpStatus;
         let ret = match self.event_loop.pump_app_events(None, &mut self.app) {
             PumpStatus::Exit(code) => Err(anyhow!(format!("unexpected exit (code {code})"))),

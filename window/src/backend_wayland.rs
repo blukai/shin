@@ -1339,7 +1339,9 @@ impl Window for WaylandBackend {
                 revents: 0,
             },
         ];
-        // TODO: should poll timeout eq -1 (blocking?)
+        // QUOTE: If the value of timeout is 0, poll() shall return immediately. If the value of
+        // timeout is -1, poll() shall block until a requested event occurs or until the call is
+        // interrupted.
         let ret = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, 0) };
         match ret {
             -1 => {
@@ -1355,6 +1357,12 @@ impl Window for WaylandBackend {
                     let ret = unsafe { (client.wl_display_read_events)(display) };
                     if ret == -1 {
                         return Err(anyhow!("wl_display_read_events failed"));
+                    }
+
+                    // TODO: is this dispatch really needed here?
+                    let ret = unsafe { (client.wl_display_dispatch_pending)(display) };
+                    if ret == -1 {
+                        return Err(anyhow!("wl_display_dispatch_pending failed"));
                     }
                 } else {
                     unsafe { (client.wl_display_cancel_read)(display) };
@@ -1374,7 +1382,7 @@ impl Window for WaylandBackend {
                     }
                 }
             }
-            _ => {}
+            _ => unreachable!(),
         }
 
         Ok(())

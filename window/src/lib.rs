@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, time::Duration};
 
 use anyhow::anyhow;
 use raw_window_handle as rwh;
@@ -52,6 +52,12 @@ pub enum Event {
 }
 
 pub trait Window: rwh::HasDisplayHandle + rwh::HasWindowHandle {
+    // TODO: add timeout: Option<Duration>.
+    // timeout limits how long it may block waiting for new events. a timeout of
+    // Some(Duration::ZERO) = don't block; None means that it may wait indefinitely.
+    //
+    // TODO: as a replacement for pump_events + pop_event consider adding non-blocking poll_event
+    // and wait_event(timeout).
     fn pump_events(&mut self) -> anyhow::Result<()>;
     fn pop_event(&mut self) -> Option<Event>;
     fn set_cursor_shape(&mut self, cursor_shape: input::CursorShape) -> anyhow::Result<()>;
