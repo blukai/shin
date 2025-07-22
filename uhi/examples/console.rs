@@ -188,6 +188,7 @@ impl Console {
                 } else {
                     uhi::Rgba8::from_u32(0xcccccc33)
                 },
+                alignment: uhi::StrokeAlignment::Inside,
             },
         ));
 

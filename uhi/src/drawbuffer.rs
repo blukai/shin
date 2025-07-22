@@ -83,11 +83,18 @@ impl<E: Externs> Fill<E> {
     }
 }
 
-// TODO: stroke alignment: inside / outside / center.
+#[derive(Debug, Clone)]
+pub enum StrokeAlignment {
+    Inside,
+    Outside,
+    Center,
+}
+
 #[derive(Debug, Clone)]
 pub struct Stroke {
     pub width: f32,
     pub color: Rgba8,
+    pub alignment: StrokeAlignment,
 }
 
 #[derive(Debug)]
@@ -139,6 +146,31 @@ impl LineShape {
         }
     }
 }
+/// computes the vertex position offset away the from center caused by line width.
+fn compute_line_width_offset(a: Vec2, b: Vec2, width: f32) -> Vec2 {
+    // direction defines how the line is oriented in space. it allows to know
+    // which way to move the vertices to create the desired thickness.
+    let dir = b - a;
+
+    // normalizing the direction vector converts it into a unit vector (length
+    // of 1). normalization ensures that the offset is proportional to the line
+    // width, regardless of the line's length.
+    let norm_dir = dir.normalize_or_zero();
+
+    // create a vector that points outward from the line. we want to move the
+    // vertices away from the center of the line, not along its length.
+    let perp = norm_dir.perp();
+
+    // to distribute the offset evenly on both sides of the line
+    let offset = perp * (width * 0.5);
+
+    offset
+}
+
+// TODO: instancing (to enable batching (vertices will be able to exist in 0..1 coordinate space
+// (probably) and then they can be translated, scaled, rotated with instance transforms (for
+// example this will allow to render all rects within a single draw call? or am i being
+// delusional?))).
 
 #[repr(C)]
 #[derive(Debug)]
@@ -151,32 +183,6 @@ pub struct Vertex {
     /// 1, 1 is the bottom right corner of the texture.
     pub tex_coord: Vec2,
     pub color: Rgba8,
-}
-
-// TODO: instancing (to enable batching (vertices will be able to exist in 0..1 coordinate space
-// (probably) and then they can be translated, scaled, rotated with instance transforms (for
-// example this will allow to render all rects within a single draw call? or am i being
-// delusional?))).
-
-/// computes the vertex position offset away the from center caused by line width.
-fn compute_line_width_offset(a: &Vec2, b: &Vec2, width: f32) -> Vec2 {
-    // direction defines how the line is oriented in space. it allows to know
-    // which way to move the vertices to create the desired thickness.
-    let dir: Vec2 = *b - *a;
-
-    // normalizing the direction vector converts it into a unit vector (length
-    // of 1). normalization ensures that the offset is proportional to the line
-    // width, regardless of the line's length.
-    let norm_dir: Vec2 = dir.normalize_or_zero();
-
-    // create a vector that points outward from the line. we want to move the
-    // vertices away from the center of the line, not along its length.
-    let perp: Vec2 = norm_dir.perp();
-
-    // to distribute the offset evenly on both sides of the line
-    let offset = perp * (width * 0.5);
-
-    offset
 }
 
 #[derive(Debug)]
@@ -260,34 +266,38 @@ impl<E: Externs> DrawBuffer<E> {
     }
 
     pub fn push_line(&mut self, line: LineShape) {
+        // NOTE: line's stroke may only be centered. specifying outside/inside stroke alignment
+        // makes sense only for shapes that need an outline (/ need to be stroked).
+        assert!(matches!(line.stroke.alignment, StrokeAlignment::Center));
+
         let idx = self.vertices.len() as u32;
 
         let [a, b] = line.points;
-        let Stroke { width, color } = line.stroke;
+        let Stroke { width, color, .. } = line.stroke;
 
-        let perp = compute_line_width_offset(&a, &b, width);
+        let offset = compute_line_width_offset(a, b, width);
 
         // top left
         self.push_vertex(Vertex {
-            position: a - perp,
+            position: a + offset,
             tex_coord: Vec2::new(0.0, 0.0),
             color,
         });
         // top right
         self.push_vertex(Vertex {
-            position: b - perp,
+            position: b + offset,
             tex_coord: Vec2::new(1.0, 0.0),
             color,
         });
         // bottom right
         self.push_vertex(Vertex {
-            position: b + perp,
+            position: b - offset,
             tex_coord: Vec2::new(1.0, 1.0),
             color,
         });
         // bottom left
         self.push_vertex(Vertex {
-            position: a + perp,
+            position: a - offset,
             tex_coord: Vec2::new(0.0, 1.0),
             color,
         });
@@ -359,38 +369,45 @@ impl<E: Externs> DrawBuffer<E> {
     }
 
     fn push_rect_stroked(&mut self, coords: Rect, stroke: Stroke) {
+        let half_width = stroke.width * 0.5;
+        let coords = match stroke.alignment {
+            StrokeAlignment::Inside => coords.shrink(&Vec2::splat(half_width)),
+            StrokeAlignment::Outside => coords.expand(&Vec2::splat(half_width)),
+            StrokeAlignment::Center => coords,
+        };
         let top_left = coords.top_left();
         let top_right = coords.top_right();
         let bottom_right = coords.bottom_right();
         let bottom_left = coords.bottom_left();
 
-        let width = stroke.width;
-        let offset = width * 0.5;
+        let stroke = Stroke {
+            alignment: StrokeAlignment::Center,
+            ..stroke
+        };
 
         // horizontal lines:
-        // extened to left and right by stroke width, shifted to top by half of
-        // stroke width.
+        // expand to left and right
         self.push_line(LineShape::new(
-            Vec2::new(top_left.x - width, top_left.y - offset),
-            Vec2::new(top_right.x + width, top_right.y - offset),
+            Vec2::new(top_left.x - half_width, top_left.y),
+            Vec2::new(top_right.x + half_width, top_right.y),
             stroke.clone(),
         ));
         self.push_line(LineShape::new(
-            Vec2::new(bottom_left.x - width, bottom_left.y + offset),
-            Vec2::new(bottom_right.x + width, bottom_right.y + offset),
+            Vec2::new(bottom_left.x - half_width, bottom_left.y),
+            Vec2::new(bottom_right.x + half_width, bottom_right.y),
             stroke.clone(),
         ));
 
         // vertical lines:
-        // shifted to right and left by half of stroke width
+        // shrink top and bottom
         self.push_line(LineShape::new(
-            Vec2::new(top_right.x + offset, top_right.y),
-            Vec2::new(bottom_right.x + offset, bottom_right.y),
+            Vec2::new(top_right.x, top_right.y + half_width),
+            Vec2::new(bottom_right.x, bottom_right.y - half_width),
             stroke.clone(),
         ));
         self.push_line(LineShape::new(
-            Vec2::new(top_left.x - offset, top_left.y),
-            Vec2::new(bottom_left.x - offset, bottom_left.y),
+            Vec2::new(top_left.x, top_left.y + half_width),
+            Vec2::new(bottom_left.x, bottom_left.y - half_width),
             stroke,
         ));
 
