@@ -8,12 +8,20 @@ impl uhi::Externs for UhiExterns {
     type TextureHandle = <uhi::GlRenderer as uhi::Renderer>::TextureHandle;
 }
 
+// TODO: can this be turned into something reusable and possibly generic(think of animating
+// colors)?
+//
+// TODO: how animations should behave in a "power saving mode" when re-renderes happen only in
+// response to the user input / not in continuous, but in reactive mode? should there be a way to
+// request a redraw or something?
 #[derive(Default)]
 struct Animation {
     from: f32,
     to: f32,
+    // TODO: would it make sense to introduce Timer as a separate thing?
     duration: f32,
     elapsed: f32,
+    just_finished: bool,
 }
 
 impl Animation {
@@ -22,17 +30,30 @@ impl Animation {
         self.to = to;
         self.duration = duration;
         self.elapsed = 0.0;
+        self.just_finished = false;
     }
 
     fn is_finished(&self) -> bool {
         self.elapsed >= self.duration
     }
 
-    fn step(&mut self, dt: f32) {
-        self.elapsed += dt;
+    fn just_finished(&self) -> bool {
+        self.just_finished
     }
 
-    fn get_value(&mut self) -> f32 {
+    fn maybe_step(&mut self, dt: f32) {
+        if self.is_finished() {
+            self.just_finished = false;
+            return;
+        }
+
+        let prev_finished = self.is_finished();
+        self.elapsed += dt;
+        let next_finished = self.is_finished();
+        self.just_finished = !prev_finished && next_finished;
+    }
+
+    fn get_value(&self) -> f32 {
         let t = (self.elapsed / self.duration).clamp(0.0, 1.0);
         self.from + (self.to - self.from) * t
     }
@@ -45,14 +66,16 @@ impl Animation {
             let remaining_distance = (to - position).abs();
             let proportional_duration = duration * (remaining_distance / total_distance);
             self.start(position, to, proportional_duration);
-        } else if self.get_value() != to {
+            return;
+        }
+
+        if self.get_value() != to {
             self.start(from, to, duration);
         }
     }
 }
 
 struct Console {
-    y: f32,
     open_animation: Animation,
 
     command_editor: String,
@@ -69,7 +92,6 @@ impl Console {
 
     fn new() -> Self {
         Self {
-            y: -Self::HEIGHT,
             open_animation: Animation::default(),
 
             command_editor: "".to_string(),
@@ -82,7 +104,7 @@ impl Console {
     }
 
     fn is_open(&self) -> bool {
-        self.y > -Self::HEIGHT
+        self.open_animation.get_value() > -Self::HEIGHT
     }
 
     fn update_history<E: uhi::Externs>(
@@ -91,20 +113,14 @@ impl Console {
         ctx: &mut uhi::Context<E>,
         input: &input::State,
     ) {
-        let key = uhi::Key::from_location();
+        assert!(self.is_open());
 
-        let history_became_active = ctx
-            .interaction_state
-            .maybe_set_hot_or_active(key, rect, input);
-        if history_became_active {
-            self.command_editor_active = false;
-        }
+        let key = uhi::Key::from_location();
 
         uhi::Text::new(self.history.as_str(), rect.shrink(&uhi::Vec2::splat(16.0)))
             .multiline()
             .selectable(&mut self.history_selection)
-            .with_hot(ctx.interaction_state.is_hot(key))
-            .with_active(ctx.interaction_state.is_active(key))
+            .maybe_set_hot_or_active(key, ctx, input)
             .update_if(|t| t.is_active(), ctx, input)
             .draw(ctx);
     }
@@ -115,39 +131,36 @@ impl Console {
         ctx: &mut uhi::Context<E>,
         input: &input::State,
     ) {
+        assert!(self.is_open());
+
         let key = uhi::Key::from_location();
 
-        let command_editor_became_active = ctx
-            .interaction_state
+        ctx.interaction_state
             .maybe_set_hot_or_active(key, rect, input);
-        if command_editor_became_active {
+
+        if self.open_animation.just_finished() {
+            // if animation just finished -> activate the command editor.
             self.command_editor_active = true;
+        } else if self.command_editor_active {
+            // but then it needs to be deactivated *once*. future activations will be set by the
+            // interaction state thingie.
+            let any_button_released = input
+                .pointer
+                .buttons
+                .any_just_released(input::PointerButton::all());
+            let rect_contains_pointer =
+                rect.contains(&uhi::Vec2::from(uhi::F64Vec2::from(input.pointer.position)));
+            if any_button_released && !rect_contains_pointer {
+                self.command_editor_active = false;
+            }
         }
-        let command_editor_active = self.command_editor_active && self.open_animation.is_finished();
 
-        let font_height = ctx
-            .font_service
-            .get_font_instance(ctx.default_font_handle, ctx.default_font_size)
-            .height();
-        let py = (rect.height() - font_height) / 2.0;
+        let active = (self.command_editor_active || ctx.interaction_state.is_active(key))
+            && self.open_animation.is_finished();
 
-        // TODO: vertically center text
-        ctx.draw_buffer.push_rect(uhi::RectShape::with_fill(
-            rect,
-            uhi::Fill::with_color(uhi::Rgba8::RED),
-        ));
-        uhi::Text::new(
-            &mut self.command_editor,
-            rect.shrink(&uhi::Vec2::new(16.0, py)),
-        )
-        .singleline()
-        .editable(&mut self.command_editor_selection)
-        .with_hot(ctx.interaction_state.is_hot(key))
-        .with_active(command_editor_active)
-        .update_if(|t| t.is_active(), ctx, input)
-        .draw(ctx);
+        // ----
 
-        if command_editor_active {
+        if active {
             let input::KeyboardState { ref scancodes, .. } = input.keyboard;
 
             if scancodes.just_pressed(input::Scancode::Enter) && !self.command_editor.is_empty() {
@@ -161,6 +174,39 @@ impl Console {
                 // TODO: scroll history to end
             }
         }
+
+        // ----
+
+        // background
+        ctx.draw_buffer.push_rect(uhi::RectShape::new(
+            rect,
+            uhi::Fill::with_color(uhi::Rgba8::from_u32(0xffffff0c)),
+            uhi::Stroke {
+                width: 1.0,
+                color: if active {
+                    uhi::Rgba8::from_u32(0x4393e7ff)
+                } else {
+                    uhi::Rgba8::from_u32(0xcccccc33)
+                },
+            },
+        ));
+
+        let font_height = ctx
+            .font_service
+            .get_font_instance(ctx.default_font_handle, ctx.default_font_size)
+            .height();
+        let py = (rect.height() - font_height) / 2.0;
+
+        uhi::Text::new(
+            &mut self.command_editor,
+            rect.shrink(&uhi::Vec2::new(16.0, py)),
+        )
+        .singleline()
+        .editable(&mut self.command_editor_selection)
+        .with_hot(ctx.interaction_state.is_hot(key))
+        .with_active(active)
+        .update_if(|t| t.is_active(), ctx, input)
+        .draw(ctx);
     }
 
     fn update<E: uhi::Externs>(
@@ -174,30 +220,24 @@ impl Console {
         if scancodes.just_pressed(input::Scancode::Grave) && !self.is_open() {
             self.open_animation
                 .transition(-Self::HEIGHT, 0.0, Self::ANIMATION_DURATION);
-            self.command_editor_active = true;
         }
         if scancodes.just_pressed(input::Scancode::Esc) && self.is_open() {
             self.open_animation
                 .transition(0.0, -Self::HEIGHT, Self::ANIMATION_DURATION);
-            self.command_editor_active = false;
         }
 
-        if !self.open_animation.is_finished() {
-            self.open_animation.step(ctx.dt());
-            self.y = self.open_animation.get_value();
-        }
-
+        self.open_animation.maybe_step(ctx.dt());
         if !self.is_open() {
             return;
         }
 
         let container_rect = {
-            let min = rect.min + uhi::Vec2::new(0.0, self.y);
+            let min = rect.min + uhi::Vec2::new(0.0, self.open_animation.get_value());
             uhi::Rect::new(min, min + uhi::Vec2::new(rect.max.x, Self::HEIGHT))
         };
         ctx.draw_buffer.push_rect(uhi::RectShape::with_fill(
             container_rect,
-            uhi::Fill::with_color(uhi::Rgba8::GRAY),
+            uhi::Fill::with_color(uhi::Rgba8::from_u32(0x1f1f1fff)),
         ));
 
         let [history_container_rect, _gap, command_editor_container_rect] = uhi::vstack([
@@ -255,7 +295,7 @@ impl AppHandler for App {
 
         // ----
 
-        unsafe { ctx.gl_api.clear_color(0.1, 0.2, 0.2, 1.0) };
+        unsafe { ctx.gl_api.clear_color(0.094, 0.094, 0.094, 1.0) };
         unsafe { ctx.gl_api.clear(gl::api::COLOR_BUFFER_BIT) };
 
         let physical_window_size = ctx.window.size();

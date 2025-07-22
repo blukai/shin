@@ -19,6 +19,10 @@ use crate::{
 // TODO: color schemes ? consider making TextPalette part of something more "centeralized" in
 // combination with other styles? part of Context maybe?
 
+// TODO: text's maybe_set_hot_or_active must accept an interaction rect enum that would instruct
+// the function to compute minimal rect that would be able to accomodate the text, use rect that
+// was provided during construction or would allow user to specify custom interaction rect.
+
 const FG: Rgba8 = Rgba8::WHITE;
 const SELECTION_ACTIVE: Rgba8 = Rgba8::from_u32(0x304a3dff);
 const SELECTION_INACTIVE: Rgba8 = Rgba8::from_u32(0x484848ff);
@@ -981,7 +985,7 @@ impl<'a> TextMultilineSelectable<'a> {
         input: &input::State,
     ) -> Self {
         // TODO: do i need to compute multiline text height here really? wouldn't it make make
-        // sense for the "text area" to reserve entirety of available space?
+        // sense for the "text area" to reserve the entirety of available space?
         let height = compute_multiline_text_height(&self.text, ctx);
         // NOTE: multline text currently takes the whole width of the provided rect. that is
         // probably fine, isn't it?

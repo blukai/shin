@@ -28,22 +28,24 @@ impl Key {
 #[derive(Debug, Default)]
 pub struct InteractionState {
     /// about to be interacting with this item
-    hot_key: Option<Key>,
+    hot: Option<Key>,
     /// items can only become active if they were hot last frame and clicked this frame
-    hot_key_last_frame: Option<Key>,
+    hot_last_frame: Option<Key>,
     /// actually interacting with this item
-    active_key: Option<Key>,
+    // NOCOMMIT
+    pub active: Option<Key>,
 }
 
 impl InteractionState {
     pub fn begin_frame(&mut self) {
-        self.hot_key = None;
+        self.hot = None;
     }
 
     pub fn end_frame(&mut self) {
-        self.hot_key_last_frame = self.hot_key;
+        self.hot_last_frame = self.hot;
     }
 
+    /// returns `true` if element just became active.
     pub fn maybe_set_hot_or_active(&mut self, key: Key, rect: Rect, input: &input::State) -> bool {
         let mut ret = false;
 
@@ -54,33 +56,33 @@ impl InteractionState {
         //
         // NOTE: setting thing inactive on release makes things weird with for example text
         // selection.
-        if self.active_key == Some(key)
+        if self.active == Some(key)
             && input.pointer.buttons.just_pressed(PointerButton::Primary)
             && !inside
         {
-            self.active_key = None;
+            self.active = None;
         }
 
-        if self.hot_key_last_frame == Some(key)
+        if self.hot_last_frame == Some(key)
             && input.pointer.buttons.just_pressed(PointerButton::Primary)
             && inside
         {
-            self.active_key = Some(key);
+            self.active = Some(key);
             ret = true;
         }
 
         if inside {
-            self.hot_key = Some(key);
+            self.hot = Some(key);
         }
 
         ret
     }
 
     pub fn is_hot(&self, key: Key) -> bool {
-        self.hot_key == Some(key)
+        self.hot == Some(key)
     }
 
     pub fn is_active(&self, key: Key) -> bool {
-        self.active_key == Some(key)
+        self.active == Some(key)
     }
 }

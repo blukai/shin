@@ -83,6 +83,7 @@ impl<E: Externs> Fill<E> {
     }
 }
 
+// TODO: stroke alignment: inside / outside / center.
 #[derive(Debug, Clone)]
 pub struct Stroke {
     pub width: f32,

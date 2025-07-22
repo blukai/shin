@@ -1,4 +1,4 @@
-use std::{env, time::Duration};
+use std::env;
 
 use anyhow::anyhow;
 use raw_window_handle as rwh;
@@ -50,6 +50,8 @@ pub enum Event {
     Pointer(input::PointerEvent),
     Keyboard(input::KeyboardEvent),
 }
+
+// TODO: clipboard write/read.
 
 pub trait Window: rwh::HasDisplayHandle + rwh::HasWindowHandle {
     // TODO: add timeout: Option<Duration>.
