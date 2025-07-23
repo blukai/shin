@@ -135,8 +135,7 @@ impl Console {
 
         let key = uhi::Key::from_location();
 
-        ctx.interaction_state
-            .maybe_set_hot_or_active(key, rect, input);
+        ctx.maybe_set_hot_or_active(key, rect, input::CursorShape::Text, input);
 
         if self.open_animation.just_finished() {
             // if animation just finished -> activate the command editor.
@@ -155,8 +154,8 @@ impl Console {
             }
         }
 
-        let active = (self.command_editor_active || ctx.interaction_state.is_active(key))
-            && self.open_animation.is_finished();
+        let active =
+            (self.command_editor_active || ctx.is_active(key)) && self.open_animation.is_finished();
 
         // ----
 
@@ -194,7 +193,7 @@ impl Console {
 
         let font_height = ctx
             .font_service
-            .get_font_instance(ctx.default_font_handle, ctx.default_font_size)
+            .get_font_instance(ctx.default_font_handle(), ctx.default_font_size())
             .height();
         let py = (rect.height() - font_height) / 2.0;
 
@@ -204,7 +203,7 @@ impl Console {
         )
         .singleline()
         .editable(&mut self.command_editor_selection)
-        .with_hot(ctx.interaction_state.is_hot(key))
+        .with_hot(ctx.is_hot(key))
         .with_active(active)
         .update_if(|t| t.is_active(), ctx, input)
         .draw(ctx);
@@ -318,6 +317,15 @@ impl AppHandler for App {
             &mut self.uhi_context,
             &self.input_state,
         );
+
+        let cursor_shape = self
+            .uhi_context
+            .cursor_shape()
+            .unwrap_or(input::CursorShape::Default);
+        ctx.window
+            .set_cursor_shape(cursor_shape)
+            // TODO: proper error handling
+            .expect("could not set cursor shape");
 
         self.uhi_renderer
             .render(

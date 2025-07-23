@@ -42,6 +42,7 @@ pub enum PointerEvent {
 pub enum CursorShape {
     Default,
     Pointer,
+    Text,
 }
 
 // keyboard

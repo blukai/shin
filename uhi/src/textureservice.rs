@@ -119,6 +119,7 @@ impl<E: Externs> TextureService<E> {
         handle
     }
 
+    // TODO: consider renaming next_pending_create to pop_create.
     pub fn next_pending_create(&self) -> Option<(TextureCreateTicket, &TextureDesc)> {
         self.pending_creates
             .iter()
@@ -184,6 +185,7 @@ impl<E: Externs> TextureService<E> {
         dst
     }
 
+    // TODO: consider renaming next_pending_update to pop_update.
     pub fn next_pending_update(&mut self) -> Option<TexturePendingUpdate<E>> {
         let Some(key) = self.pending_updates.iter().next().map(|(k, _)| k.clone()) else {
             return None;
@@ -207,6 +209,7 @@ impl<E: Externs> TextureService<E> {
         self.pending_destroys.insert(handle);
     }
 
+    // TODO: consider renaming next_pending_destroy to pop_destroy.
     pub fn next_pending_destroy(&mut self) -> Option<E::TextureHandle> {
         while let Some(handle) = self.pending_destroys.iter().next().copied() {
             self.pending_destroys.remove(&handle);

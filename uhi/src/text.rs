@@ -1,6 +1,9 @@
 use std::ops::Range;
 
-use input::{Event, KeyboardEvent, KeyboardState, Keycode, PointerButton, PointerEvent, Scancode};
+use input::{
+    CursorShape, Event, KeyboardEvent, KeyboardState, Keycode, PointerButton, PointerEvent,
+    Scancode,
+};
 
 use crate::{
     Context, DrawBuffer, Externs, F64Vec2, Fill, FillTexture, FontHandle, FontInstanceRefMut, Key,
@@ -250,8 +253,8 @@ impl<'a> Text<'a> {
 
 fn compute_singleline_text_size<E: Externs>(text: &Text, ctx: &mut Context<E>) -> Vec2 {
     let mut font_instance = ctx.font_service.get_font_instance(
-        text.font_handle.unwrap_or(ctx.default_font_handle),
-        text.font_size.unwrap_or(ctx.default_font_size),
+        text.font_handle.unwrap_or(ctx.default_font_handle()),
+        text.font_size.unwrap_or(ctx.default_font_size()),
     );
     let text_width =
         font_instance.compute_text_width(text.buffer.as_str(), &mut ctx.texture_service);
@@ -377,8 +380,8 @@ impl<'a> TextSingleline<'a> {
         ctx.draw_buffer.set_clip_rect(Some(self.text.rect));
 
         let font_instance = ctx.font_service.get_font_instance(
-            self.text.font_handle.unwrap_or(ctx.default_font_handle),
-            self.text.font_size.unwrap_or(ctx.default_font_size),
+            self.text.font_handle.unwrap_or(ctx.default_font_handle()),
+            self.text.font_size.unwrap_or(ctx.default_font_size()),
         );
         draw_singleline_text(
             &self.text,
@@ -445,10 +448,9 @@ impl<'a> TextSinglelineSelectable<'a> {
     ) -> Self {
         let size = compute_singleline_text_size(&self.text, ctx);
         let interaction_rect = Rect::new(self.text.rect.min, self.text.rect.min + size);
-        ctx.interaction_state
-            .maybe_set_hot_or_active(key, interaction_rect, input);
-        self.hot = ctx.interaction_state.is_hot(key);
-        self.active = ctx.interaction_state.is_active(key);
+        ctx.maybe_set_hot_or_active(key, interaction_rect, CursorShape::Text, input);
+        self.hot = ctx.is_hot(key);
+        self.active = ctx.is_active(key);
         self
     }
 
@@ -479,8 +481,8 @@ impl<'a> TextSinglelineSelectable<'a> {
                     if input.pointer.buttons.pressed(PointerButton::Primary) =>
                 {
                     let font_instance = ctx.font_service.get_font_instance(
-                        self.text.font_handle.unwrap_or(ctx.default_font_handle),
-                        self.text.font_size.unwrap_or(ctx.default_font_size),
+                        self.text.font_handle.unwrap_or(ctx.default_font_handle()),
+                        self.text.font_size.unwrap_or(ctx.default_font_size()),
                     );
                     let byte_offset = locate_singleline_text_coord(
                         self.text.buffer.as_str(),
@@ -518,8 +520,8 @@ impl<'a> TextSinglelineSelectable<'a> {
         ctx.draw_buffer.set_clip_rect(Some(self.text.rect));
 
         let mut font_instance = ctx.font_service.get_font_instance(
-            self.text.font_handle.unwrap_or(ctx.default_font_handle),
-            self.text.font_size.unwrap_or(ctx.default_font_size),
+            self.text.font_handle.unwrap_or(ctx.default_font_handle()),
+            self.text.font_size.unwrap_or(ctx.default_font_size()),
         );
 
         if !self.selection.is_empty() {
@@ -596,10 +598,9 @@ impl<'a> TextSinglelineEditable<'a> {
     ) -> Self {
         let size = compute_singleline_text_size(&self.text, ctx);
         let interaction_rect = Rect::new(self.text.rect.min, self.text.rect.min + size);
-        ctx.interaction_state
-            .maybe_set_hot_or_active(key, interaction_rect, input);
-        self.hot = ctx.interaction_state.is_hot(key);
-        self.active = ctx.interaction_state.is_active(key);
+        ctx.maybe_set_hot_or_active(key, interaction_rect, CursorShape::Text, input);
+        self.hot = ctx.is_hot(key);
+        self.active = ctx.is_active(key);
         self
     }
 
@@ -656,8 +657,8 @@ impl<'a> TextSinglelineEditable<'a> {
                     if input.pointer.buttons.pressed(PointerButton::Primary) =>
                 {
                     let font_instance = ctx.font_service.get_font_instance(
-                        self.text.font_handle.unwrap_or(ctx.default_font_handle),
-                        self.text.font_size.unwrap_or(ctx.default_font_size),
+                        self.text.font_handle.unwrap_or(ctx.default_font_handle()),
+                        self.text.font_size.unwrap_or(ctx.default_font_size()),
                     );
                     let byte_offset = locate_singleline_text_coord(
                         self.text.buffer.as_str(),
@@ -696,8 +697,8 @@ impl<'a> TextSinglelineEditable<'a> {
 
         let s = self.text.buffer.as_str();
         let mut font_instance = ctx.font_service.get_font_instance(
-            self.text.font_handle.unwrap_or(ctx.default_font_handle),
-            self.text.font_size.unwrap_or(ctx.default_font_size),
+            self.text.font_handle.unwrap_or(ctx.default_font_handle()),
+            self.text.font_size.unwrap_or(ctx.default_font_size()),
         );
 
         let rect_width = self.text.rect.width();
@@ -772,8 +773,8 @@ fn compute_multiline_text_height<E: Externs>(
     ctx: &mut Context<E>,
 ) -> f32 {
     let font_instance = ctx.font_service.get_font_instance(
-        text.font_handle.unwrap_or(ctx.default_font_handle),
-        text.font_size.unwrap_or(ctx.default_font_size),
+        text.font_handle.unwrap_or(ctx.default_font_handle()),
+        text.font_size.unwrap_or(ctx.default_font_size()),
     );
 
     let mut line_count: usize = 1;
@@ -811,8 +812,8 @@ fn locate_multiline_text_coord<E: Externs>(
 ) -> usize {
     let s = text.buffer.as_str();
     let font_instance = ctx.font_service.get_font_instance(
-        text.font_handle.unwrap_or(ctx.default_font_handle),
-        text.font_size.unwrap_or(ctx.default_font_size),
+        text.font_handle.unwrap_or(ctx.default_font_handle()),
+        text.font_size.unwrap_or(ctx.default_font_size()),
     );
 
     let mut line_start_idx: usize = 0;
@@ -919,8 +920,8 @@ impl<'a> TextMultiline<'a> {
         ctx.draw_buffer.set_clip_rect(Some(self.text.rect));
 
         let font_instance = ctx.font_service.get_font_instance(
-            self.text.font_handle.unwrap_or(ctx.default_font_handle),
-            self.text.font_size.unwrap_or(ctx.default_font_size),
+            self.text.font_handle.unwrap_or(ctx.default_font_handle()),
+            self.text.font_size.unwrap_or(ctx.default_font_size()),
         );
         draw_multiline_text(
             &self.text,
@@ -991,10 +992,9 @@ impl<'a> TextMultilineSelectable<'a> {
         // probably fine, isn't it?
         let size = Vec2::new(self.text.rect.max.x, height);
         let interaction_rect = Rect::new(self.text.rect.min, self.text.rect.min + size);
-        ctx.interaction_state
-            .maybe_set_hot_or_active(key, interaction_rect, input);
-        self.hot = ctx.interaction_state.is_hot(key);
-        self.active = ctx.interaction_state.is_active(key);
+        ctx.maybe_set_hot_or_active(key, interaction_rect, CursorShape::Text, input);
+        self.hot = ctx.is_hot(key);
+        self.active = ctx.is_active(key);
         self
     }
 
@@ -1058,8 +1058,8 @@ impl<'a> TextMultilineSelectable<'a> {
         ctx.draw_buffer.set_clip_rect(Some(self.text.rect));
 
         let mut font_instance = ctx.font_service.get_font_instance(
-            self.text.font_handle.unwrap_or(ctx.default_font_handle),
-            self.text.font_size.unwrap_or(ctx.default_font_size),
+            self.text.font_handle.unwrap_or(ctx.default_font_handle()),
+            self.text.font_size.unwrap_or(ctx.default_font_size()),
         );
 
         // TODO: extract draw_multiline_text_selection

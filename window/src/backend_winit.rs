@@ -1,5 +1,4 @@
 use std::collections::VecDeque;
-use std::time::{Duration, Instant};
 
 use anyhow::{Context, anyhow};
 use input::{CursorShape, KeyboardEvent, Keycode, PointerButton, PointerEvent, Scancode};
@@ -25,6 +24,7 @@ fn map_cursor_shape(cursor_shape: CursorShape) -> winit::window::Cursor {
     Cursor::Icon(match cursor_shape {
         CursorShape::Default => CursorIcon::Default,
         CursorShape::Pointer => CursorIcon::Pointer,
+        CursorShape::Text => CursorIcon::Text,
     })
 }
 

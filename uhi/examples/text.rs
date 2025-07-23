@@ -71,7 +71,7 @@ impl AppHandler for App {
             uhi::Vec2::from(uhi::U32Vec2::from(physical_window_size)) / scale_factor as f32,
         );
 
-        let primary_font_size = self.uhi_context.default_font_size;
+        let primary_font_size = self.uhi_context.default_font_size();
         let caption_font_size = primary_font_size * 0.8;
         let caption_text_palette = uhi::TextPalette::default().with_fg(uhi::Rgba8::GRAY);
 
@@ -80,11 +80,11 @@ impl AppHandler for App {
             .uhi_context
             .font_service
             .get_font_instance(
-                self.uhi_context.default_font_handle,
-                self.uhi_context.default_font_size,
+                self.uhi_context.default_font_handle(),
+                self.uhi_context.default_font_size(),
             )
             .height()
-            / self.uhi_context.default_font_size;
+            / self.uhi_context.default_font_size();
         let mut rect = logical_window_rect.shrink(&uhi::Vec2::splat(16.0));
         let mut use_rect = |font_size: f32, times: usize, add_gap: bool| -> uhi::Rect {
             let prev = rect;
@@ -233,6 +233,15 @@ impl AppHandler for App {
                     ));
             }
         }
+
+        let cursor_shape = self
+            .uhi_context
+            .cursor_shape()
+            .unwrap_or(input::CursorShape::Default);
+        ctx.window
+            .set_cursor_shape(cursor_shape)
+            // TODO: proper error handling
+            .expect("could not set cursor shape");
 
         self.uhi_renderer
             .render(

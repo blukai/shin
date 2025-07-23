@@ -74,6 +74,7 @@ fn map_cursor_shape_to_name(shape: CursorShape) -> &'static CStr {
     match shape {
         CursorShape::Default => c"default",
         CursorShape::Pointer => c"pointer",
+        CursorShape::Text => c"Text",
     }
 }
 
@@ -81,6 +82,7 @@ fn map_cursor_shape_to_enum(shape: CursorShape) -> u32 {
     match shape {
         CursorShape::Default => libwayland_client::WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT,
         CursorShape::Pointer => libwayland_client::WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_POINTER,
+        CursorShape::Text => libwayland_client::WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_TEXT,
     }
 }
 
@@ -150,13 +152,12 @@ impl Cursor {
         &self,
         libwayland_client: &libwayland_client::Lib,
         wl_pointer: *mut libwayland_client::wl_pointer,
-        shape: CursorShape,
+        name: &'static CStr,
         serial: u32,
     ) -> anyhow::Result<()> {
         assert!(!wl_pointer.is_null());
         assert!(serial != 0); // NOTE: pretty certain that 0 is not a valid serial.
 
-        let name = map_cursor_shape_to_name(shape);
         let cursor = unsafe {
             (self.libwayland_cursor.wl_cursor_theme_get_cursor)(self.wl_cursor_theme, name.as_ptr())
         };
@@ -1393,6 +1394,14 @@ impl Window for WaylandBackend {
     }
 
     fn set_cursor_shape(&mut self, shape: CursorShape) -> anyhow::Result<()> {
+        // NOTE: immediate mode ui and shit can may want to set cursor every frame, and most of the
+        // time it would be the same (which would not constitute a change).
+        //
+        // TODO: i am not 100% sure i really need this check here, but it wouldn't hurt i guess?
+        if self.cursor_shape == Some(shape) {
+            return Ok(());
+        }
+
         let Some(serial) = self.serial_tracker.get_serial(SerialType::PointerEnter) else {
             log::warn!("no pointer enter serial found");
             return Ok(());
@@ -1408,15 +1417,19 @@ impl Window for WaylandBackend {
                 )
             };
         } else if let Some(ref cursor) = self.cursor {
-            cursor.set_shape(&self.libwayland_client, self.wl_pointer, shape, serial)?;
+            cursor.set_shape(
+                &self.libwayland_client,
+                self.wl_pointer,
+                map_cursor_shape_to_name(shape),
+                serial,
+            )?;
         } else {
             return Err(anyhow!(
-                "cursor shape proto is unavailable and cursor is uninitialized"
+                "cursor shape protocol is unavailable and libwayland_cursor thing is uninitialized (why?)"
             ));
         }
 
         self.cursor_shape = Some(shape);
-
         Ok(())
     }
 
