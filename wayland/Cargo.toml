@@ -1,0 +1,14 @@
+[package]
+name = "wayland"
+version = "0.0.0"
+edition.workspace = true
+
+[dependencies]
+libc.workspace = true
+# workspace
+dynlib.workspace = true
+
+[build-dependencies]
+# workspace
+wayland-scanner.workspace = true
+

@@ -335,7 +335,7 @@ fn emit_messages<W: io::Write>(
     for msg in messages.iter() {
         write!(
             w,
-            "static {}_{}_types: SyncWrapper<[*const super::wl_interface; {}]> = SyncWrapper([\n",
+            "static {}_{}_types: super::SyncWrapper<[*const super::wl_interface; {}]> = super::SyncWrapper([\n",
             interface.name,
             msg.name,
             msg.args.len(),
@@ -444,7 +444,7 @@ fn emit_stubs<W: io::Write>(w: &mut W, interface: &Interface) -> io::Result<()> 
 
         // args
 
-        write!(w, "    lib: &super::Lib,\n",)?;
+        write!(w, "    api: &super::Api,\n",)?;
         write!(w, "    {}: *mut {},\n", interface.name, interface.name,)?;
 
         for arg in msg.args.iter() {
@@ -476,7 +476,7 @@ fn emit_stubs<W: io::Write>(w: &mut W, interface: &Interface) -> io::Result<()> 
         // body
 
         write!(w, "    unsafe {{\n")?;
-        write!(w, "        (lib.wl_proxy_marshal_flags)(\n",)?;
+        write!(w, "        (api.wl_proxy_marshal_flags)(\n",)?;
 
         // proxy: *mut super::wl_proxy,
         write!(
@@ -507,7 +507,7 @@ fn emit_stubs<W: io::Write>(w: &mut W, interface: &Interface) -> io::Result<()> 
         } else {
             write!(
                 w,
-                "            (lib.wl_proxy_get_version)({} as *mut super::wl_proxy),\n",
+                "            (api.wl_proxy_get_version)({} as *mut super::wl_proxy),\n",
                 interface.name
             )?;
         }
@@ -578,11 +578,7 @@ fn emit_interface<W: io::Write>(w: &mut W, interface: &Interface) -> io::Result<
     Ok(())
 }
 
-// TODO: consider introducing some kind of generate_header or something method that would write,
-// well, header. with:
-//     struct SyncWrapper<T>(T);
-//     unsafe impl<T> Sync for SyncWrapper<T> {}
-pub fn generate_protocol<W: io::Write>(w: &mut W, protocol: &Protocol) -> io::Result<()> {
+pub fn emit_protocol<W: io::Write>(w: &mut W, protocol: &Protocol) -> io::Result<()> {
     for interface in protocol.interfaces.iter() {
         emit_interface(w, interface)?;
     }

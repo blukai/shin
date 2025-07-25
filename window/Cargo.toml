@@ -15,13 +15,7 @@ input.workspace = true
 libc.workspace = true
 # workspace
 dynlib.workspace = true
-
-[build-dependencies]
-anyhow.workspace = true
-
-[target.'cfg(unix)'.build-dependencies]
-# workspace
-wayland-scanner.workspace = true
+wayland.workspace = true
 
 [features]
 # TODO: rename to backend_winit

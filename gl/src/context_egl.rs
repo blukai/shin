@@ -7,8 +7,6 @@ use raw_window_handle as rwh;
 
 #[path = "libegl.rs"]
 pub mod libegl;
-#[path = "libwayland_egl.rs"]
-pub mod libwayland_egl;
 
 pub fn egl_get_error(egl_lib: &libegl::Api) -> anyhow::Error {
     match unsafe { egl_lib.GetError() } as libegl::EGLenum {
@@ -35,7 +33,7 @@ pub struct Context {
 impl Context {
     pub fn new(display_handle: rwh::DisplayHandle, config: Config) -> anyhow::Result<Self> {
         unsafe {
-            let dynlib = DynLib::open(c"libEGL.so").or_else(|_| DynLib::open(c"libEGL.so.1"))?;
+            let dynlib = DynLib::load(c"libEGL.so").or_else(|_| DynLib::load(c"libEGL.so.1"))?;
             let lib = libegl::Api::load_with(|name| {
                 dynlib.lookup(CStr::from_ptr(name)).unwrap_or(null_mut())
             });
@@ -183,15 +181,15 @@ impl Context {
 // https://registry.khronos.org/vulkan/specs/latest/html/vkspec.html#wsi
 
 struct WaylandWsi {
-    libwayland_egl_lib: libwayland_egl::Lib,
-    wl_egl_window: *mut libwayland_egl::wl_egl_window,
+    libwayland_egl: wayland::EglApi,
+    wl_egl_window: *mut wayland::wl_egl_window,
 }
 
 impl WaylandWsi {
     fn new(wayland_wh: rwh::WaylandWindowHandle, width: u32, height: u32) -> anyhow::Result<Self> {
-        let libwayland_egl_lib = libwayland_egl::Lib::load()?;
+        let libwayland_egl = wayland::EglApi::load()?;
         let wl_egl_window = unsafe {
-            (libwayland_egl_lib.wl_egl_window_create)(
+            (libwayland_egl.wl_egl_window_create)(
                 wayland_wh.surface.as_ptr(),
                 width as c_int,
                 height as c_int,
@@ -201,7 +199,7 @@ impl WaylandWsi {
             return Err(anyhow!("could not create wl egl window"));
         }
         Ok(Self {
-            libwayland_egl_lib,
+            libwayland_egl,
             wl_egl_window,
         })
     }
@@ -270,7 +268,7 @@ impl Surface {
     pub fn resize(&self, width: u32, height: u32) -> anyhow::Result<()> {
         match self.wsi {
             Wsi::Wayland(ref payload) => unsafe {
-                (payload.libwayland_egl_lib.wl_egl_window_resize)(
+                (payload.libwayland_egl.wl_egl_window_resize)(
                     payload.wl_egl_window,
                     width as i32,
                     height as i32,

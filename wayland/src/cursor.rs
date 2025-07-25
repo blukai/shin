@@ -1,12 +1,19 @@
 #![allow(non_camel_case_types)]
 
-use std::ffi::{c_char, c_int, c_uint};
+use std::{
+    ffi::{c_char, c_int, c_uint},
+    marker,
+};
 
-use dynlib::{DynLib, opaque_struct};
+use dynlib::DynLib;
 
-use crate::libwayland_client;
+use crate::client;
 
-opaque_struct!(wl_cursor_theme);
+#[repr(C)]
+pub struct wl_cursor_theme {
+    _data: (),
+    _marker: marker::PhantomData<(*mut u8, marker::PhantomPinned)>,
+}
 
 #[repr(C)]
 pub struct wl_cursor_image {
@@ -24,28 +31,25 @@ pub struct wl_cursor {
     pub name: *const c_char,
 }
 
-pub struct Lib {
+pub struct CursorApi {
     pub wl_cursor_theme_load: unsafe extern "C" fn(
         name: *const c_char,
         size: c_int,
-        shm: *mut libwayland_client::wl_shm,
+        shm: *mut client::wl_shm,
     ) -> *mut wl_cursor_theme,
     pub wl_cursor_theme_destroy: unsafe extern "C" fn(theme: *mut wl_cursor_theme),
     pub wl_cursor_theme_get_cursor:
         unsafe extern "C" fn(theme: *mut wl_cursor_theme, name: *const c_char) -> *mut wl_cursor,
     pub wl_cursor_image_get_buffer:
-        unsafe extern "C" fn(image: *mut wl_cursor_image) -> *mut libwayland_client::wl_buffer,
+        unsafe extern "C" fn(image: *mut wl_cursor_image) -> *mut client::wl_buffer,
 
     _dynlib: DynLib,
 }
 
-unsafe impl Sync for Lib {}
-unsafe impl Send for Lib {}
-
-impl Lib {
-    pub fn load() -> anyhow::Result<Self> {
-        let dynlib = DynLib::open(c"libwayland-cursor.so")
-            .or_else(|_| DynLib::open(c"libwayland-cursor.so.0"))?;
+impl CursorApi {
+    pub fn load() -> Result<Self, dynlib::Error> {
+        let dynlib = DynLib::load(c"libwayland-cursor.so")
+            .or_else(|_| DynLib::load(c"libwayland-cursor.so.0"))?;
 
         Ok(Self {
             wl_cursor_theme_load: dynlib.lookup(c"wl_cursor_theme_load")?,

@@ -9,6 +9,7 @@ members = [
   "nohash",
   "rangealloc",
   "uhi",
+  "wayland",
   "wayland-scanner",
   "window",
   "xml-iterator",
@@ -33,6 +34,7 @@ input = { path = "input" }
 nohash = { path = "nohash" }
 rangealloc = { path = "rangealloc" }
 uhi = { path = "uhi" }
+wayland = { path = "wayland" }
 wayland-scanner = { path = "wayland-scanner" }
 window = { path = "window" }
 xml-iterator = { path = "xml-iterator" }

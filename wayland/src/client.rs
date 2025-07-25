@@ -1,12 +1,19 @@
 #![allow(non_camel_case_types)]
 
-use std::ffi::{c_char, c_int, c_void};
+use std::{
+    ffi::{c_char, c_int, c_void},
+    marker,
+};
 
-use dynlib::{DynLib, opaque_struct};
+use dynlib::DynLib;
 
 pub const WL_MARSHAL_FLAG_DESTROY: u32 = 1 << 0;
 
-opaque_struct!(wl_proxy);
+#[repr(C)]
+pub struct wl_proxy {
+    _data: (),
+    _marker: marker::PhantomData<(*mut u8, marker::PhantomPinned)>,
+}
 
 #[repr(C)]
 #[derive(Debug, Clone)]
@@ -49,12 +56,11 @@ pub fn wl_fixed_to_f64(f: wl_fixed) -> f64 {
 }
 
 // NOTE: this hack is stolen from github.com/Smithay/wayland-rs.
-// SyncWrapper makes it possible to use static raw pointers in other statics.
-#[repr(transparent)]
+// SyncWrapper allows to put raw pointers, that point into statics, into statics.
 struct SyncWrapper<T>(T);
 unsafe impl<T> Sync for SyncWrapper<T> {}
 
-pub struct Lib {
+pub struct ClientApi {
     pub wl_display_cancel_read: unsafe extern "C" fn(display: *mut wl_display),
     pub wl_display_connect: unsafe extern "C" fn(name: *const c_char) -> *mut wl_display,
     pub wl_display_disconnect: unsafe extern "C" fn(display: *mut wl_display) -> *mut c_void,
@@ -85,8 +91,8 @@ pub struct Lib {
     _dynlib: DynLib,
 }
 
-impl Lib {
-    pub fn load() -> anyhow::Result<Self> {
+impl ClientApi {
+    pub fn load() -> Result<Self, dynlib::Error> {
         let dynlib = DynLib::load(c"libwayland-client.so")
             .or_else(|_| DynLib::load(c"libwayland-client.so.0"))?;
 
@@ -112,19 +118,12 @@ impl Lib {
     }
 }
 
+// NOTE: this is an alias for generated stuff.
+type Api = ClientApi;
+
 #[allow(non_upper_case_globals)]
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/wayland_generated.rs"));
 }
-pub use generated::*;
 
-unsafe extern "C" fn __noop_listener() {}
-const __NOOP_LISTENER: unsafe extern "C" fn() = __noop_listener;
-macro_rules! noop_listener {
-    () => {
-        unsafe {
-            #[expect(clippy::missing_transmute_annotations)]
-            std::mem::transmute(crate::libwayland_client::__NOOP_LISTENER)
-        }
-    };
-}
+pub use generated::*;

@@ -4,10 +4,6 @@ use anyhow::anyhow;
 use raw_window_handle as rwh;
 
 #[cfg(unix)]
-pub mod libwayland_client;
-#[cfg(unix)]
-pub mod libwayland_cursor;
-#[cfg(unix)]
 pub mod libxkbcommon;
 
 #[cfg(unix)]
@@ -52,6 +48,20 @@ pub enum Event {
 }
 
 // TODO: clipboard write/read.
+//
+// oneshot-like api; bi-directional data offers?
+//
+// -> offer (same as with cursor shape?) (mime)
+// <- send (clipboard event) (mime, dst)
+//
+// <- receive (clipboard event) (mime, src)
+//
+// see https://github.com/rust-lang/futures-rs/blob/de9274e655b2fff8c9630a259a473b71a6b79dda/futures-channel/src/oneshot.rs
+//
+// maybe clipboard needs not to be a part of window crate? nor input. but a separate crate that
+// would allow to create clipboard thing from a rwh? maybe not.
+//
+// most likely clipboard events need to be platform dependent?
 
 pub trait Window: rwh::HasDisplayHandle + rwh::HasWindowHandle {
     // TODO: add timeout: Option<Duration>.

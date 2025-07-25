@@ -1,12 +1,19 @@
 #![allow(non_camel_case_types)]
 
-use std::ffi::{c_int, c_void};
+use std::{
+    ffi::{c_int, c_void},
+    marker,
+};
 
-use dynlib::{DynLib, opaque_struct};
+use dynlib::DynLib;
 
-opaque_struct!(wl_egl_window);
+#[repr(C)]
+pub struct wl_egl_window {
+    _data: (),
+    _marker: marker::PhantomData<(*mut u8, marker::PhantomPinned)>,
+}
 
-pub struct Lib {
+pub struct EglApi {
     pub wl_egl_window_create: unsafe extern "C" fn(
         surface: *mut c_void,
         width: c_int,
@@ -24,13 +31,10 @@ pub struct Lib {
     _dynlib: DynLib,
 }
 
-unsafe impl Sync for Lib {}
-unsafe impl Send for Lib {}
-
-impl Lib {
-    pub fn load() -> anyhow::Result<Self> {
+impl EglApi {
+    pub fn load() -> Result<Self, dynlib::Error> {
         let dynlib =
-            DynLib::open(c"libwayland-egl.so").or_else(|_| DynLib::open(c"libwayland-egl.so.1"))?;
+            DynLib::load(c"libwayland-egl.so").or_else(|_| DynLib::load(c"libwayland-egl.so.1"))?;
 
         Ok(Self {
             wl_egl_window_create: dynlib.lookup(c"wl_egl_window_create")?,

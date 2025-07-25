@@ -302,7 +302,6 @@ checksum = "f25c0e292a7ca6d6498557ff1df68f32c99850012b6ea401cf8daf771f22ff53"
 name = "dynlib"
 version = "0.0.0"
 dependencies = [
- "anyhow",
  "libc",
 ]
 
@@ -379,6 +378,7 @@ dependencies = [
  "gl-generator",
  "log",
  "raw-window-handle",
+ "wayland",
 ]
 
 [[package]]
@@ -1260,6 +1260,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "943aab3fdaaa029a6e0271b35ea10b72b943135afe9bffca82384098ad0e06a6"
 
 [[package]]
+name = "wayland"
+version = "0.0.0"
+dependencies = [
+ "dynlib",
+ "libc",
+ "wayland-scanner 0.0.0",
+]
+
+[[package]]
 name = "wayland-backend"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1415,7 +1424,7 @@ dependencies = [
  "libc",
  "log",
  "raw-window-handle",
- "wayland-scanner 0.0.0",
+ "wayland",
  "winit",
 ]
 

@@ -1,8 +1,11 @@
 #![allow(non_camel_case_types)]
 
-use std::ffi::{c_char, c_int};
+use std::{
+    ffi::{c_char, c_int},
+    marker,
+};
 
-use dynlib::{DynLib, opaque_struct};
+use dynlib::DynLib;
 
 // *Real* modifiers names are hardcoded in libxkbcommon
 pub const XKB_MOD_NAME_SHIFT: &[u8] = b"Shift\0";
@@ -19,9 +22,23 @@ pub const XKB_MOD_NAME_ALT: &[u8] = b"Mod1\0"; // Alt
 pub const XKB_MOD_NAME_LOGO: &[u8] = b"Mod4\0"; // Super
 pub const XKB_MOD_NAME_NUM: &[u8] = b"Mod2\0"; // NumLock
 
-opaque_struct!(xkb_context);
-opaque_struct!(xkb_keymap);
-opaque_struct!(xkb_state);
+#[repr(C)]
+pub struct xkb_context {
+    _data: (),
+    _marker: marker::PhantomData<(*mut u8, marker::PhantomPinned)>,
+}
+
+#[repr(C)]
+pub struct xkb_keymap {
+    _data: (),
+    _marker: marker::PhantomData<(*mut u8, marker::PhantomPinned)>,
+}
+
+#[repr(C)]
+pub struct xkb_state {
+    _data: (),
+    _marker: marker::PhantomData<(*mut u8, marker::PhantomPinned)>,
+}
 
 pub type xkb_layout_index_t = u32;
 pub type xkb_mod_index_t = u32;
@@ -106,9 +123,9 @@ pub struct Lib {
 
 impl Lib {
     pub fn load() -> anyhow::Result<Self> {
-        let dynlib = DynLib::open(c"libxkbcommon.so")
-            .or_else(|_| DynLib::open(c"libxkbcommon.so.0"))
-            .or_else(|_| DynLib::open(c"libxkbcommon.so.0.0.0"))?;
+        let dynlib = DynLib::load(c"libxkbcommon.so")
+            .or_else(|_| DynLib::load(c"libxkbcommon.so.0"))
+            .or_else(|_| DynLib::load(c"libxkbcommon.so.0.0.0"))?;
 
         Ok(Self {
             xkb_context_new: dynlib.lookup(c"xkb_context_new")?,
