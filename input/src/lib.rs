@@ -3,6 +3,7 @@ use std::hash::{Hash, Hasher};
 use nohash::{NoHash, NoHashMap, NoHashSet};
 
 // pointer
+// ----
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +47,7 @@ pub enum CursorShape {
 }
 
 // keyboard
+// ----
 
 /// Scancode is a hardware-generated code that corresponds to the physical key pressed on the
 /// keyboard. It represents the physical location of the key regardless of the keyboard layout.
@@ -233,6 +235,7 @@ pub enum KeyboardEvent {
 }
 
 // states
+// ----
 
 // NOTE: this is inspired by bevy (or stolen if you will). input handling is kind of nice there.
 //

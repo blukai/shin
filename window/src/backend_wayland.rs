@@ -1039,6 +1039,7 @@ impl WaylandBackend {
             (boxed.libwayland_client.wl_display_roundtrip)(boxed.wl_display.as_ptr());
         }
 
+        // TODO: consider handling those somehow more ~gracefully xd. at least provide useful info?
         assert!(!boxed.wl_compositor.is_null());
         assert!(!boxed.wl_seat.is_null());
         assert!(!boxed.wl_shm.is_null());
@@ -1223,6 +1224,38 @@ impl WaylandBackend {
         Ok(boxed)
     }
 
+    fn set_cursor_shape(&mut self, shape: CursorShape) -> anyhow::Result<()> {
+        let Some(serial) = self.serial_tracker.get_serial(SerialType::PointerEnter) else {
+            log::warn!("no pointer enter serial found");
+            return Ok(());
+        };
+
+        if !self.wp_cursor_shape_device_v1.is_null() {
+            unsafe {
+                libwayland_client::wp_cursor_shape_device_v1_set_shape(
+                    &self.libwayland_client,
+                    self.wp_cursor_shape_device_v1,
+                    serial,
+                    map_cursor_shape_to_enum(shape),
+                )
+            };
+        } else if let Some(ref cursor) = self.cursor {
+            cursor.set_shape(
+                &self.libwayland_client,
+                self.wl_pointer,
+                map_cursor_shape_to_name(shape),
+                serial,
+            )?;
+        } else {
+            return Err(anyhow!(
+                "cursor shape protocol is unavailable and libwayland_cursor thing is uninitialized (why?)"
+            ));
+        }
+
+        self.cursor_shape = Some(shape);
+        Ok(())
+    }
+
     fn maybe_resize(&mut self, logical_size: Option<(u32, u32)>, scale_factor: Option<f64>) {
         assert!(logical_size.is_some() || scale_factor.is_some());
 
@@ -1255,15 +1288,15 @@ impl WaylandBackend {
                 // needs to be re-scaled.
                 if let Some(ref mut cursor) = self.cursor {
                     match cursor.set_scale(self.wl_shm, scale_factor) {
-                        Err(err) => {
-                            log::error!("could not set cursor scale (during rescale): {err:?}");
-                        }
                         Ok(_) => {
                             // NOTE: cursor needs to be updated after re-scaling.
                             let shape = self.cursor_shape.unwrap_or(CursorShape::Default);
                             if let Err(err) = self.set_cursor_shape(shape) {
                                 log::error!("could not set cursor shape (during rescale): {err:?}");
                             }
+                        }
+                        Err(err) => {
+                            log::error!("could not set cursor scale (during rescale): {err:?}");
                         }
                     }
                 }
@@ -1402,35 +1435,7 @@ impl Window for WaylandBackend {
             return Ok(());
         }
 
-        let Some(serial) = self.serial_tracker.get_serial(SerialType::PointerEnter) else {
-            log::warn!("no pointer enter serial found");
-            return Ok(());
-        };
-
-        if !self.wp_cursor_shape_device_v1.is_null() {
-            unsafe {
-                libwayland_client::wp_cursor_shape_device_v1_set_shape(
-                    &self.libwayland_client,
-                    self.wp_cursor_shape_device_v1,
-                    serial,
-                    map_cursor_shape_to_enum(shape),
-                )
-            };
-        } else if let Some(ref cursor) = self.cursor {
-            cursor.set_shape(
-                &self.libwayland_client,
-                self.wl_pointer,
-                map_cursor_shape_to_name(shape),
-                serial,
-            )?;
-        } else {
-            return Err(anyhow!(
-                "cursor shape protocol is unavailable and libwayland_cursor thing is uninitialized (why?)"
-            ));
-        }
-
-        self.cursor_shape = Some(shape);
-        Ok(())
+        self.set_cursor_shape(shape)
     }
 
     fn scale_factor(&self) -> f64 {
