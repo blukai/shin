@@ -3,8 +3,6 @@ use std::mem;
 use std::ptr::NonNull;
 use std::{error, fmt};
 
-use libc::{dlclose, dlerror, dlopen, dlsym};
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Error(Option<CString>);
 
@@ -21,7 +19,7 @@ impl fmt::Display for Error {
 
 impl Error {
     fn from_dlerror() -> Self {
-        let err = unsafe { dlerror() };
+        let err = unsafe { libc::dlerror() };
         if err.is_null() {
             Self(None)
         } else {
@@ -34,7 +32,9 @@ pub struct DynLib(NonNull<c_void>);
 
 impl DynLib {
     pub fn load(filename: &CStr) -> Result<Self, Error> {
-        if let Some(handle) = NonNull::new(unsafe { dlopen(filename.as_ptr(), libc::RTLD_LAZY) }) {
+        if let Some(handle) =
+            NonNull::new(unsafe { libc::dlopen(filename.as_ptr(), libc::RTLD_LAZY) })
+        {
             Ok(Self(handle))
         } else {
             Err(Error::from_dlerror())
@@ -43,7 +43,7 @@ impl DynLib {
 
     pub fn lookup<F: Sized>(&self, name: &CStr) -> Result<F, Error> {
         assert_eq!(mem::size_of::<F>(), mem::size_of::<usize>());
-        let addr = unsafe { dlsym(self.0.as_ptr(), name.as_ptr()) };
+        let addr = unsafe { libc::dlsym(self.0.as_ptr(), name.as_ptr()) };
         if addr.is_null() {
             Err(Error::from_dlerror())
         } else {
@@ -54,6 +54,6 @@ impl DynLib {
 
 impl Drop for DynLib {
     fn drop(&mut self) {
-        unsafe { dlclose(self.0.as_ptr()) };
+        unsafe { libc::dlclose(self.0.as_ptr()) };
     }
 }
