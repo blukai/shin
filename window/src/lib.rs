@@ -1,4 +1,4 @@
-use std::env;
+use std::{borrow::Cow, env};
 
 use anyhow::anyhow;
 use raw_window_handle as rwh;
@@ -47,22 +47,35 @@ pub enum Event {
     Keyboard(input::KeyboardEvent),
 }
 
-// TODO: clipboard write/read.
-//
-// oneshot-like api; bi-directional data offers?
-//
-// -> offer (same as with cursor shape?) (mime)
-// <- send (clipboard event) (mime, dst)
-//
-// <- receive (clipboard event) (mime, src)
-//
-// see https://github.com/rust-lang/futures-rs/blob/de9274e655b2fff8c9630a259a473b71a6b79dda/futures-channel/src/oneshot.rs
-//
-// maybe clipboard needs not to be a part of window crate? nor input. but a separate crate that
-// would allow to create clipboard thing from a rwh? maybe not.
-//
-// most likely clipboard events need to be platform dependent?
+// TODO: maybe clipboard needs not to be a part of window crate? nor input. but a separate crate
+// that would allow to create clipboard thing from a rwh? maybe not.
 
+pub trait ClipboardDataProvider {
+    fn iter_supported_mime_types<I>(&self) -> I
+    where
+        I: Iterator<Item = Cow<'static, str>>,
+        Self: Sized;
+
+    // NOTE: it might make sense for the "consumer" to provide a writer so that this function can
+    // "stream" bytes directly into it.
+    // but practically i am quite certain that the data either is already encoded into the expected
+    // format or it cannot be turned into it in a way that would allow to "stream" it into without
+    // having to buffer it first?
+    // thus let's return bytes.
+    //
+    // NOTE: the event loop probably should always call this method (and put data into "system"
+    // clipboard) in a separate thread to prevent ui from being blocked.
+    // why? that is because for example in case of images most likely you are working with raw
+    // pixels and it's not super cheap and quick to turn those into png if we're talking about for
+    // example 4k image.
+    //
+    // NOTE: ^ this method might be slow. thread it out.
+    fn get_data(&self, mime_type: Cow<'static, str>) -> Option<Box<[u8]>>;
+}
+
+// TODO: rename this into EventLoop. but note that scale_factor and size methods most likely will
+// need to be moved into a separate thing that will probably retain the name Window (or maybe it
+// would make more sense to call it surface?).
 pub trait Window: rwh::HasDisplayHandle + rwh::HasWindowHandle {
     // TODO: add timeout: Option<Duration>.
     // timeout limits how long it may block waiting for new events. a timeout of
@@ -72,7 +85,19 @@ pub trait Window: rwh::HasDisplayHandle + rwh::HasWindowHandle {
     // and wait_event(timeout).
     fn pump_events(&mut self) -> anyhow::Result<()>;
     fn pop_event(&mut self) -> Option<Event>;
+
     fn set_cursor_shape(&mut self, cursor_shape: input::CursorShape) -> anyhow::Result<()>;
+
+    // TODO: might need to introduce a method that would allow to list available mime types.
+    //
+    /// if successful, this function will return the total number of bytes read.
+    fn read_clipboard(
+        &self,
+        mime_type: Cow<'static, str>,
+        buf: &mut Vec<u8>,
+    ) -> anyhow::Result<usize>;
+    fn provide_clipboard_data(&mut self, provider: Box<dyn ClipboardDataProvider>);
+
     fn scale_factor(&self) -> f64;
     fn size(&self) -> (u32, u32);
 }

@@ -21,6 +21,8 @@ use crate::{
 
 // TODO: color schemes ? consider making TextPalette part of something more "centeralized" in
 // combination with other styles? part of Context maybe?
+// i don't quite like the idea of palette (or style) hierarchies. ensure that styles struct is
+// flat.
 
 // TODO: text's maybe_set_hot_or_active must accept an interaction rect enum that would instruct
 // the function to compute minimal rect that would be able to accomodate the text, use rect that
@@ -127,16 +129,16 @@ impl TextSelection {
         }
     }
 
-    fn normalized_selection(&self) -> Range<usize> {
+    fn normalized_cursor(&self) -> Range<usize> {
         let left = self.cursor.start.min(self.cursor.end);
         let right = self.cursor.start.max(self.cursor.end);
         left..right
     }
 
     fn delete_selection(&mut self, text: &mut String) {
-        let range = self.normalized_selection();
-        if range.end > range.start {
-            text.replace_range(range, "");
+        let normalized_cursor = self.normalized_cursor();
+        if normalized_cursor.end > normalized_cursor.start {
+            text.replace_range(normalized_cursor, "");
         }
         self.cursor.end = self.cursor.end.min(self.cursor.start);
         self.cursor.start = self.cursor.end;
@@ -166,6 +168,17 @@ impl TextSelection {
         text.insert(self.cursor.start, ch);
         self.cursor.start += ch.len_utf8();
         self.cursor.end = self.cursor.start;
+    }
+
+    fn paste(&mut self, text: &mut String, pasta: &str) {
+        let normalized_cursor = self.normalized_cursor();
+        if self.is_empty() {
+            text.insert_str(normalized_cursor.start, pasta);
+        } else {
+            text.replace_range(normalized_cursor.clone(), pasta);
+        }
+        self.cursor.end = normalized_cursor.start + pasta.len();
+        self.cursor.start = self.cursor.end;
     }
 }
 
@@ -454,7 +467,7 @@ impl<'a> TextSinglelineSelectable<'a> {
         self
     }
 
-    pub fn update<E: Externs>(self, ctx: &mut Context<E>, input: &input::State) -> Self {
+    pub fn update<E: Externs>(self, key: Key, ctx: &mut Context<E>, input: &input::State) -> Self {
         let KeyboardState { ref scancodes, .. } = input.keyboard;
         for event in input.events.iter() {
             match event {
@@ -506,11 +519,12 @@ impl<'a> TextSinglelineSelectable<'a> {
     pub fn update_if<E: Externs, F: FnOnce(&Self) -> bool>(
         self,
         f: F,
+        key: Key,
         ctx: &mut Context<E>,
         input: &input::State,
     ) -> Self {
         if f(&self) {
-            self.update(ctx, input)
+            self.update(key, ctx, input)
         } else {
             self
         }
@@ -604,7 +618,12 @@ impl<'a> TextSinglelineEditable<'a> {
         self
     }
 
-    pub fn update<E: Externs>(mut self, ctx: &mut Context<E>, input: &input::State) -> Self {
+    pub fn update<E: Externs>(
+        mut self,
+        key: Key,
+        ctx: &mut Context<E>,
+        input: &input::State,
+    ) -> Self {
         let KeyboardState { ref scancodes, .. } = input.keyboard;
         for event in input.events.iter() {
             match event {
@@ -639,6 +658,12 @@ impl<'a> TextSinglelineEditable<'a> {
                 }) => {
                     let text = self.text.buffer.as_string_mut().expect("editable text");
                     self.selection.delete_right(text);
+                }
+                Event::Keyboard(KeyboardEvent::Press {
+                    scancode: Scancode::V,
+                    ..
+                }) if scancodes.any_pressed([Scancode::CtrlLeft, Scancode::CtrlRight]) => {
+                    ctx.request_clipboard_read(key);
                 }
                 Event::Keyboard(KeyboardEvent::Press {
                     keycode: Keycode::Char(ch),
@@ -676,17 +701,25 @@ impl<'a> TextSinglelineEditable<'a> {
                 _ => {}
             }
         }
+
+        if let Some(pasta) = ctx.take_clipboard_read(key) {
+            let text = self.text.buffer.as_string_mut().expect("editable text");
+            // TODO: consider removing line breaks or something.
+            self.selection.paste(text, pasta.as_str());
+        }
+
         self
     }
 
     pub fn update_if<E: Externs, F: FnOnce(&Self) -> bool>(
         self,
         f: F,
+        key: Key,
         ctx: &mut Context<E>,
         input: &input::State,
     ) -> Self {
         if f(&self) {
-            self.update(ctx, input)
+            self.update(key, ctx, input)
         } else {
             self
         }
@@ -998,7 +1031,7 @@ impl<'a> TextMultilineSelectable<'a> {
         self
     }
 
-    pub fn update<E: Externs>(self, ctx: &mut Context<E>, input: &input::State) -> Self {
+    pub fn update<E: Externs>(self, key: Key, ctx: &mut Context<E>, input: &input::State) -> Self {
         let KeyboardState { ref scancodes, .. } = input.keyboard;
         for event in input.events.iter() {
             match event {
@@ -1044,11 +1077,12 @@ impl<'a> TextMultilineSelectable<'a> {
     pub fn update_if<E: Externs, F: FnOnce(&Self) -> bool>(
         self,
         f: F,
+        key: Key,
         ctx: &mut Context<E>,
         input: &input::State,
     ) -> Self {
         if f(&self) {
-            self.update(ctx, input)
+            self.update(key, ctx, input)
         } else {
             self
         }

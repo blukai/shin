@@ -1,3 +1,6 @@
+use std::borrow::Cow;
+
+use anyhow::Context as _;
 use app::AppHandler;
 use gl::api::Apier as _;
 use window::{Event, WindowAttrs, WindowEvent};
@@ -121,7 +124,7 @@ impl Console {
             .multiline()
             .selectable(&mut self.history_selection)
             .maybe_set_hot_or_active(key, ctx, input)
-            .update_if(|t| t.is_active(), ctx, input)
+            .update_if(|t| t.is_active(), key, ctx, input)
             .draw(ctx);
     }
 
@@ -205,7 +208,7 @@ impl Console {
         .editable(&mut self.command_editor_selection)
         .with_hot(ctx.is_hot(key))
         .with_active(active)
-        .update_if(|t| t.is_active(), ctx, input)
+        .update_if(|t| t.is_active(), key, ctx, input)
         .draw(ctx);
     }
 
@@ -318,14 +321,21 @@ impl AppHandler for App {
             &self.input_state,
         );
 
-        let cursor_shape = self
-            .uhi_context
-            .cursor_shape()
-            .unwrap_or(input::CursorShape::Default);
-        ctx.window
-            .set_cursor_shape(cursor_shape)
-            // TODO: proper error handling
-            .expect("could not set cursor shape");
+        if let Some(cursor_shape) = self.uhi_context.take_cursor_shape() {
+            ctx.window
+                .set_cursor_shape(cursor_shape)
+                // TODO: proper error handling
+                .expect("could not set cursor shape");
+        }
+
+        if let Some(clipboard_read) = self.uhi_context.get_pending_clipboard_read_mut() {
+            let mut buf = vec![];
+            let payload = ctx
+                .window
+                .read_clipboard(Cow::Borrowed("text/plain"), &mut buf)
+                .and_then(|_| String::from_utf8(buf).context("invalid text"));
+            clipboard_read.fulfill(payload);
+        }
 
         self.uhi_renderer
             .render(

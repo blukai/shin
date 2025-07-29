@@ -1,6 +1,9 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
-use std::ffi::{CStr, c_char, c_int, c_void};
+use std::ffi::{CStr, CString, c_char, c_int, c_void};
+use std::io::{PipeReader, Read as _};
 use std::mem::MaybeUninit;
+use std::os::fd::FromRawFd as _;
 use std::ptr::{NonNull, null, null_mut};
 use std::slice;
 use std::time::Duration;
@@ -9,7 +12,9 @@ use anyhow::{Context as _, anyhow};
 use input::{CursorShape, KeyboardEvent, Keycode, PointerButton, PointerEvent, Scancode};
 use raw_window_handle as rwh;
 
-use crate::{DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent, xkb};
+use crate::{
+    ClipboardDataProvider, DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent, xkb,
+};
 
 unsafe extern "C" fn noop_listener() {}
 const NOOP_LISTENER: unsafe extern "C" fn() = noop_listener;
@@ -439,11 +444,11 @@ impl TimerFD {
 
 pub struct WaylandBackend {
     libwayland_client: wayland::ClientApi,
-
     wl_display: NonNull<wayland::wl_display>,
 
     // interfaces
     wl_compositor: *mut wayland::wl_compositor,
+    wl_data_device_manager: *mut wayland::wl_data_device_manager,
     wl_seat: *mut wayland::wl_seat,
     wl_shm: *mut wayland::wl_shm,
     wp_cursor_shape_manager_v1: *mut wayland::wp_cursor_shape_manager_v1,
@@ -483,6 +488,10 @@ pub struct WaylandBackend {
     key_repeat_info: Option<KeyRepeatInfo>,
     key_repeat: Option<(Scancode, Keycode)>,
 
+    // clipboard
+    wl_data_device: *mut wayland::wl_data_device,
+    wl_data_offer: *mut wayland::wl_data_offer,
+
     serial_tracker: SerialTracker,
     events: VecDeque<Event>,
 }
@@ -509,6 +518,15 @@ unsafe extern "C" fn handle_wl_registry_global(
                     name,
                     &wayland::wl_compositor_interface,
                     6.min(version),
+                ) as _;
+            }
+            "wl_data_device_manager" => {
+                evl.wl_data_device_manager = wayland::wl_registry_bind(
+                    &evl.libwayland_client,
+                    wl_registry,
+                    name,
+                    &wayland::wl_data_device_manager_interface,
+                    3.min(version),
                 ) as _;
             }
             "wl_seat" => {
@@ -777,7 +795,6 @@ const WL_POINTER_LISTENER: wayland::wl_pointer_listener = wayland::wl_pointer_li
     axis_relative_direction: noop_listener!(),
 };
 
-// TODO: will need this to be able to map scancodes to keycodes with libxkbcommon.
 unsafe extern "C" fn handle_wl_keyboard_keymap(
     data: *mut c_void,
     _wl_keyboard: *mut wayland::wl_keyboard,
@@ -791,6 +808,7 @@ unsafe extern "C" fn handle_wl_keyboard_keymap(
 
     match format {
         wayland::WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1 => {
+            // TODO: this need to be more robust. panics on sway reload (mod+shift+c).
             assert!(evl.xkb_context.is_none());
             let xkb_context =
                 unsafe { xkb::Context::from_fd(fd, size) }.expect("could not create xkb context");
@@ -826,7 +844,12 @@ unsafe extern "C" fn handle_wl_keyboard_leave(
     log::debug!("recv wl_keyboard_leave");
 
     let evl = unsafe { &mut *(data as *mut WaylandBackend) };
+
     evl.serial_tracker.reset_serial(SerialType::KeyboardEnter);
+
+    // QUOTE: The data_offer is valid until a new data_offer or NULL is received or until the
+    // client loses keyboard focus.
+    evl.wl_data_offer = null_mut();
 }
 
 unsafe extern "C" fn handle_wl_keyboard_key(
@@ -946,6 +969,30 @@ const WL_KEYBOARD_LISTENER: wayland::wl_keyboard_listener = wayland::wl_keyboard
     key: handle_wl_keyboard_key,
     modifiers: handle_wl_keyboard_modifiers,
     repeat_info: handle_wl_keyboard_repeat_info,
+};
+
+unsafe extern "C" fn handle_wl_data_device_selection(
+    data: *mut c_void,
+    _wl_data_device: *mut wayland::wl_data_device,
+    id: *mut wayland::wl_data_offer,
+) {
+    log::debug!("recv wl_data_device selection");
+
+    let evl = unsafe { &mut *(data as *mut WaylandBackend) };
+
+    // QUOTE: The data_offer is valid until a new data_offer or NULL is received or until the
+    // client loses keyboard focus.
+    evl.wl_data_offer = id;
+}
+
+const WL_DATA_DEVICE_LISTENER: wayland::wl_data_device_listener =
+    wayland::wl_data_device_listener {
+        data_offer: noop_listener!(),
+        enter: noop_listener!(),
+        leave: noop_listener!(),
+        motion: noop_listener!(),
+        drop: noop_listener!(),
+        selection: handle_wl_data_device_selection,
     };
 
 impl WaylandBackend {
@@ -969,10 +1016,10 @@ impl WaylandBackend {
 
         let mut boxed = Box::new(WaylandBackend {
             libwayland_client,
-
             wl_display,
 
             wl_compositor: null_mut(),
+            wl_data_device_manager: null_mut(),
             wl_seat: null_mut(),
             wl_shm: null_mut(),
             wp_cursor_shape_manager_v1: null_mut(),
@@ -1003,6 +1050,9 @@ impl WaylandBackend {
             key_repeat_info: None,
             key_repeat: None,
 
+            wl_data_device: null_mut(),
+            wl_data_offer: null_mut(),
+
             serial_tracker: SerialTracker::default(),
             events: VecDeque::new(),
         });
@@ -1030,7 +1080,7 @@ impl WaylandBackend {
         assert!(!boxed.wl_shm.is_null());
         assert!(!boxed.xdg_wm_base.is_null());
 
-        log::info!("initialized globals");
+        log::info!("initialized window globals");
 
         unsafe {
             (boxed.libwayland_client.wl_proxy_add_listener)(
@@ -1185,6 +1235,28 @@ impl WaylandBackend {
             )
         };
 
+        // clipboard
+
+        if !boxed.wl_data_device_manager.is_null() {
+            boxed.wl_data_device = unsafe {
+                wayland::wl_data_device_manager_get_data_device(
+                    &boxed.libwayland_client,
+                    boxed.wl_data_device_manager,
+                    boxed.wl_seat,
+                )
+            };
+            if boxed.wl_data_device.is_null() {
+                return Err(anyhow!("could not get data device"));
+            }
+            unsafe {
+                (boxed.libwayland_client.wl_proxy_add_listener)(
+                    boxed.wl_data_device as *mut wayland::wl_proxy,
+                    &WL_DATA_DEVICE_LISTENER as *const wayland::wl_data_device_listener as _,
+                    boxed.as_mut() as *mut WaylandBackend as *mut c_void,
+                )
+            };
+        }
+
         // finalize
 
         unsafe { wayland::wl_surface_commit(&boxed.libwayland_client, boxed.wl_surface) };
@@ -1205,7 +1277,7 @@ impl WaylandBackend {
 
     fn set_cursor_shape(&mut self, shape: CursorShape) -> anyhow::Result<()> {
         let Some(serial) = self.serial_tracker.get_serial(SerialType::PointerEnter) else {
-            log::warn!("no pointer enter serial found");
+            log::warn!("could not set cursor shape (no pointer enter serial)");
             return Ok(());
         };
 
@@ -1296,6 +1368,52 @@ impl WaylandBackend {
                     scale_factor: self.scale_factor(),
                 }));
         }
+    }
+
+    fn maybe_receive_data_offer(
+        &self,
+        mime_type: Cow<'static, str>,
+        buf: &mut Vec<u8>,
+    ) -> anyhow::Result<usize> {
+        if self.wl_data_offer.is_null() {
+            log::warn!("could not read clipboard (no data offer)");
+            return Ok(0);
+        }
+
+        let c_mime_type =
+            CString::new(mime_type.as_ref()).context("could not convert mime type to c string")?;
+
+        let mut fds = [0 as c_int; 2];
+        let ret = unsafe { libc::pipe(fds.as_mut_ptr()) };
+        if ret == -1 {
+            let errno = unsafe { *libc::__errno_location() };
+            return Err(anyhow!("could not pipe: 0x:{errno:x}"));
+        }
+        let [read_fd, write_fd] = fds;
+
+        unsafe {
+            wayland::wl_data_offer_receive(
+                &self.libwayland_client,
+                self.wl_data_offer,
+                c_mime_type.as_ptr(),
+                write_fd,
+            )
+        };
+
+        let ret = unsafe { libc::close(write_fd) };
+        if ret == -1 {
+            // NOTE: i am hesitant to treat this as critical error, but rather as something that is
+            // very unlikely to ever happen and if it'll happen - probably no biggie?
+            let errno = unsafe { *libc::__errno_location() };
+            log::error!("could not close clipboard writer pipe: 0x:{errno:x}");
+        }
+
+        unsafe { (self.libwayland_client.wl_display_flush)(self.wl_display.as_ptr()) };
+
+        // NOTE: PipeReader becomes responsibile for closing fd.
+        unsafe { PipeReader::from_raw_fd(read_fd) }
+            .read_to_end(buf)
+            .context("could not read from pipe")
     }
 }
 
@@ -1415,6 +1533,18 @@ impl Window for WaylandBackend {
         }
 
         self.set_cursor_shape(shape)
+    }
+
+    fn read_clipboard(
+        &self,
+        mime_type: Cow<'static, str>,
+        buf: &mut Vec<u8>,
+    ) -> anyhow::Result<usize> {
+        self.maybe_receive_data_offer(mime_type, buf)
+    }
+
+    fn provide_clipboard_data(&mut self, provider: Box<dyn ClipboardDataProvider>) {
+        todo!();
     }
 
     fn scale_factor(&self) -> f64 {

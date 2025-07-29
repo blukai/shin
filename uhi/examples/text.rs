@@ -1,3 +1,6 @@
+use std::borrow::Cow;
+
+use anyhow::Context as _;
 use app::AppHandler;
 use gl::api::Apier as _;
 use window::{Event, WindowAttrs, WindowEvent};
@@ -126,6 +129,7 @@ impl AppHandler for App {
             .singleline()
             .draw(&mut self.uhi_context);
 
+            let key = uhi::Key::from_location();
             uhi::Text::new(
                 "なかなか興味深いですね",
                 use_rect(primary_font_size, 1, true),
@@ -133,12 +137,13 @@ impl AppHandler for App {
             .with_font_size(primary_font_size)
             .singleline()
             .selectable(&mut self.text_singleline_selection)
-            .maybe_set_hot_or_active(
-                uhi::Key::from_location(),
+            .maybe_set_hot_or_active(key, &mut self.uhi_context, &self.input_state)
+            .update_if(
+                |t| t.is_active(),
+                key,
                 &mut self.uhi_context,
                 &self.input_state,
             )
-            .update_if(|t| t.is_active(), &mut self.uhi_context, &self.input_state)
             .draw(&mut self.uhi_context);
         }
 
@@ -152,6 +157,7 @@ impl AppHandler for App {
             .singleline()
             .draw(&mut self.uhi_context);
 
+            let key = uhi::Key::from_location();
             uhi::Text::new(
                 &mut self.text_singleline_editable,
                 use_rect(primary_font_size, 1, true),
@@ -159,12 +165,13 @@ impl AppHandler for App {
             .with_font_size(primary_font_size)
             .singleline()
             .editable(&mut self.text_singleline_editable_selection)
-            .maybe_set_hot_or_active(
-                uhi::Key::from_location(),
+            .maybe_set_hot_or_active(key, &mut self.uhi_context, &self.input_state)
+            .update_if(
+                |t| t.is_active(),
+                key,
                 &mut self.uhi_context,
                 &self.input_state,
             )
-            .update_if(|t| t.is_active(), &mut self.uhi_context, &self.input_state)
             .draw(&mut self.uhi_context);
         }
 
@@ -178,6 +185,7 @@ impl AppHandler for App {
             .singleline()
             .draw(&mut self.uhi_context);
 
+            let key = uhi::Key::from_location();
             uhi::Text::new(
                 "With no bamboo hat\nDoes the drizzle fall on me?\nWhat care I of that?",
                 use_rect(primary_font_size, 3, true),
@@ -185,12 +193,13 @@ impl AppHandler for App {
             .with_font_size(primary_font_size)
             .multiline()
             .selectable(&mut self.text_multiline_selection)
-            .maybe_set_hot_or_active(
-                uhi::Key::from_location(),
+            .maybe_set_hot_or_active(key, &mut self.uhi_context, &self.input_state)
+            .update_if(
+                |t| t.is_active(),
+                key,
                 &mut self.uhi_context,
                 &self.input_state,
             )
-            .update_if(|t| t.is_active(), &mut self.uhi_context, &self.input_state)
             .draw(&mut self.uhi_context);
         }
 
@@ -234,14 +243,21 @@ impl AppHandler for App {
             }
         }
 
-        let cursor_shape = self
-            .uhi_context
-            .cursor_shape()
-            .unwrap_or(input::CursorShape::Default);
-        ctx.window
-            .set_cursor_shape(cursor_shape)
-            // TODO: proper error handling
-            .expect("could not set cursor shape");
+        if let Some(cursor_shape) = self.uhi_context.take_cursor_shape() {
+            ctx.window
+                .set_cursor_shape(cursor_shape)
+                // TODO: proper error handling
+                .expect("could not set cursor shape");
+        }
+
+        if let Some(clipboard_read) = self.uhi_context.get_pending_clipboard_read_mut() {
+            let mut buf = vec![];
+            let payload = ctx
+                .window
+                .read_clipboard(Cow::Borrowed("text/plain"), &mut buf)
+                .and_then(|_| String::from_utf8(buf).context("invalid text"));
+            clipboard_read.fulfill(payload);
+        }
 
         self.uhi_renderer
             .render(

@@ -25,6 +25,32 @@ impl Key {
     }
 }
 
+/// ui requested to do something. event loop must fulfill the request at frame boundary.
+pub struct ClipboardRead {
+    key: Key,
+    frame_time: Instant,
+    payload: Option<anyhow::Result<String>>,
+}
+
+impl ClipboardRead {
+    fn new(key: Key, frame_time: Instant) -> Self {
+        Self {
+            key,
+            frame_time,
+            payload: None,
+        }
+    }
+
+    fn is_pending(&self) -> bool {
+        self.payload.is_none()
+    }
+
+    pub fn fulfill(&mut self, payload: anyhow::Result<String>) {
+        assert!(self.is_pending());
+        self.payload = Some(payload);
+    }
+}
+
 pub struct Context<E: Externs> {
     pub font_service: FontService,
     pub texture_service: TextureService<E>,
@@ -47,6 +73,8 @@ pub struct Context<E: Externs> {
     // NOTE: ui thing has no direct relationship/connection with the windowing system - those would
     // need to consume cursor shape at the end of the ui frame.
     cursor_shape: Option<CursorShape>,
+
+    clipboard_read: Option<ClipboardRead>,
 }
 
 impl<E: Externs> Default for Context<E> {
@@ -81,12 +109,19 @@ impl<E: Externs> Context<E> {
             active: None,
 
             cursor_shape: None,
+
+            clipboard_read: None,
         })
     }
+
     pub fn begin_frame(&mut self) {
         self.current_frame_start = Instant::now();
         self.delta_time = self.current_frame_start - self.previous_frame_start;
         self.previous_frame_start = self.current_frame_start;
+
+        // NOTE: start each frame with a default cursor so that the event loop can restore it to
+        // default if nothing wants to set it.
+        self.cursor_shape = Some(CursorShape::Default);
     }
 
     pub fn end_frame(&mut self) {
@@ -94,7 +129,15 @@ impl<E: Externs> Context<E> {
 
         self.hot_last_frame = self.hot.take();
 
-        self.cursor_shape = None;
+        // NOTE: cursor shape needs to be taken before end of the frame.
+        assert!(self.cursor_shape.is_none());
+
+        // NOTE: clean up request older than current frame (orphaned or unconsumed).
+        self.clipboard_read
+            .take_if(|cr| cr.frame_time < self.current_frame_start)
+            .inspect(|cr| {
+                log::debug!("evict clipboard read ({:?})", cr.key);
+            });
     }
 
     pub fn default_font_handle(&self) -> FontHandle {
@@ -158,9 +201,39 @@ impl<E: Externs> Context<E> {
         self.active == Some(key)
     }
 
-    // TODO: consider maybe somehow hinting/emphasising that this needs to be "consumed" at the end
-    // of each frame?
-    pub fn cursor_shape(&self) -> Option<CursorShape> {
-        self.cursor_shape
+    pub fn take_cursor_shape(&mut self) -> Option<CursorShape> {
+        self.cursor_shape.take()
+    }
+
+    // TODO: i don't quite like the naming. maybe try again to come up with something better.
+
+    /// widget requests a clipboard read.
+    pub fn request_clipboard_read(&mut self, key: Key) {
+        log::debug!("request clipboard read ({key:?})");
+        self.clipboard_read = Some(ClipboardRead::new(key, self.current_frame_start));
+    }
+
+    /// event loop needs to fulfill a clipboard read request at the end of the frame.
+    pub fn get_pending_clipboard_read_mut(&mut self) -> Option<&mut ClipboardRead> {
+        self.clipboard_read.as_mut().filter(|cr| cr.is_pending())
+    }
+
+    /// widget takes(/consumes) a clipboard read.
+    pub fn take_clipboard_read(&mut self, key: Key) -> Option<String> {
+        self.clipboard_read
+            .take_if(|cr| cr.key == key && !cr.is_pending())
+            .and_then(|cr| match cr.payload {
+                Some(Ok(payload)) => {
+                    log::debug!("take clipboard read ({key:?})");
+                    Some(payload)
+                }
+                Some(Err(err)) => {
+                    // TODO: do i need to be somehow more elaborate with handling this error? this
+                    // semi-silent approach is probably ok.
+                    log::error!("could not read clipboard: {err:?}");
+                    None
+                }
+                None => unreachable!(),
+            })
     }
 }
