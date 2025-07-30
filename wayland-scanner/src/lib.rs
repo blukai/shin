@@ -130,7 +130,7 @@ pub fn parse_protocol<'a>(input: &'a str) -> anyhow::Result<Protocol<'a>> {
                             })?
                         }
                         "interface" => arg.interface = Some(attr.value),
-                        "allow_null" => arg.allow_null = attr.value == "true",
+                        "allow-null" => arg.allow_null = attr.value == "true",
                         "enum" => arg.r#enum = Some(attr.value),
                         _ => {}
                     }
