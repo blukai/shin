@@ -28,6 +28,10 @@ use crate::{
 // the function to compute minimal rect that would be able to accomodate the text, use rect that
 // was provided during construction or would allow user to specify custom interaction rect.
 
+// TODO: copy selectable text.
+
+// TODO: cut editable text.
+
 const FG: Rgba8 = Rgba8::WHITE;
 const SELECTION_ACTIVE: Rgba8 = Rgba8::from_u32(0x304a3dff);
 const SELECTION_INACTIVE: Rgba8 = Rgba8::from_u32(0x484848ff);
@@ -179,6 +183,14 @@ impl TextSelection {
         }
         self.cursor.end = normalized_cursor.start + pasta.len();
         self.cursor.start = self.cursor.end;
+    }
+
+    fn copy<'a>(&self, text: &'a str) -> Option<&'a str> {
+        if self.is_empty() {
+            return None;
+        }
+        let normalized_cursor = self.normalized_cursor();
+        Some(&text[normalized_cursor])
     }
 }
 
@@ -659,11 +671,22 @@ impl<'a> TextSinglelineEditable<'a> {
                     let text = self.text.buffer.as_string_mut().expect("editable text");
                     self.selection.delete_right(text);
                 }
+                // TODO: is this way of setting copypasta keybinding ok? can there be different
+                // keybidnings? what about macos?
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::V,
                     ..
                 }) if scancodes.any_pressed([Scancode::CtrlLeft, Scancode::CtrlRight]) => {
                     ctx.request_clipboard_read(key);
+                }
+                Event::Keyboard(KeyboardEvent::Press {
+                    scancode: Scancode::C,
+                    ..
+                }) if scancodes.any_pressed([Scancode::CtrlLeft, Scancode::CtrlRight]) => {
+                    let text = self.text.buffer.as_string_mut().expect("editable text");
+                    if let Some(text) = self.selection.copy(text) {
+                        ctx.request_clipboard_write(text.to_string());
+                    }
                 }
                 Event::Keyboard(KeyboardEvent::Press {
                     keycode: Keycode::Char(ch),

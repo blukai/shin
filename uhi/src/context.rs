@@ -51,6 +51,11 @@ impl ClipboardRead {
     }
 }
 
+struct ClipboardWrite {
+    frame_time: Instant,
+    payload: String,
+}
+
 pub struct Context<E: Externs> {
     pub font_service: FontService,
     pub texture_service: TextureService<E>,
@@ -75,6 +80,7 @@ pub struct Context<E: Externs> {
     cursor_shape: Option<CursorShape>,
 
     clipboard_read: Option<ClipboardRead>,
+    clipboard_write: Option<ClipboardWrite>,
 }
 
 impl<E: Externs> Default for Context<E> {
@@ -111,6 +117,7 @@ impl<E: Externs> Context<E> {
             cursor_shape: None,
 
             clipboard_read: None,
+            clipboard_write: None,
         })
     }
 
@@ -135,9 +142,12 @@ impl<E: Externs> Context<E> {
         // NOTE: clean up request older than current frame (orphaned or unconsumed).
         self.clipboard_read
             .take_if(|cr| cr.frame_time < self.current_frame_start)
-            .inspect(|cr| {
-                log::debug!("evict clipboard read ({:?})", cr.key);
-            });
+            .inspect(|cr| log::debug!("evict clipboard read (key {:?})", cr.key));
+
+        // NOTE: clean up request older than current frame (unconsumed).
+        self.clipboard_write
+            .take_if(|cw| cw.frame_time < self.current_frame_start)
+            .inspect(|__| log::debug!("evict clipboard write"));
     }
 
     pub fn default_font_handle(&self) -> FontHandle {
@@ -209,7 +219,7 @@ impl<E: Externs> Context<E> {
 
     /// widget requests a clipboard read.
     pub fn request_clipboard_read(&mut self, key: Key) {
-        log::debug!("request clipboard read ({key:?})");
+        log::debug!("request clipboard read (key {key:?})");
         self.clipboard_read = Some(ClipboardRead::new(key, self.current_frame_start));
     }
 
@@ -235,5 +245,19 @@ impl<E: Externs> Context<E> {
                 }
                 None => unreachable!(),
             })
+    }
+
+    /// widget requests a clipboard write.
+    pub fn request_clipboard_write(&mut self, payload: String) {
+        log::debug!("request clipboard write (text {payload})");
+        self.clipboard_write = Some(ClipboardWrite {
+            frame_time: self.current_frame_start,
+            payload,
+        });
+    }
+
+    /// event loop needs to put this into clipboard at the end of the frame.
+    pub fn take_pending_clipboard_write(&mut self) -> Option<String> {
+        self.clipboard_write.take().map(|cw| cw.payload)
     }
 }

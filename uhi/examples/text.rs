@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use anyhow::Context as _;
 use app::AppHandler;
 use gl::api::Apier as _;
@@ -251,12 +249,21 @@ impl AppHandler for App {
         }
 
         if let Some(clipboard_read) = self.uhi_context.get_pending_clipboard_read_mut() {
+            // TODO: figure out maybe how to incorporate reusable clipboard-read buffer into uhi
+            // context or something?
             let mut buf = vec![];
             let payload = ctx
                 .window
-                .read_clipboard(Cow::Borrowed("text/plain"), &mut buf)
+                .read_clipboard(window::MIME_TYPE_TEXT, &mut buf)
                 .and_then(|_| String::from_utf8(buf).context("invalid text"));
             clipboard_read.fulfill(payload);
+        }
+
+        if let Some(text) = self.uhi_context.take_pending_clipboard_write() {
+            ctx.window
+                .provide_clipboard_data(Box::new(window::ClipboardTextProvider::new(text)))
+                // TODO: proper error handling
+                .expect("could not provive clipboard data");
         }
 
         self.uhi_renderer
@@ -266,6 +273,7 @@ impl AppHandler for App {
                 physical_window_size,
                 scale_factor as f32,
             )
+            // TODO: proper error handling
             .expect("uhi renderer fucky wucky");
 
         // ----

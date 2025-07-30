@@ -1,8 +1,7 @@
-use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
-use std::io::{PipeReader, Read as _};
-use std::mem::MaybeUninit;
+use std::io::{PipeReader, PipeWriter, Read as _};
+use std::mem::{self, MaybeUninit};
 use std::os::fd::FromRawFd as _;
 use std::ptr::{NonNull, null, null_mut};
 use std::slice;
@@ -16,13 +15,21 @@ use crate::{
     ClipboardDataProvider, DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent, xkb,
 };
 
+// TODO: (xd) consider checking return of wl_proxy_add_listener (xd).
+
+// TODO: can't paste data copied from this event loop into other app when this app is not visible.
+// the issue is in eglSwapBuffers.
+// the solution might lie in frame callback which would allow to communicate when to perform a
+// draw.
+// also note that eglSwapBuffers will stop being and issue with eglSwapInterval of 0.
+
 unsafe extern "C" fn noop_listener() {}
 const NOOP_LISTENER: unsafe extern "C" fn() = noop_listener;
 macro_rules! noop_listener {
     () => {
         unsafe {
             #[expect(clippy::missing_transmute_annotations)]
-            std::mem::transmute(NOOP_LISTENER)
+            mem::transmute(NOOP_LISTENER)
         }
     };
 }
@@ -442,6 +449,8 @@ impl TimerFD {
     }
 }
 
+// TODO: allocate once and reuse the allocation for converting &str into cstr/*const c_char.
+// temp_cstring: CString,
 pub struct WaylandBackend {
     libwayland_client: wayland::ClientApi,
     wl_display: NonNull<wayland::wl_display>,
@@ -491,6 +500,8 @@ pub struct WaylandBackend {
     // clipboard
     wl_data_device: *mut wayland::wl_data_device,
     wl_data_offer: *mut wayland::wl_data_offer,
+    // NOTE: on cancel this needs to be cleaned up and destroyed.
+    clipboard_data: Option<(Box<dyn ClipboardDataProvider>, *mut wayland::wl_data_source)>,
 
     serial_tracker: SerialTracker,
     events: VecDeque<Event>,
@@ -979,7 +990,6 @@ unsafe extern "C" fn handle_wl_data_device_selection(
     log::debug!("recv wl_data_device selection");
 
     let evl = unsafe { &mut *(data as *mut WaylandBackend) };
-
     // QUOTE: The data_offer is valid until a new data_offer or NULL is received or until the
     // client loses keyboard focus.
     evl.wl_data_offer = id;
@@ -993,6 +1003,70 @@ const WL_DATA_DEVICE_LISTENER: wayland::wl_data_device_listener =
         motion: noop_listener!(),
         drop: noop_listener!(),
         selection: handle_wl_data_device_selection,
+    };
+
+unsafe extern "C" fn handle_wl_data_source_send(
+    data: *mut c_void,
+    wl_data_source: *mut wayland::wl_data_source,
+    mime_type: *const c_char,
+    fd: i32,
+) {
+    log::debug!("recv wl_data_source send");
+
+    let evl = unsafe { &mut *(data as *mut WaylandBackend) };
+
+    // NOTE: PipeWriter becomes responsibile for closing fd. i am constructing it early here to not
+    // have to manually close fd in each error case.
+    let mut writer = unsafe { PipeWriter::from_raw_fd(fd) };
+
+    // NOTE: never will be hit/unreachable (but compositor might be buggy? idk).
+    let Some((data_provider, data_source)) = evl.clipboard_data.as_ref() else {
+        return;
+    };
+
+    if *data_source != wl_data_source {
+        log::warn!("attempt to send on unknown data source");
+        return;
+    }
+
+    let c_mime_type = unsafe { CStr::from_ptr(mime_type) };
+    let Ok(mime_type) = c_mime_type.to_str() else {
+        log::error!("invalid mime type: {c_mime_type:?}");
+        return;
+    };
+
+    let supported_mime_types = data_provider.supported_mime_types();
+    if !supported_mime_types.contains(&mime_type) {
+        log::error!("unsupported mime type (got {mime_type}, want {supported_mime_types:?})");
+        return;
+    }
+
+    if let Err(err) = data_provider.write_as(mime_type, &mut writer) {
+        log::error!("could not write data into clipboard: {err:?}");
+    }
+}
+
+unsafe extern "C" fn handle_wl_data_source_cancelled(
+    data: *mut c_void,
+    wl_data_source: *mut wayland::wl_data_source,
+) {
+    log::debug!("recv wl_data_source cancelled");
+
+    let evl = unsafe { &mut *(data as *mut WaylandBackend) };
+    unsafe { wayland::wl_data_source_destroy(&evl.libwayland_client, wl_data_source) };
+    // NOTE: should always take. if existing data source != given -> compositor did a fucky wacky?
+    evl.clipboard_data
+        .take_if(|(_, prev)| *prev == wl_data_source);
+}
+
+const WL_DATA_SOURCE_LISTENER: wayland::wl_data_source_listener =
+    wayland::wl_data_source_listener {
+        target: noop_listener!(),
+        send: handle_wl_data_source_send,
+        cancelled: handle_wl_data_source_cancelled,
+        dnd_drop_performed: noop_listener!(),
+        dnd_finished: noop_listener!(),
+        action: noop_listener!(),
     };
 
 impl WaylandBackend {
@@ -1052,6 +1126,7 @@ impl WaylandBackend {
 
             wl_data_device: null_mut(),
             wl_data_offer: null_mut(),
+            clipboard_data: None,
 
             serial_tracker: SerialTracker::default(),
             events: VecDeque::new(),
@@ -1277,7 +1352,7 @@ impl WaylandBackend {
 
     fn set_cursor_shape(&mut self, shape: CursorShape) -> anyhow::Result<()> {
         let Some(serial) = self.serial_tracker.get_serial(SerialType::PointerEnter) else {
-            log::warn!("could not set cursor shape (no pointer enter serial)");
+            log::warn!("could not set cursor shape (no pointer enter)");
             return Ok(());
         };
 
@@ -1370,18 +1445,26 @@ impl WaylandBackend {
         }
     }
 
-    fn maybe_receive_data_offer(
-        &self,
-        mime_type: Cow<'static, str>,
-        buf: &mut Vec<u8>,
-    ) -> anyhow::Result<usize> {
-        if self.wl_data_offer.is_null() {
-            log::warn!("could not read clipboard (no data offer)");
+    fn get_clipboard_data(&self, mime_type: &str, buf: &mut Vec<u8>) -> anyhow::Result<usize> {
+        // NOTE: try to read from existing clipboard data because otherwise the whole thing will
+        // hang because reads and writes happen on the same thread here.
+        if let Some((data_provider, _data_source)) = self.clipboard_data.as_ref() {
+            if data_provider.supported_mime_types().contains(&mime_type) {
+                return data_provider
+                    .write_as(mime_type, buf)
+                    .context("failed to write into buf from existing data provier");
+            }
+            // TODO: is this ok?
             return Ok(0);
         }
 
+        if self.wl_data_offer.is_null() {
+            return Err(anyhow!("data device manager is missing"));
+        }
+
+        // TODO: don't allocate, but use reusable buffer.
         let c_mime_type =
-            CString::new(mime_type.as_ref()).context("could not convert mime type to c string")?;
+            CString::new(mime_type).context("could not convert mime type to c string")?;
 
         let mut fds = [0 as c_int; 2];
         let ret = unsafe { libc::pipe(fds.as_mut_ptr()) };
@@ -1408,12 +1491,90 @@ impl WaylandBackend {
             log::error!("could not close clipboard writer pipe: 0x:{errno:x}");
         }
 
-        unsafe { (self.libwayland_client.wl_display_flush)(self.wl_display.as_ptr()) };
+        let ret = unsafe { (self.libwayland_client.wl_display_flush)(self.wl_display.as_ptr()) };
+        if ret == -1 {
+            // TODO: handle wl_display_flush's EAGAIN errno?
+            return Err(anyhow!("wl_display_flush failed"));
+        }
 
         // NOTE: PipeReader becomes responsibile for closing fd.
         unsafe { PipeReader::from_raw_fd(read_fd) }
             .read_to_end(buf)
             .context("could not read from pipe")
+    }
+
+    fn set_clipboard_data(
+        &mut self,
+        data_provider: Box<dyn ClipboardDataProvider>,
+    ) -> anyhow::Result<()> {
+        if let Some((data_provider, data_source)) = self.clipboard_data.take() {
+            drop(data_provider);
+            unsafe { wayland::wl_data_source_destroy(&self.libwayland_client, data_source) };
+        }
+
+        let supported_mime_types = data_provider.supported_mime_types();
+        if supported_mime_types.is_empty() {
+            return Err(anyhow!("data provider supports nothing huh?"));
+        }
+
+        // TODO: consider not bailing-out if there's no serial, but defering the offer until there
+        // is?
+        let Some(serial) = self
+            .serial_tracker
+            .get_serial(SerialType::PointerEnter)
+            .or_else(|| self.serial_tracker.get_serial(SerialType::KeyboardEnter))
+        else {
+            return Err(anyhow!("no pointer nor keyboard serial found"));
+        };
+
+        if self.wl_data_device_manager.is_null() {
+            return Err(anyhow!("data device manager is missing"));
+        }
+
+        let data_source = unsafe {
+            wayland::wl_data_device_manager_create_data_source(
+                &self.libwayland_client,
+                self.wl_data_device_manager,
+            )
+        };
+        if data_source.is_null() {
+            return Err(anyhow!("failed to create data source"));
+        }
+
+        unsafe {
+            (self.libwayland_client.wl_proxy_add_listener)(
+                data_source as *mut wayland::wl_proxy,
+                &WL_DATA_SOURCE_LISTENER as *const wayland::wl_data_source_listener as _,
+                self as *mut WaylandBackend as *mut c_void,
+            )
+        };
+
+        for mime_type in supported_mime_types {
+            // TODO: don't allocate, but use reusable buffer.
+            let c_mime_type =
+                CString::new(*mime_type).context("could not convert mime type to c string")?;
+
+            unsafe {
+                wayland::wl_data_source_offer(
+                    &self.libwayland_client,
+                    data_source,
+                    c_mime_type.as_ptr(),
+                )
+            };
+        }
+
+        unsafe {
+            wayland::wl_data_device_set_selection(
+                &self.libwayland_client,
+                self.wl_data_device,
+                data_source,
+                serial,
+            )
+        };
+
+        self.clipboard_data = Some((data_provider, data_source));
+
+        Ok(())
     }
 }
 
@@ -1535,16 +1696,15 @@ impl Window for WaylandBackend {
         self.set_cursor_shape(shape)
     }
 
-    fn read_clipboard(
-        &self,
-        mime_type: Cow<'static, str>,
-        buf: &mut Vec<u8>,
-    ) -> anyhow::Result<usize> {
-        self.maybe_receive_data_offer(mime_type, buf)
+    fn read_clipboard(&self, mime_type: &str, buf: &mut Vec<u8>) -> anyhow::Result<usize> {
+        self.get_clipboard_data(mime_type, buf)
     }
 
-    fn provide_clipboard_data(&mut self, provider: Box<dyn ClipboardDataProvider>) {
-        todo!();
+    fn provide_clipboard_data(
+        &mut self,
+        data_provider: Box<dyn ClipboardDataProvider>,
+    ) -> anyhow::Result<()> {
+        self.set_clipboard_data(data_provider)
     }
 
     fn scale_factor(&self) -> f64 {
