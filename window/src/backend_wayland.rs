@@ -1,5 +1,5 @@
 use std::collections::{HashMap, VecDeque};
-use std::ffi::{CStr, CString, c_char, c_int, c_void};
+use std::ffi::{CStr, c_char, c_int, c_void};
 use std::io::{PipeReader, PipeWriter, Read as _};
 use std::mem::{self, MaybeUninit};
 use std::os::fd::FromRawFd as _;
@@ -446,8 +446,32 @@ impl TimerFD {
     }
 }
 
-// TODO: allocate once and reuse the allocation for converting &str into cstr/*const c_char.
-// temp_cstring: CString,
+// NOTE: i use re-use this for converting &str into *const c_char when calling ffi funcs.
+// better solution prob would be to have a proper temp allocator for this and any other kinds of
+// stuff.
+struct TempCStr {
+    buf: Vec<u8>,
+}
+
+impl TempCStr {
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            buf: Vec::with_capacity(capacity),
+        }
+    }
+
+    fn from_str(&mut self, str: &str) -> &CStr {
+        assert!(self.buf.is_empty());
+        self.buf.extend_from_slice(str.as_bytes());
+        self.buf.push(0);
+        unsafe { CStr::from_bytes_with_nul_unchecked(self.buf.as_ref()) }
+    }
+
+    fn clear(&mut self) {
+        self.buf.clear()
+    }
+}
+
 pub struct WaylandBackend {
     libwayland_client: wayland::ClientApi,
     wl_display: NonNull<wayland::wl_display>,
@@ -502,6 +526,8 @@ pub struct WaylandBackend {
 
     serial_tracker: SerialTracker,
     events: VecDeque<Event>,
+
+    temp_cstr: TempCStr,
 }
 
 unsafe extern "C" fn handle_wl_registry_global(
@@ -1127,6 +1153,8 @@ impl WaylandBackend {
 
             serial_tracker: SerialTracker::default(),
             events: VecDeque::new(),
+
+            temp_cstr: TempCStr::with_capacity(255),
         });
 
         // init globals
@@ -1439,7 +1467,7 @@ impl WaylandBackend {
         }
     }
 
-    fn get_clipboard_data(&self, mime_type: &str, buf: &mut Vec<u8>) -> anyhow::Result<usize> {
+    fn get_clipboard_data(&mut self, mime_type: &str, buf: &mut Vec<u8>) -> anyhow::Result<usize> {
         // NOTE: try to read from existing clipboard data because otherwise the whole thing will
         // hang because reads and writes happen on the same thread here.
         if let Some((data_provider, _data_source)) = self.clipboard_data.as_ref() {
@@ -1456,10 +1484,6 @@ impl WaylandBackend {
             return Err(anyhow!("data device manager is missing"));
         }
 
-        // TODO: don't allocate, but use reusable buffer.
-        let c_mime_type =
-            CString::new(mime_type).context("could not convert mime type to c string")?;
-
         let mut fds = [0 as c_int; 2];
         let ret = unsafe { libc::pipe(fds.as_mut_ptr()) };
         if ret == -1 {
@@ -1468,6 +1492,7 @@ impl WaylandBackend {
         }
         let [read_fd, write_fd] = fds;
 
+        let c_mime_type = self.temp_cstr.from_str(mime_type);
         unsafe {
             wayland::wl_data_offer_receive(
                 &self.libwayland_client,
@@ -1476,6 +1501,7 @@ impl WaylandBackend {
                 write_fd,
             )
         };
+        self.temp_cstr.clear();
 
         let ret = unsafe { libc::close(write_fd) };
         if ret == -1 {
@@ -1544,10 +1570,7 @@ impl WaylandBackend {
         };
 
         for mime_type in supported_mime_types {
-            // TODO: don't allocate, but use reusable buffer.
-            let c_mime_type =
-                CString::new(*mime_type).context("could not convert mime type to c string")?;
-
+            let c_mime_type = self.temp_cstr.from_str(*mime_type);
             unsafe {
                 wayland::wl_data_source_offer(
                     &self.libwayland_client,
@@ -1555,6 +1578,7 @@ impl WaylandBackend {
                     c_mime_type.as_ptr(),
                 )
             };
+            self.temp_cstr.clear();
         }
 
         unsafe {
@@ -1690,7 +1714,7 @@ impl Window for WaylandBackend {
         self.set_cursor_shape(shape)
     }
 
-    fn read_clipboard(&self, mime_type: &str, buf: &mut Vec<u8>) -> anyhow::Result<usize> {
+    fn read_clipboard(&mut self, mime_type: &str, buf: &mut Vec<u8>) -> anyhow::Result<usize> {
         self.get_clipboard_data(mime_type, buf)
     }
 

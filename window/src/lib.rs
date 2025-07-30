@@ -123,7 +123,7 @@ pub trait Window: rwh::HasDisplayHandle + rwh::HasWindowHandle {
     // if clipboard is not-available.
 
     // if successful, this function will return the total number of bytes read (might be 0).
-    fn read_clipboard(&self, mime_type: &str, buf: &mut Vec<u8>) -> anyhow::Result<usize>;
+    fn read_clipboard(&mut self, mime_type: &str, buf: &mut Vec<u8>) -> anyhow::Result<usize>;
     // TODO: consider changing provider from being all boxed and ugly to an enum that would support
     // most common mime types as well as allow for providing manual/custom boxed providers.
     fn provide_clipboard_data(
