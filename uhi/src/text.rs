@@ -28,9 +28,10 @@ use crate::{
 // the function to compute minimal rect that would be able to accomodate the text, use rect that
 // was provided during construction or would allow user to specify custom interaction rect.
 
-// TODO: copy selectable text.
-
 // TODO: cut editable text.
+
+// TODO: make keyboard keys configurable. that would allow to have platform-specific definitions as
+// well as user-provided.
 
 const FG: Rgba8 = Rgba8::WHITE;
 const SELECTION_ACTIVE: Rgba8 = Rgba8::from_u32(0x304a3dff);
@@ -479,7 +480,7 @@ impl<'a> TextSinglelineSelectable<'a> {
         self
     }
 
-    pub fn update<E: Externs>(self, key: Key, ctx: &mut Context<E>, input: &input::State) -> Self {
+    pub fn update<E: Externs>(self, _key: Key, ctx: &mut Context<E>, input: &input::State) -> Self {
         let KeyboardState { ref scancodes, .. } = input.keyboard;
         for event in input.events.iter() {
             match event {
@@ -487,15 +488,25 @@ impl<'a> TextSinglelineSelectable<'a> {
                     scancode: Scancode::ArrowLeft,
                     ..
                 }) if scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]) => {
-                    let s = self.text.buffer.as_str();
-                    self.selection.move_cursor_left(s, true);
+                    self.selection
+                        .move_cursor_left(self.text.buffer.as_str(), true);
                 }
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::ArrowRight,
                     ..
                 }) if scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]) => {
-                    let s = self.text.buffer.as_str();
-                    self.selection.move_cursor_right(s, true);
+                    self.selection
+                        .move_cursor_right(self.text.buffer.as_str(), true);
+                }
+                Event::Keyboard(KeyboardEvent::Press {
+                    scancode: Scancode::C,
+                    ..
+                }) if scancodes.any_pressed([Scancode::CtrlLeft, Scancode::CtrlRight]) => {
+                    let text = self.text.buffer.as_str();
+                    if let Some(copy) = self.selection.copy(text) {
+                        // TODO: consider allocating copy into single-frame arena or something.
+                        ctx.request_clipboard_write(copy.to_string());
+                    }
                 }
                 Event::Pointer(
                     pe @ PointerEvent::Press {
@@ -551,11 +562,13 @@ impl<'a> TextSinglelineSelectable<'a> {
         );
 
         if !self.selection.is_empty() {
-            let s = self.text.buffer.as_str();
-            let selection_start_x = font_instance
-                .compute_text_width(&s[..self.selection.cursor.start], &mut ctx.texture_service);
+            let text = self.text.buffer.as_str();
+            let selection_start_x = font_instance.compute_text_width(
+                &text[..self.selection.cursor.start],
+                &mut ctx.texture_service,
+            );
             let selection_end_x = font_instance
-                .compute_text_width(&s[..self.selection.cursor.end], &mut ctx.texture_service);
+                .compute_text_width(&text[..self.selection.cursor.end], &mut ctx.texture_service);
             draw_singleline_text_selection(
                 &self.text,
                 self.selection,
@@ -643,36 +656,20 @@ impl<'a> TextSinglelineEditable<'a> {
                     scancode: Scancode::ArrowLeft,
                     ..
                 }) => {
-                    let s = self.text.buffer.as_str();
-                    let extend_selection =
-                        scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]);
-                    self.selection.move_cursor_left(s, extend_selection);
+                    self.selection.move_cursor_left(
+                        self.text.buffer.as_str(),
+                        scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]),
+                    );
                 }
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::ArrowRight,
                     ..
                 }) => {
-                    let s = self.text.buffer.as_str();
-                    let extend_selection =
-                        scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]);
-                    self.selection.move_cursor_right(s, extend_selection);
+                    self.selection.move_cursor_right(
+                        self.text.buffer.as_str(),
+                        scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]),
+                    );
                 }
-                Event::Keyboard(KeyboardEvent::Press {
-                    scancode: Scancode::Backspace,
-                    ..
-                }) => {
-                    let text = self.text.buffer.as_string_mut().expect("editable text");
-                    self.selection.delete_left(text);
-                }
-                Event::Keyboard(KeyboardEvent::Press {
-                    scancode: Scancode::Delete,
-                    ..
-                }) => {
-                    let text = self.text.buffer.as_string_mut().expect("editable text");
-                    self.selection.delete_right(text);
-                }
-                // TODO: is this way of setting copypasta keybinding ok? can there be different
-                // keybidnings? what about macos?
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::V,
                     ..
@@ -683,18 +680,33 @@ impl<'a> TextSinglelineEditable<'a> {
                     scancode: Scancode::C,
                     ..
                 }) if scancodes.any_pressed([Scancode::CtrlLeft, Scancode::CtrlRight]) => {
-                    let text = self.text.buffer.as_string_mut().expect("editable text");
-                    if let Some(text) = self.selection.copy(text) {
-                        ctx.request_clipboard_write(text.to_string());
+                    let text = self.text.buffer.as_string_mut().unwrap();
+                    if let Some(copy) = self.selection.copy(text) {
+                        // TODO: consider allocating copy into single-frame arena or something.
+                        ctx.request_clipboard_write(copy.to_string());
                     }
+                }
+                Event::Keyboard(KeyboardEvent::Press {
+                    scancode: Scancode::Backspace,
+                    ..
+                }) => {
+                    self.selection
+                        .delete_left(self.text.buffer.as_string_mut().unwrap());
+                }
+                Event::Keyboard(KeyboardEvent::Press {
+                    scancode: Scancode::Delete,
+                    ..
+                }) => {
+                    self.selection
+                        .delete_right(self.text.buffer.as_string_mut().unwrap());
                 }
                 Event::Keyboard(KeyboardEvent::Press {
                     keycode: Keycode::Char(ch),
                     ..
                 }) if *ch as u32 >= 32 && *ch as u32 != 127 => {
                     // TODO: maybe better printability check ^.
-                    let text = self.text.buffer.as_string_mut().expect("editable text");
-                    self.selection.insert_char(text, *ch);
+                    self.selection
+                        .insert_char(self.text.buffer.as_string_mut().unwrap(), *ch);
                 }
                 Event::Pointer(
                     ev @ PointerEvent::Press {
@@ -726,9 +738,9 @@ impl<'a> TextSinglelineEditable<'a> {
         }
 
         if let Some(pasta) = ctx.take_clipboard_read(key) {
-            let text = self.text.buffer.as_string_mut().expect("editable text");
             // TODO: consider removing line breaks or something.
-            self.selection.paste(text, pasta.as_str());
+            self.selection
+                .paste(self.text.buffer.as_string_mut().unwrap(), pasta.as_str());
         }
 
         self
@@ -751,20 +763,22 @@ impl<'a> TextSinglelineEditable<'a> {
     pub fn draw<E: Externs>(self, ctx: &mut Context<E>) {
         ctx.draw_buffer.set_clip_rect(Some(self.text.rect));
 
-        let s = self.text.buffer.as_str();
+        let text = self.text.buffer.as_str();
         let mut font_instance = ctx.font_service.get_font_instance(
             self.text.font_handle.unwrap_or(ctx.default_font_handle()),
             self.text.font_size.unwrap_or(ctx.default_font_size()),
         );
 
         let rect_width = self.text.rect.width();
-        let text_width = font_instance.compute_text_width(s, &mut ctx.texture_service);
+        let text_width = font_instance.compute_text_width(text, &mut ctx.texture_service);
         let cursor_width = font_instance.typical_advance_width();
 
-        let selection_start_x = font_instance
-            .compute_text_width(&s[..self.selection.cursor.start], &mut ctx.texture_service);
+        let selection_start_x = font_instance.compute_text_width(
+            &text[..self.selection.cursor.start],
+            &mut ctx.texture_service,
+        );
         let selection_end_x = font_instance
-            .compute_text_width(&s[..self.selection.cursor.end], &mut ctx.texture_service);
+            .compute_text_width(&text[..self.selection.cursor.end], &mut ctx.texture_service);
 
         let mut scroll_x = self.selection.scroll_x;
         // right edge. scroll to show cursor + overscroll for cursor width.
@@ -1054,7 +1068,7 @@ impl<'a> TextMultilineSelectable<'a> {
         self
     }
 
-    pub fn update<E: Externs>(self, key: Key, ctx: &mut Context<E>, input: &input::State) -> Self {
+    pub fn update<E: Externs>(self, _key: Key, ctx: &mut Context<E>, input: &input::State) -> Self {
         let KeyboardState { ref scancodes, .. } = input.keyboard;
         for event in input.events.iter() {
             match event {
@@ -1062,15 +1076,25 @@ impl<'a> TextMultilineSelectable<'a> {
                     scancode: Scancode::ArrowLeft,
                     ..
                 }) if scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]) => {
-                    let s = self.text.buffer.as_str();
-                    self.selection.move_cursor_left(s, true);
+                    self.selection
+                        .move_cursor_left(self.text.buffer.as_str(), true);
                 }
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::ArrowRight,
                     ..
                 }) if scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]) => {
-                    let s = self.text.buffer.as_str();
-                    self.selection.move_cursor_right(s, true);
+                    self.selection
+                        .move_cursor_right(self.text.buffer.as_str(), true);
+                }
+                Event::Keyboard(KeyboardEvent::Press {
+                    scancode: Scancode::C,
+                    ..
+                }) if scancodes.any_pressed([Scancode::CtrlLeft, Scancode::CtrlRight]) => {
+                    let text = self.text.buffer.as_str();
+                    if let Some(copy) = self.selection.copy(text) {
+                        // TODO: consider allocating copy into single-frame arena or something.
+                        ctx.request_clipboard_write(copy.to_string());
+                    }
                 }
                 Event::Pointer(
                     pe @ PointerEvent::Press {
@@ -1121,7 +1145,7 @@ impl<'a> TextMultilineSelectable<'a> {
 
         // TODO: extract draw_multiline_text_selection
         if !self.selection.is_empty() {
-            let s = self.text.buffer.as_str();
+            let text = self.text.buffer.as_str();
             let fill = if self.active {
                 self.text
                     .palette
@@ -1140,20 +1164,20 @@ impl<'a> TextMultilineSelectable<'a> {
             let mut line_start_idx: usize = 0;
             let mut offset_y: f32 = 0.0;
             loop {
-                let line_end_idx = s[line_start_idx..]
+                let line_end_idx = text[line_start_idx..]
                     .find('\n')
-                    .map_or_else(|| s.len(), |i| line_start_idx + i);
+                    .map_or_else(|| text.len(), |i| line_start_idx + i);
 
                 if line_start_idx < end && line_end_idx > start {
                     let start_in_line = start.max(line_start_idx);
                     let end_in_line = end.min(line_end_idx);
 
                     let start_x = font_instance.compute_text_width(
-                        &s[line_start_idx..start_in_line],
+                        &text[line_start_idx..start_in_line],
                         &mut ctx.texture_service,
                     );
                     let end_x = font_instance.compute_text_width(
-                        &s[line_start_idx..end_in_line],
+                        &text[line_start_idx..end_in_line],
                         &mut ctx.texture_service,
                     );
 
@@ -1164,7 +1188,7 @@ impl<'a> TextMultilineSelectable<'a> {
                         .push_rect(RectShape::with_fill(rect, Fill::with_color(fill)));
                 }
 
-                if line_end_idx + 1 >= end.min(s.len()) {
+                if line_end_idx + 1 >= end.min(text.len()) {
                     break;
                 }
 
