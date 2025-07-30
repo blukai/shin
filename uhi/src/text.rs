@@ -30,6 +30,7 @@ use crate::{
 
 // TODO: make keyboard keys configurable. that would allow to have platform-specific definitions as
 // well as user-provided.
+// see "Text-editing shortcuts" at https://support.apple.com/en-us/102650.
 
 const FG: Rgba8 = Rgba8::WHITE;
 const SELECTION_ACTIVE: Rgba8 = Rgba8::from_u32(0x304a3dff);
@@ -96,9 +97,15 @@ impl TextSelection {
         self.cursor = 0..0;
     }
 
+    fn normalized_cursor(&self) -> Range<usize> {
+        let left = self.cursor.start.min(self.cursor.end);
+        let right = self.cursor.start.max(self.cursor.end);
+        left..right
+    }
+
     // TODO: move modifiers (by char, by char type, by word, etc.)
 
-    fn move_cursor_left(&mut self, text: &str, extend_selection: bool) {
+    fn move_left(&mut self, text: &str, extend_selection: bool) {
         if !self.is_empty() && !extend_selection {
             self.cursor.end = self.cursor.end.min(self.cursor.start);
             self.cursor.start = self.cursor.end;
@@ -115,7 +122,7 @@ impl TextSelection {
         }
     }
 
-    fn move_cursor_right(&mut self, text: &str, extend_selection: bool) {
+    fn move_right(&mut self, text: &str, extend_selection: bool) {
         if !self.is_empty() && !extend_selection {
             self.cursor.end = self.cursor.end.max(self.cursor.start);
             self.cursor.start = self.cursor.end;
@@ -132,10 +139,22 @@ impl TextSelection {
         }
     }
 
-    fn normalized_cursor(&self) -> Range<usize> {
-        let left = self.cursor.start.min(self.cursor.end);
-        let right = self.cursor.start.max(self.cursor.end);
-        left..right
+    fn move_home(&mut self, text: &str, extend_selection: bool) {
+        self.cursor.end = text[..self.cursor.end]
+            .rfind('\n')
+            .map_or_else(|| 0, |i| i + 1);
+        if !extend_selection {
+            self.cursor.start = self.cursor.end;
+        }
+    }
+
+    fn move_end(&mut self, text: &str, extend_selection: bool) {
+        self.cursor.end = text[self.cursor.end..]
+            .find('\n')
+            .map_or_else(|| text.len(), |i| self.cursor.end + i);
+        if !extend_selection {
+            self.cursor.start = self.cursor.end;
+        }
     }
 
     fn delete_selection(&mut self, text: &mut String) {
@@ -150,7 +169,7 @@ impl TextSelection {
     fn delete_left(&mut self, text: &mut String) {
         if self.is_empty() {
             self.cursor.end = self.cursor.start;
-            self.move_cursor_left(text, true);
+            self.move_left(text, true);
         }
         self.delete_selection(text);
     }
@@ -158,7 +177,7 @@ impl TextSelection {
     fn delete_right(&mut self, text: &mut String) {
         if self.is_empty() {
             self.cursor.end = self.cursor.start;
-            self.move_cursor_right(text, true);
+            self.move_right(text, true);
         }
         self.delete_selection(text);
     }
@@ -486,16 +505,28 @@ impl<'a> TextSinglelineSelectable<'a> {
                     scancode: Scancode::ArrowLeft,
                     ..
                 }) if scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]) => {
-                    self.selection
-                        .move_cursor_left(self.text.buffer.as_str(), true);
+                    self.selection.move_left(self.text.buffer.as_str(), true);
                 }
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::ArrowRight,
                     ..
                 }) if scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]) => {
-                    self.selection
-                        .move_cursor_right(self.text.buffer.as_str(), true);
+                    self.selection.move_right(self.text.buffer.as_str(), true);
                 }
+
+                Event::Keyboard(KeyboardEvent::Press {
+                    scancode: Scancode::Home,
+                    ..
+                }) if scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]) => {
+                    self.selection.move_home(self.text.buffer.as_str(), true);
+                }
+                Event::Keyboard(KeyboardEvent::Press {
+                    scancode: Scancode::End,
+                    ..
+                }) if scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]) => {
+                    self.selection.move_end(self.text.buffer.as_str(), true);
+                }
+
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::C,
                     ..
@@ -506,6 +537,7 @@ impl<'a> TextSinglelineSelectable<'a> {
                         ctx.request_clipboard_write(copy.to_string());
                     }
                 }
+
                 Event::Pointer(
                     pe @ PointerEvent::Press {
                         button: PointerButton::Primary,
@@ -654,7 +686,7 @@ impl<'a> TextSinglelineEditable<'a> {
                     scancode: Scancode::ArrowLeft,
                     ..
                 }) => {
-                    self.selection.move_cursor_left(
+                    self.selection.move_left(
                         self.text.buffer.as_str(),
                         scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]),
                     );
@@ -663,11 +695,31 @@ impl<'a> TextSinglelineEditable<'a> {
                     scancode: Scancode::ArrowRight,
                     ..
                 }) => {
-                    self.selection.move_cursor_right(
+                    self.selection.move_right(
                         self.text.buffer.as_str(),
                         scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]),
                     );
                 }
+
+                Event::Keyboard(KeyboardEvent::Press {
+                    scancode: Scancode::Home,
+                    ..
+                }) => {
+                    self.selection.move_home(
+                        self.text.buffer.as_str(),
+                        scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]),
+                    );
+                }
+                Event::Keyboard(KeyboardEvent::Press {
+                    scancode: Scancode::End,
+                    ..
+                }) => {
+                    self.selection.move_end(
+                        self.text.buffer.as_str(),
+                        scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]),
+                    );
+                }
+
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::V,
                     ..
@@ -695,6 +747,7 @@ impl<'a> TextSinglelineEditable<'a> {
                         self.selection.delete_selection(text);
                     }
                 }
+
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::Backspace,
                     ..
@@ -717,6 +770,7 @@ impl<'a> TextSinglelineEditable<'a> {
                     self.selection
                         .insert_char(self.text.buffer.as_string_mut().unwrap(), *ch);
                 }
+
                 Event::Pointer(
                     ev @ PointerEvent::Press {
                         button: PointerButton::Primary,
@@ -1085,16 +1139,28 @@ impl<'a> TextMultilineSelectable<'a> {
                     scancode: Scancode::ArrowLeft,
                     ..
                 }) if scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]) => {
-                    self.selection
-                        .move_cursor_left(self.text.buffer.as_str(), true);
+                    self.selection.move_left(self.text.buffer.as_str(), true);
                 }
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::ArrowRight,
                     ..
                 }) if scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]) => {
-                    self.selection
-                        .move_cursor_right(self.text.buffer.as_str(), true);
+                    self.selection.move_right(self.text.buffer.as_str(), true);
                 }
+
+                Event::Keyboard(KeyboardEvent::Press {
+                    scancode: Scancode::Home,
+                    ..
+                }) if scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]) => {
+                    self.selection.move_home(self.text.buffer.as_str(), true);
+                }
+                Event::Keyboard(KeyboardEvent::Press {
+                    scancode: Scancode::End,
+                    ..
+                }) if scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]) => {
+                    self.selection.move_end(self.text.buffer.as_str(), true);
+                }
+
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::C,
                     ..
@@ -1105,6 +1171,7 @@ impl<'a> TextMultilineSelectable<'a> {
                         ctx.request_clipboard_write(copy.to_string());
                     }
                 }
+
                 Event::Pointer(
                     pe @ PointerEvent::Press {
                         button: PointerButton::Primary,
