@@ -28,8 +28,6 @@ use crate::{
 // the function to compute minimal rect that would be able to accomodate the text, use rect that
 // was provided during construction or would allow user to specify custom interaction rect.
 
-// TODO: cut editable text.
-
 // TODO: make keyboard keys configurable. that would allow to have platform-specific definitions as
 // well as user-provided.
 
@@ -684,6 +682,17 @@ impl<'a> TextSinglelineEditable<'a> {
                     if let Some(copy) = self.selection.copy(text) {
                         // TODO: consider allocating copy into single-frame arena or something.
                         ctx.request_clipboard_write(copy.to_string());
+                    }
+                }
+                Event::Keyboard(KeyboardEvent::Press {
+                    scancode: Scancode::X,
+                    ..
+                }) if scancodes.any_pressed([Scancode::CtrlLeft, Scancode::CtrlRight]) => {
+                    let text = self.text.buffer.as_string_mut().unwrap();
+                    if let Some(copy) = self.selection.copy(text) {
+                        // TODO: consider allocating copy into single-frame arena or something.
+                        ctx.request_clipboard_write(copy.to_string());
+                        self.selection.delete_selection(text);
                     }
                 }
                 Event::Keyboard(KeyboardEvent::Press {
