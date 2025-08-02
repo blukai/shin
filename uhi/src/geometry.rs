@@ -210,6 +210,45 @@ impl Rect {
         Self { min, max }
     }
 
+    pub fn from_center_size(center: Vec2, size: f32) -> Self {
+        let radius = Vec2::splat(size / 2.0);
+        Self {
+            min: center - radius,
+            max: center + radius,
+        }
+    }
+
+    // ----
+    // suggary getters
+
+    pub fn width(&self) -> f32 {
+        self.max.x - self.min.x
+    }
+
+    pub fn height(&self) -> f32 {
+        self.max.y - self.min.y
+    }
+
+    pub fn size(&self) -> Vec2 {
+        self.max - self.min
+    }
+
+    pub fn top(&self) -> f32 {
+        self.min.y
+    }
+
+    pub fn right(&self) -> f32 {
+        self.max.x
+    }
+
+    pub fn bottom(&self) -> f32 {
+        self.max.y
+    }
+
+    pub fn left(&self) -> f32 {
+        self.min.x
+    }
+
     pub fn top_left(&self) -> Vec2 {
         self.min
     }
@@ -225,6 +264,30 @@ impl Rect {
     pub fn bottom_right(&self) -> Vec2 {
         self.max
     }
+
+    // ----
+    // actually useful stuff
+
+    pub fn contains(&self, point: &Vec2) -> bool {
+        let x = point.x >= self.min.x && point.x <= self.max.x;
+        let y = point.y >= self.min.y && point.y <= self.max.y;
+        x && y
+    }
+
+    pub fn translate_by(self, delta: &Vec2) -> Self {
+        Self::new(self.min + *delta, self.max + *delta)
+    }
+
+    pub fn shrink(self, amount: &Vec2) -> Self {
+        Self::new(self.min + *amount, self.max - *amount)
+    }
+
+    pub fn expand(self, amount: &Vec2) -> Self {
+        Self::new(self.min - *amount, self.max + *amount)
+    }
+
+    // ----
+    // suggary setters
 
     pub fn set_top_left(&mut self, top_left: Vec2) {
         self.min = top_left;
@@ -242,43 +305,5 @@ impl Rect {
     pub fn set_bottom_left(&mut self, bottom_left: Vec2) {
         self.min = Vec2::new(bottom_left.x, self.min.y);
         self.max = Vec2::new(self.max.x, bottom_left.y);
-    }
-
-    pub fn from_center_size(center: Vec2, size: f32) -> Self {
-        let radius = Vec2::splat(size / 2.0);
-        Self {
-            min: center - radius,
-            max: center + radius,
-        }
-    }
-
-    pub fn width(&self) -> f32 {
-        self.max.x - self.min.x
-    }
-
-    pub fn height(&self) -> f32 {
-        self.max.y - self.min.y
-    }
-
-    pub fn size(&self) -> Vec2 {
-        self.max - self.min
-    }
-
-    pub fn translate_by(self, delta: &Vec2) -> Self {
-        Self::new(self.min + *delta, self.max + *delta)
-    }
-
-    pub fn contains(&self, point: &Vec2) -> bool {
-        let x = point.x >= self.min.x && point.x <= self.max.x;
-        let y = point.y >= self.min.y && point.y <= self.max.y;
-        x && y
-    }
-
-    pub fn shrink(self, amount: &Vec2) -> Self {
-        Self::new(self.min + *amount, self.max - *amount)
-    }
-
-    pub fn expand(self, amount: &Vec2) -> Self {
-        Self::new(self.min - *amount, self.max + *amount)
     }
 }

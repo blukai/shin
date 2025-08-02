@@ -285,6 +285,34 @@ impl<'a> FontInstanceRefMut<'a> {
         }
         width
     }
+
+    /// the most obvious use case for this is to check something / do some assertions in tests
+    /// maybe.
+    pub fn iter_glyphs(&self) -> impl Iterator<Item = GlyphRef> {
+        self.font_instance.glyphs.values().map(|glyph| GlyphRef {
+            glyph,
+            tex_page: &self.tex_pages[glyph.tex_page_idx],
+        })
+    }
+
+    /// all this really is is an alias for `clone` xd.
+    ///
+    /// you don't want to pass a reference to a thing that is carrying references; that creates
+    /// more indirection that i am willing to tolerate for no good reason.
+    ///
+    /// this is a hack somewhat and i am totally fine with it being a hack. rust really-really
+    /// sucks at certain things. just don't fuck up.
+    ///
+    /// sometimes multiple functions may want [`FontInstanceRefMut`], but i do not believe that
+    /// doing a lookup on [`FontService`] for it multiple times is sane, and you can't derive Clone
+    /// for thisbecause it contains mutable references that are not "clonable">
+    pub fn reborrow_mut(&mut self) -> FontInstanceRefMut<'a> {
+        Self {
+            font: self.font,
+            font_instance: unsafe { &mut *(self.font_instance as *mut FontInstance) },
+            tex_pages: unsafe { &mut *(self.tex_pages as *mut Vec<TexturePage>) },
+        }
+    }
 }
 
 #[derive(Default)]
