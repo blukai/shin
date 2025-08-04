@@ -78,14 +78,20 @@ impl TextPalette {
     }
 }
 
+// TODO: consider animating scroll.
+//
+// TODO: this is not only about text selection anymore (with the inclusion of scroll). consider
+// renaming to text state or something.
 #[derive(Default)]
 pub struct TextSelection {
     // if equal, no selection; start may be less than or greater than end (start is where the
     // initial click was).
     cursor: Range<usize>,
-    // used only in editors.
-    // TODO: consider animating scroll.
+
+    // used only in singleline editor (atm).
     scroll_x: f32,
+    // used only in multiline selectable text (atm).
+    scroll_y: f32,
 }
 
 impl TextSelection {
@@ -557,7 +563,7 @@ impl<'a> TextSinglelineSelectable<'a> {
                     );
                     let byte_offset = locate_singleline_text_coord(
                         self.text.buffer.as_str(),
-                        self.text.rect.min.x - self.selection.scroll_x,
+                        self.text.rect.min.x,
                         Vec2::from(F64Vec2::from(input.pointer.position)),
                         font_instance,
                         &mut ctx.texture_service,
@@ -591,6 +597,8 @@ impl<'a> TextSinglelineSelectable<'a> {
     pub fn draw<E: Externs>(self, ctx: &mut Context<E>) {
         ctx.draw_buffer.set_clip_rect(Some(self.text.rect));
 
+        // TODO: singleline selectable text needs to support scroll (x) too.
+
         let mut font_instance = ctx.font_service.get_font_instance(
             self.text.font_handle.unwrap_or(ctx.default_font_handle()),
             self.text.font_size.unwrap_or(ctx.default_font_size()),
@@ -609,7 +617,7 @@ impl<'a> TextSinglelineSelectable<'a> {
                 &self.text,
                 selection_min_x,
                 selection_max_x,
-                self.selection.scroll_x,
+                0.0,
                 self.active,
                 &mut font_instance,
                 &mut ctx.draw_buffer,
@@ -871,16 +879,17 @@ impl<'a> TextSinglelineEditable<'a> {
                 &self.text,
                 selection_min_x,
                 selection_max_x,
-                self.selection.scroll_x,
+                scroll_x,
                 self.active,
                 &mut font_instance,
                 &mut ctx.draw_buffer,
             );
         }
 
+        // TODO: incorporate singleline cursor drawing into draw_singleline_text_selection.
         if self.active {
-            let min = self.text.rect.min - Vec2::new(self.selection.scroll_x, 0.0)
-                + Vec2::new(selection_max_x, 0.0);
+            let min =
+                self.text.rect.min - Vec2::new(scroll_x, 0.0) + Vec2::new(selection_max_x, 0.0);
             let size = Vec2::new(cursor_width, font_instance.height());
             let rect = Rect::new(min, min + size);
             let fill = self
@@ -992,36 +1001,35 @@ fn test_layout_row() {
     }
 }
 
-fn compute_multiline_text_height<E: Externs>(text: &Text, ctx: &mut Context<E>) -> f32 {
-    let str = text.buffer.as_str();
-    let mut font_instance = ctx.font_service.get_font_instance(
-        text.font_handle.unwrap_or(ctx.default_font_handle()),
-        text.font_size.unwrap_or(ctx.default_font_size()),
-    );
-    let font_height = font_instance.height();
-
+fn count_multiline_text_rows<E: Externs>(
+    str: &str,
+    rect: Rect,
+    mut font_instance: FontInstanceRefMut,
+    texture_service: &mut TextureService<E>,
+) -> usize {
     let mut line_count = 0;
     let mut last_row_range = 0..0;
     while last_row_range.end < str.len() {
         last_row_range = layout_row(
             str,
             last_row_range.end,
-            text.rect,
+            rect,
             font_instance.reborrow_mut(),
-            &mut ctx.texture_service,
+            texture_service,
         );
         line_count += 1;
     }
-    line_count as f32 * font_height
+    line_count
 }
 
 fn locate_multiline_text_coord<E: Externs>(
     text: &Text,
+    scroll_y: f32,
     position: Vec2,
     ctx: &mut Context<E>,
 ) -> usize {
-    // maybe pointer is above
-    if position.y < text.rect.top() {
+    let top = text.rect.top() - scroll_y;
+    if position.y < top {
         return 0;
     }
 
@@ -1046,14 +1054,14 @@ fn locate_multiline_text_coord<E: Externs>(
         line_num += 1;
 
         // maybe this is the line
-        let end_y = text.rect.top() + line_num as f32 * font_height;
+        let end_y = top + line_num as f32 * font_height;
         if position.y < end_y {
             break;
         }
     }
 
     // maybe pointer is below
-    let end_y = text.rect.top() + line_num as f32 * font_height;
+    let end_y = top + line_num as f32 * font_height;
     if position.y > end_y {
         return str.len();
     }
@@ -1083,6 +1091,7 @@ fn draw_multiline_text_selection<E: Externs>(
     draw_buffer: &mut DrawBuffer<E>,
 ) {
     let str = text.buffer.as_str();
+    let top = text.rect.top() - selection.scroll_y;
     let selection_range = selection.normalized_cursor();
     let font_height = font_instance.height();
     let fill = if active {
@@ -1128,8 +1137,8 @@ fn draw_multiline_text_selection<E: Externs>(
         let max_x = prefix_width + infix_width;
 
         // TODO: min_ max_
-        let min_y = text.rect.top() + line_num as f32 * font_height;
-        let max_y = text.rect.top() + (line_num + 1) as f32 * font_height;
+        let min_y = top + line_num as f32 * font_height;
+        let max_y = top + (line_num + 1) as f32 * font_height;
 
         let rect = Rect::new(
             Vec2::new(text.rect.left() + min_x, min_y),
@@ -1144,6 +1153,7 @@ fn draw_multiline_text_selection<E: Externs>(
 // TODO: y scroll or something. i want to be able to "scroll to bottom".
 fn draw_multiline_text<E: Externs>(
     text: &Text,
+    scroll_y: f32,
     mut font_instance: FontInstanceRefMut,
     texture_service: &mut TextureService<E>,
     draw_buffer: &mut DrawBuffer<E>,
@@ -1154,6 +1164,7 @@ fn draw_multiline_text<E: Externs>(
     let font_height = font_instance.height();
 
     let mut position = text.rect.top_left();
+    position.y -= scroll_y;
     for ch in str.chars() {
         let glyph = font_instance.get_or_rasterize_glyph(ch, texture_service);
         let advance_width = glyph.advance_width();
@@ -1205,6 +1216,7 @@ impl<'a> TextMultiline<'a> {
         );
         draw_multiline_text(
             &self.text,
+            0.0,
             font_instance,
             &mut ctx.texture_service,
             &mut ctx.draw_buffer,
@@ -1270,7 +1282,18 @@ impl<'a> TextMultilineSelectable<'a> {
         // maybe not!
         // but also maybe there needs to be a param that would allow to specify minimum amount of
         // rows?
-        let height = compute_multiline_text_height(&self.text, ctx);
+
+        let font_instance = ctx.font_service.get_font_instance(
+            self.text.font_handle.unwrap_or(ctx.default_font_handle()),
+            self.text.font_size.unwrap_or(ctx.default_font_size()),
+        );
+        let height = font_instance.height()
+            * count_multiline_text_rows(
+                self.text.buffer.as_str(),
+                self.text.rect,
+                font_instance,
+                &mut ctx.texture_service,
+            ) as f32;
         let size = Vec2::new(self.text.rect.width(), height);
         let interaction_rect = Rect::new(self.text.rect.min, self.text.rect.min + size);
         ctx.maybe_set_hot_or_active(key, interaction_rect, CursorShape::Text, input);
@@ -1331,6 +1354,7 @@ impl<'a> TextMultilineSelectable<'a> {
                 {
                     let byte_offset = locate_multiline_text_coord(
                         &self.text,
+                        self.selection.scroll_y,
                         Vec2::from(F64Vec2::from(input.pointer.position)),
                         ctx,
                     );
@@ -1363,10 +1387,33 @@ impl<'a> TextMultilineSelectable<'a> {
     pub fn draw<E: Externs>(self, ctx: &mut Context<E>) {
         ctx.draw_buffer.set_clip_rect(Some(self.text.rect));
 
+        let str = self.text.buffer.as_str();
         let mut font_instance = ctx.font_service.get_font_instance(
             self.text.font_handle.unwrap_or(ctx.default_font_handle()),
             self.text.font_size.unwrap_or(ctx.default_font_size()),
         );
+
+        let rect_height = self.text.rect.height();
+        let font_height = font_instance.height();
+
+        let selection_max_y = font_height
+            * count_multiline_text_rows(
+                &str[..self.selection.cursor.end],
+                self.text.rect,
+                font_instance.reborrow_mut(),
+                &mut ctx.texture_service,
+            ) as f32;
+
+        let mut scroll_y = self.selection.scroll_y;
+        // bottom edge
+        if selection_max_y - scroll_y > rect_height {
+            scroll_y = selection_max_y - rect_height;
+        }
+        // top edge
+        if selection_max_y - font_height < scroll_y {
+            scroll_y = (selection_max_y - font_height).max(0.0);
+        }
+        self.selection.scroll_y = scroll_y;
 
         if !self.selection.is_empty() {
             draw_multiline_text_selection(
@@ -1381,6 +1428,7 @@ impl<'a> TextMultilineSelectable<'a> {
 
         draw_multiline_text(
             &self.text,
+            scroll_y,
             font_instance,
             &mut ctx.texture_service,
             &mut ctx.draw_buffer,

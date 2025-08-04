@@ -144,13 +144,13 @@ impl Console {
         } else if self.command_editor_active {
             // but then it needs to be deactivated *once*. future activations will be set by the
             // interaction state thingie.
-            let any_button_released = input
+            let any_button_pressed = input
                 .pointer
                 .buttons
-                .any_just_released(input::PointerButton::all());
+                .any_just_pressed(input::PointerButton::all());
             let rect_contains_pointer =
                 rect.contains(&uhi::Vec2::from(uhi::F64Vec2::from(input.pointer.position)));
-            if any_button_released && !rect_contains_pointer {
+            if any_button_pressed && !rect_contains_pointer {
                 self.command_editor_active = false;
             }
         }
