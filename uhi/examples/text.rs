@@ -15,12 +15,12 @@ struct App {
 
     input_state: input::State,
 
-    text_singleline_selection: uhi::TextSelection,
+    text_singleline_state: uhi::TextState,
 
     text_singleline_editable: String,
-    text_singleline_editable_selection: uhi::TextSelection,
+    text_singleline_editable_state: uhi::TextState,
 
-    text_multiline_selection: uhi::TextSelection,
+    text_multiline_state: uhi::TextState,
 }
 
 impl AppHandler for App {
@@ -31,12 +31,12 @@ impl AppHandler for App {
 
             input_state: input::State::default(),
 
-            text_singleline_selection: uhi::TextSelection::default(),
+            text_singleline_state: uhi::TextState::default(),
 
             text_singleline_editable: "hello, sailor".to_string(),
-            text_singleline_editable_selection: uhi::TextSelection::default(),
+            text_singleline_editable_state: uhi::TextState::default(),
 
-            text_multiline_selection: uhi::TextSelection::default(),
+            text_multiline_state: uhi::TextState::default(),
         }
     }
 
@@ -127,22 +127,14 @@ impl AppHandler for App {
             .singleline()
             .draw(&mut self.uhi_context);
 
-            let key = uhi::Key::from_location();
             uhi::Text::new(
                 "なかなか興味深いですね",
                 use_rect(primary_font_size, 1, true),
             )
             .with_font_size(primary_font_size)
             .singleline()
-            .selectable(&mut self.text_singleline_selection)
-            .maybe_set_hot_or_active(key, &mut self.uhi_context, &self.input_state)
-            .update_if(
-                |t| t.is_active(),
-                key,
-                &mut self.uhi_context,
-                &self.input_state,
-            )
-            .draw(&mut self.uhi_context);
+            .selectable(&mut self.text_singleline_state)
+            .draw(&mut self.uhi_context, &self.input_state);
         }
 
         {
@@ -155,22 +147,14 @@ impl AppHandler for App {
             .singleline()
             .draw(&mut self.uhi_context);
 
-            let key = uhi::Key::from_location();
             uhi::Text::new(
                 &mut self.text_singleline_editable,
                 use_rect(primary_font_size, 1, true),
             )
             .with_font_size(primary_font_size)
             .singleline()
-            .editable(&mut self.text_singleline_editable_selection)
-            .maybe_set_hot_or_active(key, &mut self.uhi_context, &self.input_state)
-            .update_if(
-                |t| t.is_active(),
-                key,
-                &mut self.uhi_context,
-                &self.input_state,
-            )
-            .draw(&mut self.uhi_context);
+            .editable(&mut self.text_singleline_editable_state)
+            .draw(&mut self.uhi_context, &self.input_state);
         }
 
         {
@@ -183,22 +167,14 @@ impl AppHandler for App {
             .singleline()
             .draw(&mut self.uhi_context);
 
-            let key = uhi::Key::from_location();
             uhi::Text::new(
                 "With no bamboo hat\nDoes the drizzle fall on me?\nWhat care I of that?",
                 use_rect(primary_font_size, 3, true),
             )
             .with_font_size(primary_font_size)
             .multiline()
-            .selectable(&mut self.text_multiline_selection)
-            .maybe_set_hot_or_active(key, &mut self.uhi_context, &self.input_state)
-            .update_if(
-                |t| t.is_active(),
-                key,
-                &mut self.uhi_context,
-                &self.input_state,
-            )
-            .draw(&mut self.uhi_context);
+            .selectable(&mut self.text_multiline_state)
+            .draw(&mut self.uhi_context, &self.input_state);
         }
 
         {
@@ -241,14 +217,14 @@ impl AppHandler for App {
             }
         }
 
-        if let Some(cursor_shape) = self.uhi_context.take_cursor_shape() {
+        if let Some(cursor_shape) = self.uhi_context.interaction_state.take_cursor_shape() {
             ctx.window
                 .set_cursor_shape(cursor_shape)
                 // TODO: proper error handling
                 .expect("could not set cursor shape");
         }
 
-        if let Some(clipboard_read) = self.uhi_context.get_pending_clipboard_read_mut() {
+        if self.uhi_context.clipboard_service.is_awaiting_read() {
             // TODO: figure out maybe how to incorporate reusable clipboard-read buffer into uhi
             // context or something?
             let mut buf = vec![];
@@ -256,10 +232,10 @@ impl AppHandler for App {
                 .window
                 .read_clipboard(window::MIME_TYPE_TEXT, &mut buf)
                 .and_then(|_| String::from_utf8(buf).context("invalid text"));
-            clipboard_read.fulfill(payload);
+            self.uhi_context.clipboard_service.fulfill_read(payload);
         }
 
-        if let Some(text) = self.uhi_context.take_pending_clipboard_write() {
+        if let Some(text) = self.uhi_context.clipboard_service.take_write() {
             ctx.window
                 .provide_clipboard_data(Box::new(window::ClipboardTextProvider::new(text)))
                 // TODO: proper error handling

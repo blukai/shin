@@ -85,12 +85,14 @@ impl From<(f32, f32)> for Vec2 {
 }
 
 impl From<F64Vec2> for Vec2 {
+    #[inline]
     fn from(value: F64Vec2) -> Self {
         Self::new(value.x as f32, value.y as f32)
     }
 }
 
 impl From<U32Vec2> for Vec2 {
+    #[inline]
     fn from(value: U32Vec2) -> Self {
         Self::new(value.x as f32, value.y as f32)
     }
@@ -166,6 +168,7 @@ pub struct F64Vec2 {
 }
 
 impl From<(f64, f64)> for F64Vec2 {
+    #[inline]
     fn from((x, y): (f64, f64)) -> Self {
         Self::new(x, y)
     }
@@ -185,6 +188,7 @@ pub struct U32Vec2 {
 }
 
 impl From<(u32, u32)> for U32Vec2 {
+    #[inline]
     fn from((x, y): (u32, u32)) -> Self {
         Self::new(x, y)
     }
@@ -206,10 +210,12 @@ pub struct Rect {
 }
 
 impl Rect {
+    #[inline]
     pub fn new(min: Vec2, max: Vec2) -> Self {
         Self { min, max }
     }
 
+    #[inline]
     pub fn from_center_size(center: Vec2, size: f32) -> Self {
         let radius = Vec2::splat(size / 2.0);
         Self {

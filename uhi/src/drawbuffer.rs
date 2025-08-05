@@ -5,6 +5,12 @@ use crate::{Externs, Rect, TextureKind, Vec2};
 // TODO: consider offloading vertex generation and stuff for the gpu (or maybe for software
 // renderer?) to the renderer. accumulate shapes, not verticies.
 
+// TODO: layers. i want to be able to put some stuff behind, some stuff ~above while drawing.
+//
+// can layers be relative? should i try to entertain idea of relative layers? for example tooltips
+// at base layer must have lower priority and not be show when popup is active or something like
+// that.
+
 // NOTE: repr(C) is here to ensure that ordering is correct in into_array transmutation.
 #[repr(C)]
 // NOTE: Copy is derived simply because it's cheap. size of u32.

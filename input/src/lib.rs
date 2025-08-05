@@ -247,6 +247,8 @@ pub struct ButtonInput<B>
 where
     B: Copy + Eq + NoHash,
 {
+    // TODO: consider consolidating all of those hash sets into a single hash map of flags that
+    // will represent all possible states (including whether this is a repeated press).
     pressed: NoHashSet<B>,
     just_pressed: NoHashSet<B>,
     just_released: NoHashSet<B>,
@@ -344,7 +346,6 @@ pub struct PointerState {
     pub position: (f64, f64),
     pub delta: (f64, f64),
     pub buttons: ButtonInput<PointerButton>,
-    // NOTE: this is currently unused, but the plan is to use it for text selection / dragging.
     pub press_origins: NoHashMap<PointerButton, (f64, f64)>,
 }
 

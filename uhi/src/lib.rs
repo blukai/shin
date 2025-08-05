@@ -1,19 +1,23 @@
 use std::fmt;
 
+mod clipboardservice;
 mod context;
 mod drawbuffer;
 mod fontservice;
 mod geometry;
+mod interactionstate;
 mod layout;
 mod renderer;
 mod text;
 mod texturepacker;
 mod textureservice;
 
+pub use clipboardservice::*;
 pub use context::*;
 pub use drawbuffer::*;
 pub use fontservice::*;
 pub use geometry::*;
+pub use interactionstate::*;
 pub use layout::*;
 pub use renderer::*;
 pub use text::*;

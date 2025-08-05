@@ -80,11 +80,11 @@ struct Console {
     open_animation: Animation,
 
     command_editor: String,
-    command_editor_selection: uhi::TextSelection,
+    command_editor_state: uhi::TextState,
     command_editor_active: bool,
 
     history: String,
-    history_selection: uhi::TextSelection,
+    history_state: uhi::TextState,
 }
 
 impl Console {
@@ -96,11 +96,11 @@ impl Console {
             open_animation: Animation::default(),
 
             command_editor: "".to_string(),
-            command_editor_selection: uhi::TextSelection::default(),
+            command_editor_state: uhi::TextState::default(),
             command_editor_active: false,
 
             history: "".to_string(),
-            history_selection: uhi::TextSelection::default(),
+            history_state: uhi::TextState::default(),
         }
     }
 
@@ -116,14 +116,10 @@ impl Console {
     ) {
         assert!(self.is_open());
 
-        let key = uhi::Key::from_location();
-
         uhi::Text::new(self.history.as_str(), rect.shrink(&uhi::Vec2::splat(16.0)))
             .multiline()
-            .selectable(&mut self.history_selection)
-            .maybe_set_hot_or_active(key, ctx, input)
-            .update_if(|t| t.is_active(), key, ctx, input)
-            .draw(ctx);
+            .selectable(&mut self.history_state)
+            .draw(ctx, input);
     }
 
     fn update_command_editor<E: uhi::Externs>(
@@ -134,9 +130,10 @@ impl Console {
     ) {
         assert!(self.is_open());
 
-        let key = uhi::Key::from_location();
+        let key = uhi::Key::from_caller_location();
 
-        ctx.maybe_set_hot_or_active(key, rect, input::CursorShape::Text, input);
+        ctx.interaction_state
+            .maybe_set_hot_or_active(key, rect, input::CursorShape::Text, input);
 
         if self.open_animation.just_finished() {
             // if animation just finished -> activate the command editor.
@@ -155,8 +152,8 @@ impl Console {
             }
         }
 
-        let active =
-            (self.command_editor_active || ctx.is_active(key)) && self.open_animation.is_finished();
+        let active = (self.command_editor_active || ctx.interaction_state.is_active(key))
+            && self.open_animation.is_finished();
 
         // ----
 
@@ -169,7 +166,7 @@ impl Console {
                 self.history.push('\n');
 
                 self.command_editor.clear();
-                self.command_editor_selection.clear();
+                self.command_editor_state.clear();
 
                 // TODO: scroll history to end
             }
@@ -202,12 +199,11 @@ impl Console {
             &mut self.command_editor,
             rect.shrink(&uhi::Vec2::new(16.0, py)),
         )
+        .with_key(key)
         .singleline()
-        .editable(&mut self.command_editor_selection)
-        .with_hot(ctx.is_hot(key))
-        .with_active(active)
-        .update_if(|t| t.is_active(), key, ctx, input)
-        .draw(ctx);
+        .editable(&mut self.command_editor_state)
+        .with_maybe_hot_or_active(ctx.interaction_state.is_hot(key), active)
+        .draw(ctx, input);
     }
 
     fn update<E: uhi::Externs>(
@@ -319,14 +315,14 @@ impl AppHandler for App {
             &self.input_state,
         );
 
-        if let Some(cursor_shape) = self.uhi_context.take_cursor_shape() {
+        if let Some(cursor_shape) = self.uhi_context.interaction_state.take_cursor_shape() {
             ctx.window
                 .set_cursor_shape(cursor_shape)
                 // TODO: proper error handling
                 .expect("could not set cursor shape");
         }
 
-        if let Some(clipboard_read) = self.uhi_context.get_pending_clipboard_read_mut() {
+        if self.uhi_context.clipboard_service.is_awaiting_read() {
             // TODO: figure out maybe how to incorporate reusable clipboard-read buffer into uhi
             // context or something?
             let mut buf = vec![];
@@ -334,10 +330,10 @@ impl AppHandler for App {
                 .window
                 .read_clipboard(window::MIME_TYPE_TEXT, &mut buf)
                 .and_then(|_| String::from_utf8(buf).context("invalid text"));
-            clipboard_read.fulfill(payload);
+            self.uhi_context.clipboard_service.fulfill_read(payload);
         }
 
-        if let Some(text) = self.uhi_context.take_pending_clipboard_write() {
+        if let Some(text) = self.uhi_context.clipboard_service.take_write() {
             ctx.window
                 .provide_clipboard_data(Box::new(window::ClipboardTextProvider::new(text)))
                 // TODO: proper error handling
