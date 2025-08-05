@@ -200,9 +200,9 @@ impl Console {
             rect.shrink(&uhi::Vec2::new(16.0, py)),
         )
         .with_key(key)
+        .with_maybe_hot_or_active(ctx.interaction_state.is_hot(key), active)
         .singleline()
         .editable(&mut self.command_editor_state)
-        .with_maybe_hot_or_active(ctx.interaction_state.is_hot(key), active)
         .draw(ctx, input);
     }
 

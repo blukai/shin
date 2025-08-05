@@ -111,8 +111,24 @@ impl Vec2 {
         Self { x: v, y: v }
     }
 
+    // ----
+
     #[inline]
-    pub fn dot(self, rhs: Self) -> f32 {
+    pub const fn with_x(mut self, x: f32) -> Self {
+        self.x = x;
+        self
+    }
+
+    #[inline]
+    pub const fn with_y(mut self, y: f32) -> Self {
+        self.y = y;
+        self
+    }
+
+    // ----
+
+    #[inline]
+    pub const fn dot(self, rhs: Self) -> f32 {
         (self.x * rhs.x) + (self.y * rhs.y)
     }
 
@@ -137,7 +153,7 @@ impl Vec2 {
     }
 
     #[inline]
-    pub fn perp(self) -> Self {
+    pub const fn perp(self) -> Self {
         Self {
             x: -self.y,
             y: self.x,
@@ -145,7 +161,7 @@ impl Vec2 {
     }
 
     #[inline]
-    pub fn min(self, rhs: Self) -> Self {
+    pub const fn min(self, rhs: Self) -> Self {
         Self {
             x: if self.x < rhs.x { self.x } else { rhs.x },
             y: if self.y < rhs.y { self.y } else { rhs.y },
@@ -153,7 +169,7 @@ impl Vec2 {
     }
 
     #[inline]
-    pub fn max(self, rhs: Self) -> Self {
+    pub const fn max(self, rhs: Self) -> Self {
         Self {
             x: if self.x > rhs.x { self.x } else { rhs.x },
             y: if self.y > rhs.y { self.y } else { rhs.y },
@@ -225,7 +241,6 @@ impl Rect {
     }
 
     // ----
-    // suggary getters
 
     pub fn width(&self) -> f32 {
         self.max.x - self.min.x
@@ -238,41 +253,6 @@ impl Rect {
     pub fn size(&self) -> Vec2 {
         self.max - self.min
     }
-
-    pub fn top(&self) -> f32 {
-        self.min.y
-    }
-
-    pub fn right(&self) -> f32 {
-        self.max.x
-    }
-
-    pub fn bottom(&self) -> f32 {
-        self.max.y
-    }
-
-    pub fn left(&self) -> f32 {
-        self.min.x
-    }
-
-    pub fn top_left(&self) -> Vec2 {
-        self.min
-    }
-
-    pub fn top_right(&self) -> Vec2 {
-        Vec2::new(self.max.x, self.min.y)
-    }
-
-    pub fn bottom_left(&self) -> Vec2 {
-        Vec2::new(self.min.x, self.max.y)
-    }
-
-    pub fn bottom_right(&self) -> Vec2 {
-        self.max
-    }
-
-    // ----
-    // actually useful stuff
 
     pub fn contains(&self, point: &Vec2) -> bool {
         let x = point.x >= self.min.x && point.x <= self.max.x;
@@ -293,7 +273,23 @@ impl Rect {
     }
 
     // ----
-    // suggary setters
+    // suggary stuff
+
+    pub fn top_left(&self) -> Vec2 {
+        self.min
+    }
+
+    pub fn top_right(&self) -> Vec2 {
+        Vec2::new(self.max.x, self.min.y)
+    }
+
+    pub fn bottom_left(&self) -> Vec2 {
+        Vec2::new(self.min.x, self.max.y)
+    }
+
+    pub fn bottom_right(&self) -> Vec2 {
+        self.max
+    }
 
     pub fn set_top_left(&mut self, top_left: Vec2) {
         self.min = top_left;

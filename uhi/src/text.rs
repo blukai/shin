@@ -6,7 +6,7 @@ use input::{
 };
 
 use crate::{
-    ClipboardService, Context, DrawBuffer, Externs, F64Vec2, Fill, FillTexture, FontHandle,
+    ClipboardState, Context, DrawBuffer, Externs, F64Vec2, Fill, FillTexture, FontHandle,
     FontInstanceRefMut, InteractionState, Key, Rect, RectShape, Rgba8, TextureKind, TextureService,
     Vec2,
 };
@@ -48,6 +48,524 @@ use crate::{
 // content).
 
 // TODO: culling - don't draw stuff that is not within the clip rect.
+
+// TODO: support different line break modes or whatever. current idea is break anywhere doesn't
+// matter where; if next char can't fit on current line it must move to the next one.
+
+// ----
+// testing utils
+
+#[cfg(test)]
+mod tests {
+    use crate::{Externs, FontInstanceRefMut, TextureService};
+
+    pub fn assert_all_glyphs_have_equal_advance_width<E: Externs>(
+        str: &str,
+        mut font_instance: FontInstanceRefMut,
+        texture_service: &mut TextureService<E>,
+    ) {
+        let mut prev_advance_width: Option<f32> = None;
+        for ch in str.chars() {
+            let glyph = font_instance.get_or_rasterize_glyph(ch, texture_service);
+            let advance_width = glyph.advance_width();
+            if let Some(prev_advance_width) = prev_advance_width.replace(advance_width) {
+                assert_eq!(prev_advance_width, advance_width);
+            }
+        }
+    }
+}
+
+// ----
+// actual stuff
+
+fn should_break_line(ch: char, advance_width: f32, current_x: f32, rect: Rect) -> bool {
+    if ch == '\n' {
+        return true;
+    }
+
+    assert!(current_x >= rect.min.x);
+    let will_overflow = current_x + advance_width - rect.min.x > rect.width();
+    will_overflow
+}
+
+// NOTE: don't advance if line break was cause by whitespace character (`\n` is considered a
+// whitespace).
+fn should_consume_post_line_break_char(ch: char) -> bool {
+    ch.is_whitespace()
+}
+
+fn layout_row<E: Externs>(
+    str: &str,
+    start_byte: usize,
+    rect: Rect,
+    mut font_instance: FontInstanceRefMut,
+    texture_service: &mut TextureService<E>,
+) -> Range<usize> {
+    let mut current_x: f32 = rect.min.x;
+    let mut end_byte: usize = start_byte;
+
+    for ch in (&str[start_byte..]).chars() {
+        let glyph = font_instance.get_or_rasterize_glyph(ch, texture_service);
+        let advance_width = glyph.advance_width();
+
+        if should_break_line(ch, advance_width, current_x, rect) {
+            if should_consume_post_line_break_char(ch) {
+                end_byte += ch.len_utf8();
+            }
+            return start_byte..end_byte;
+        }
+
+        current_x += advance_width;
+        end_byte += ch.len_utf8();
+    }
+
+    start_byte..str.len()
+}
+
+#[test]
+fn test_layout_row() {
+    // NOTE: it's a pretty poor test that makes very heavy assumptions about the fact that we're
+    // dealing with monospace font. it will not be correct with non-monospace font (although it
+    // might pass).
+
+    use crate::UnitExterns;
+
+    const CHARS_PER_ROW: usize = 16;
+
+    let mut ctx = Context::<UnitExterns>::default();
+    let mut font_instance = ctx
+        .font_service
+        .get_font_instance(ctx.default_font_handle(), ctx.default_font_size());
+
+    let haiku = "With no bamboo hat\nDoes the drizzle fall on me?\nWhat care I of that?";
+    tests::assert_all_glyphs_have_equal_advance_width(
+        haiku,
+        font_instance.reborrow_mut(),
+        &mut ctx.texture_service,
+    );
+    // NOTE: assertion above /\ ensures that the width below \/ matches the assumption.
+    let width = font_instance.typical_advance_width() * CHARS_PER_ROW as f32;
+    let rect = Rect::new(Vec2::ZERO, Vec2::new(width, f32::INFINITY));
+
+    let mut last_row_range = 0..0;
+    while last_row_range.end < haiku.len() {
+        last_row_range = layout_row(
+            haiku,
+            last_row_range.end,
+            rect,
+            font_instance.reborrow_mut(),
+            &mut ctx.texture_service,
+        );
+        // NOTE: a line may include invisible(/ chars that must not be rendered) at the end.
+        let row = &haiku[last_row_range.clone()];
+        assert!(row.trim().len() <= CHARS_PER_ROW);
+    }
+}
+
+fn count_rows<E: Externs>(
+    str: &str,
+    rect: Rect,
+    mut font_instance: FontInstanceRefMut,
+    texture_service: &mut TextureService<E>,
+) -> usize {
+    let mut line_count = 0;
+    let mut last_row_range = 0..0;
+    while last_row_range.end < str.len() {
+        last_row_range = layout_row(
+            str,
+            last_row_range.end,
+            rect,
+            font_instance.reborrow_mut(),
+            texture_service,
+        );
+        line_count += 1;
+    }
+    line_count
+}
+
+// returns byte offset(not char index)
+fn locate_singleline_coord<E: Externs>(
+    str: &str,
+    container_rect: Rect,
+    scroll_offset: Vec2,
+    coord: Vec2,
+    mut font_instance: FontInstanceRefMut,
+    texture_service: &mut TextureService<E>,
+) -> usize {
+    let left = container_rect.min.x - scroll_offset.x;
+    if coord.x < left {
+        return 0;
+    }
+
+    let mut byte_offset: usize = 0;
+    let mut x_offset: f32 = left;
+    for ch in str.chars() {
+        let glyph = font_instance.get_or_rasterize_glyph(ch, texture_service);
+
+        let min_x = x_offset;
+        let max_x = min_x + glyph.advance_width();
+        if coord.x >= min_x && coord.x <= max_x {
+            // NOTE: it seems like everyone consider char selected only if you're reaching past
+            // half of it.
+            let center_x = min_x + (max_x - min_x) / 2.0;
+            if coord.x < center_x {
+                return byte_offset;
+            } else {
+                return byte_offset + ch.len_utf8();
+            }
+        }
+
+        byte_offset += ch.len_utf8();
+        x_offset += glyph.advance_width();
+    }
+
+    // the pointer is after end of the line.
+    assert!(coord.x > x_offset);
+    str.len()
+}
+
+// returns byte offset(not char index)
+fn locate_multiline_coord<E: Externs>(
+    str: &str,
+    container_rect: Rect,
+    scroll_offset: Vec2,
+    coord: Vec2,
+    mut font_instance: FontInstanceRefMut,
+    texture_service: &mut TextureService<E>,
+) -> usize {
+    let top = container_rect.min.y - scroll_offset.y;
+    if coord.y < top {
+        return 0;
+    }
+
+    let font_height = font_instance.height();
+
+    let mut line_num = 0;
+    let mut last_row_range = 0..0;
+    while last_row_range.end < str.len() {
+        last_row_range = layout_row(
+            str,
+            last_row_range.end,
+            container_rect,
+            font_instance.reborrow_mut(),
+            texture_service,
+        );
+
+        line_num += 1;
+
+        // maybe this is the line
+        let max_y = top + line_num as f32 * font_height;
+        if coord.y < max_y {
+            break;
+        }
+    }
+
+    // maybe pointer is below
+    let max_y = top + line_num as f32 * font_height;
+    if coord.y > max_y {
+        return str.len();
+    }
+
+    let offset_within_row = locate_singleline_coord(
+        &str[last_row_range.clone()],
+        container_rect,
+        scroll_offset,
+        coord,
+        font_instance,
+        texture_service,
+    );
+    last_row_range.start + offset_within_row
+}
+
+fn scroll_into_singleline_cursor<E: Externs>(
+    str: &str,
+    cursor_byte_range: Range<usize>,
+    container_rect: Rect,
+    scroll_offset: Vec2,
+    mut font_instance: FontInstanceRefMut,
+    texture_service: &mut TextureService<E>,
+) -> Vec2 {
+    let container_width = container_rect.width();
+    let cursor_width = font_instance.typical_advance_width();
+
+    let pre_cursor_text = &str[..cursor_byte_range.end];
+    let post_cursor_text = &str[cursor_byte_range.end..];
+
+    let pre_cursor_text_width = font_instance.compute_text_width(pre_cursor_text, texture_service);
+    let post_cursor_text_width =
+        font_instance.compute_text_width(post_cursor_text, texture_service);
+    let text_width = pre_cursor_text_width + post_cursor_text_width;
+
+    let cursor_min_x = pre_cursor_text_width;
+    let cursor_max_x = cursor_min_x + cursor_width;
+
+    // right edge. scroll to show cursor + overscroll for cursor width.
+    if cursor_max_x - scroll_offset.x > container_width {
+        return scroll_offset.with_x(cursor_max_x - container_width);
+    }
+
+    // left edge. scroll to show cursor.
+    if cursor_min_x < scroll_offset.x {
+        return scroll_offset.with_x(cursor_min_x);
+    }
+
+    // undo overscroll when cursor moves back. if we can show all text without overscrolling, do
+    // that.
+    if cursor_max_x <= text_width && text_width > container_width {
+        return scroll_offset.with_x(scroll_offset.x.min(text_width - container_width));
+    }
+
+    scroll_offset
+}
+
+// TODO: scroll_into_multiline_cursor need to support different row wrapping modes.
+fn scroll_into_multiline_cursor<E: Externs>(
+    str: &str,
+    cursor_byte_range: Range<usize>,
+    container_rect: Rect,
+    scroll_offset: Vec2,
+    font_instance: FontInstanceRefMut,
+    texture_service: &mut TextureService<E>,
+) -> Vec2 {
+    let container_height = container_rect.height();
+    let font_height = font_instance.height();
+
+    let pre_cursor_text = &str[..cursor_byte_range.end];
+    let pre_cursor_row_count = count_rows(
+        pre_cursor_text,
+        container_rect,
+        font_instance,
+        texture_service,
+    );
+
+    let cursor_max_y = pre_cursor_row_count as f32 * font_height;
+    let cursor_min_y = (cursor_max_y - font_height).max(0.0);
+
+    // bottom edge
+    if cursor_max_y - scroll_offset.y > container_height {
+        return scroll_offset.with_y(cursor_max_y - container_height);
+    }
+    // top edge
+    if cursor_min_y < scroll_offset.y {
+        return scroll_offset.with_y(cursor_min_y);
+    }
+
+    scroll_offset
+}
+
+// ----
+// draw singleline
+
+// TODO: draw_singleline_selection sucks. need some kind of z-indices in draw buffer to be able to
+// draw stuff iteratively and "commit" it different layers.
+fn draw_singleline_selection<E: Externs>(
+    text: &Text,
+    state: &TextState,
+    active: bool,
+    draw_cursor: bool,
+    mut font_instance: FontInstanceRefMut,
+    texture_service: &mut TextureService<E>,
+    draw_buffer: &mut DrawBuffer<E>,
+) {
+    // early bail out
+    if state.selection.is_empty() && !draw_cursor {
+        return;
+    }
+
+    let str = text.buffer.as_str();
+
+    let pre_selection_text = &str[..state.selection.byte_range.start];
+    let selection_text = &str[state.selection.byte_range.clone()];
+
+    let pre_selection_text_width =
+        font_instance.compute_text_width(pre_selection_text, texture_service);
+    let selection_text_width = font_instance.compute_text_width(selection_text, texture_service);
+
+    let selection_min_x = pre_selection_text_width;
+    let selection_max_x = pre_selection_text_width + selection_text_width;
+
+    // NOTE: end is where the cursor is. for example in `hello, sailor` selection may have started
+    // at `,` and moved left to `e`.
+    if !state.selection.is_empty() {
+        let min_x = selection_min_x.min(selection_max_x);
+        let max_x = selection_min_x.max(selection_max_x);
+
+        let min = text.rect.min - Vec2::new(state.scroll.offset.x, 0.0) + Vec2::new(min_x, 0.0);
+        let size = Vec2::new(max_x - min_x, font_instance.height());
+        let rect = Rect::new(min, min + size);
+        let fill = if active {
+            text.palette
+                .as_ref()
+                .map_or_else(|| SELECTION_ACTIVE, |a| a.selection_active)
+        } else {
+            text.palette
+                .as_ref()
+                .map_or_else(|| SELECTION_INACTIVE, |a| a.selection_inactive)
+        };
+        draw_buffer.push_rect(RectShape::with_fill(rect, Fill::with_color(fill)));
+    }
+
+    // TODO: draw inactive cursor, maybe outlined or something.
+    if draw_cursor && active {
+        let cursor_width = font_instance.typical_advance_width();
+
+        let min =
+            text.rect.min - Vec2::new(state.scroll.offset.x, 0.0) + Vec2::new(selection_max_x, 0.0);
+        let size = Vec2::new(cursor_width, font_instance.height());
+        let rect = Rect::new(min, min + size);
+        let fill = text.palette.as_ref().map_or_else(|| CURSOR, |a| a.cursor);
+        draw_buffer.push_rect(RectShape::with_fill(rect, Fill::with_color(fill)));
+    }
+}
+
+fn draw_singleline_text<E: Externs>(
+    text: &Text,
+    scroll_x: f32,
+    mut font_instance: FontInstanceRefMut,
+    texture_service: &mut TextureService<E>,
+    draw_buffer: &mut DrawBuffer<E>,
+) {
+    let font_ascent = font_instance.ascent();
+    let fg = text.palette.as_ref().map(|a| a.fg).unwrap_or(FG);
+
+    let mut offset_x: f32 = text.rect.min.x - scroll_x;
+    for ch in text.buffer.as_str().chars() {
+        let glyph = font_instance.get_or_rasterize_glyph(ch, texture_service);
+
+        draw_buffer.push_rect(RectShape::with_fill(
+            glyph
+                .bounding_rect()
+                .translate_by(&Vec2::new(offset_x, text.rect.min.y + font_ascent)),
+            Fill::new(
+                fg,
+                FillTexture {
+                    kind: TextureKind::Internal(glyph.tex_handle()),
+                    coords: glyph.tex_coords(),
+                },
+            ),
+        ));
+
+        offset_x += glyph.advance_width();
+    }
+}
+
+// ----
+// draw multiline
+
+// TODO: draw_multiline_text_selection should also draw cursor (if draw_cursor is on or something).
+fn draw_multiline_selection<E: Externs>(
+    text: &Text,
+    state: &TextState,
+    active: bool,
+    mut font_instance: FontInstanceRefMut,
+    texture_service: &mut TextureService<E>,
+    draw_buffer: &mut DrawBuffer<E>,
+) {
+    let str = text.buffer.as_str();
+    let top = text.rect.min.y - state.scroll.offset.y;
+    let selection_range = state.selection.normalized_cursor();
+    let font_height = font_instance.height();
+    let fill = if active {
+        text.palette
+            .as_ref()
+            .map_or_else(|| SELECTION_ACTIVE, |a| a.selection_active)
+    } else {
+        text.palette
+            .as_ref()
+            .map_or_else(|| SELECTION_INACTIVE, |a| a.selection_inactive)
+    };
+
+    let mut line_num = 0;
+    let mut last_row_range = 0..0;
+    while last_row_range.end < str.len() {
+        last_row_range = layout_row(
+            str,
+            last_row_range.end,
+            text.rect,
+            font_instance.reborrow_mut(),
+            texture_service,
+        );
+        if selection_range.end < last_row_range.start || selection_range.start > last_row_range.end
+        {
+            // TODO: play around with the scope guard thing (aka defer).
+            line_num += 1;
+            continue;
+        }
+
+        let fragment_range = selection_range.start.max(last_row_range.start)
+            ..selection_range.end.min(last_row_range.end);
+        let relative_range =
+            fragment_range.start - last_row_range.start..fragment_range.end - last_row_range.start;
+
+        let row = &text.buffer.as_str()[last_row_range.clone()];
+        let prefix = &row[..relative_range.start];
+        let infix = &row[relative_range];
+
+        let prefix_width = font_instance.compute_text_width(prefix, texture_service);
+        let infix_width = font_instance.compute_text_width(infix, texture_service);
+
+        let min_x = prefix_width;
+        let max_x = prefix_width + infix_width;
+
+        let min_y = top + line_num as f32 * font_height;
+        let max_y = top + (line_num + 1) as f32 * font_height;
+
+        let rect = Rect::new(
+            Vec2::new(text.rect.min.x + min_x, min_y),
+            Vec2::new(text.rect.min.x + max_x, max_y),
+        );
+        draw_buffer.push_rect(RectShape::with_fill(rect, Fill::with_color(fill)));
+
+        line_num += 1;
+    }
+}
+
+// TODO: y scroll or something. i want to be able to "scroll to bottom".
+fn draw_multiline_text<E: Externs>(
+    text: &Text,
+    scroll_y: f32,
+    mut font_instance: FontInstanceRefMut,
+    texture_service: &mut TextureService<E>,
+    draw_buffer: &mut DrawBuffer<E>,
+) {
+    let str = text.buffer.as_str();
+    let fg = text.palette.as_ref().map(|a| a.fg).unwrap_or(FG);
+    let font_ascent = font_instance.ascent();
+    let font_height = font_instance.height();
+
+    let mut position = text.rect.top_left();
+    position.y -= scroll_y;
+    for ch in str.chars() {
+        let glyph = font_instance.get_or_rasterize_glyph(ch, texture_service);
+        let advance_width = glyph.advance_width();
+
+        if should_break_line(ch, advance_width, position.x, text.rect) {
+            position.x = text.rect.min.x;
+            position.y += font_height;
+
+            if should_consume_post_line_break_char(ch) {
+                continue;
+            }
+        }
+
+        draw_buffer.push_rect(RectShape::with_fill(
+            glyph
+                .bounding_rect()
+                .translate_by(&Vec2::new(position.x, position.y + font_ascent)),
+            Fill::new(
+                fg,
+                FillTexture {
+                    kind: TextureKind::Internal(glyph.tex_handle()),
+                    coords: glyph.tex_coords(),
+                },
+            ),
+        ));
+
+        position.x += advance_width;
+    }
+}
+
+// ----
 
 const FG: Rgba8 = Rgba8::WHITE;
 const SELECTION_ACTIVE: Rgba8 = Rgba8::from_u32(0x304a3dff);
@@ -255,6 +773,8 @@ impl TextState {
     }
 }
 
+// TODO: get rid of TextBuffer. supply text in final "build" call.
+//
 // NOTE: this is marked non_exhaustive because i don't want this to be constructable from outside.
 #[non_exhaustive]
 pub enum TextBuffer<'a> {
@@ -293,15 +813,19 @@ impl<'a> From<&'a mut String> for TextBuffer<'a> {
 }
 
 // ----
-// builder
 
 pub struct Text<'a> {
     key: Key,
     buffer: TextBuffer<'a>,
     rect: Rect,
+
     font_handle: Option<FontHandle>,
     font_size: Option<f32>,
     palette: Option<TextPalette>,
+
+    // NOTE: this is also sort of "state", but the kind that doesn't need to survive across frames.
+    hot: Option<bool>,
+    active: Option<bool>,
 }
 
 impl<'a> Text<'a> {
@@ -311,13 +835,17 @@ impl<'a> Text<'a> {
             key: Key::from_location(std::panic::Location::caller()),
             buffer: text.into(),
             rect,
+
             font_handle: None,
             font_size: None,
             palette: None,
+
+            hot: None,
+            active: None,
         }
     }
 
-    /// you might need to set custom key when rendering stuff in a loop (maybe use
+    /// you should provide custom key when rendering stuff in a loop (maybe use
     /// [`Key::from_caller_location_and`]).
     pub fn with_key(mut self, key: Key) -> Self {
         self.key = key;
@@ -334,8 +862,17 @@ impl<'a> Text<'a> {
         self
     }
 
+    // TODO: this sucks. i don't want to supply a full palette to just change foreground color.
     pub fn with_palette(mut self, value: TextPalette) -> Self {
         self.palette = Some(value);
+        self
+    }
+
+    /// you should provide `hot` and `active` values if you did invoke
+    /// [`InteractionState::maybe_set_hot_or_active`] manually for this widget.
+    pub fn with_maybe_hot_or_active(mut self, hot: bool, active: bool) -> Self {
+        self.hot.replace(hot);
+        self.active.replace(active);
         self
     }
 
@@ -346,126 +883,16 @@ impl<'a> Text<'a> {
     pub fn multiline(self) -> TextMultiline<'a> {
         TextMultiline::new(self)
     }
-}
 
-// ----
-// update singleline stuff
+    // ----
 
-// returns byte offset(not char index)
-fn locate_singleline_text_coord<E: Externs>(
-    str: &str,
-    min_x: f32,
-    position: Vec2,
-    mut font_instance: FontInstanceRefMut,
-    texture_service: &mut TextureService<E>,
-) -> usize {
-    // maybe we're dragging and the pointer is before beginning of the line.
-    if position.x < min_x {
-        return 0;
+    #[allow(dead_code)]
+    fn is_hot(&self) -> bool {
+        self.hot == Some(true)
     }
 
-    let mut byte_offset: usize = 0;
-    let mut offset_x: f32 = min_x;
-    for ch in str.chars() {
-        let glyph = font_instance.get_or_rasterize_glyph(ch, texture_service);
-
-        let min_x = offset_x;
-        let max_x = min_x + glyph.advance_width();
-        if position.x >= min_x && position.x <= max_x {
-            // NOTE: it seems like everyone consider char selected only if you're reaching past
-            // half of it.
-            let center_x = min_x + (max_x - min_x) / 2.0;
-            if position.x < center_x {
-                return byte_offset;
-            } else {
-                return byte_offset + ch.len_utf8();
-            }
-        }
-
-        byte_offset += ch.len_utf8();
-        offset_x += glyph.advance_width();
-    }
-
-    // the pointer is after end of the line.
-    assert!(position.x > offset_x);
-    str.len()
-}
-
-// ----
-// draw singleline stuff
-
-// TODO: draw_singleline_selection sucks. need some kind of z-indices in draw buffer to be able to
-// draw stuff iteratively and "commit" it different layers.
-fn draw_singleline_selection<E: Externs>(
-    text: &Text,
-    selection_start_x: f32,
-    selection_end_x: f32,
-    scroll_x: f32,
-    maybe_cursor_width: Option<f32>,
-    active: bool,
-    font_instance: FontInstanceRefMut,
-    draw_buffer: &mut DrawBuffer<E>,
-) {
-    // NOTE: end is where the cursor is. for example in `hello, sailor` selection may have started
-    // at `,` and moved left to `e`.
-    if selection_start_x != selection_end_x {
-        let min_x = selection_start_x.min(selection_end_x);
-        let max_x = selection_start_x.max(selection_end_x);
-
-        let min = text.rect.min - Vec2::new(scroll_x, 0.0) + Vec2::new(min_x, 0.0);
-        let size = Vec2::new(max_x - min_x, font_instance.height());
-        let rect = Rect::new(min, min + size);
-        let fill = if active {
-            text.palette
-                .as_ref()
-                .map_or_else(|| SELECTION_ACTIVE, |a| a.selection_active)
-        } else {
-            text.palette
-                .as_ref()
-                .map_or_else(|| SELECTION_INACTIVE, |a| a.selection_inactive)
-        };
-        draw_buffer.push_rect(RectShape::with_fill(rect, Fill::with_color(fill)));
-    }
-
-    if let Some(cursor_width) = maybe_cursor_width {
-        if active {
-            let min = text.rect.min - Vec2::new(scroll_x, 0.0) + Vec2::new(selection_end_x, 0.0);
-            let size = Vec2::new(cursor_width, font_instance.height());
-            let rect = Rect::new(min, min + size);
-            let fill = text.palette.as_ref().map_or_else(|| CURSOR, |a| a.cursor);
-            draw_buffer.push_rect(RectShape::with_fill(rect, Fill::with_color(fill)));
-        }
-    }
-}
-
-fn draw_singleline_text<E: Externs>(
-    text: &Text,
-    scroll_x: f32,
-    mut font_instance: FontInstanceRefMut,
-    texture_service: &mut TextureService<E>,
-    draw_buffer: &mut DrawBuffer<E>,
-) {
-    let font_ascent = font_instance.ascent();
-    let fg = text.palette.as_ref().map(|a| a.fg).unwrap_or(FG);
-
-    let mut offset_x: f32 = text.rect.min.x - scroll_x;
-    for ch in text.buffer.as_str().chars() {
-        let glyph = font_instance.get_or_rasterize_glyph(ch, texture_service);
-
-        draw_buffer.push_rect(RectShape::with_fill(
-            glyph
-                .bounding_rect()
-                .translate_by(&Vec2::new(offset_x, text.rect.min.y + font_ascent)),
-            Fill::new(
-                fg,
-                FillTexture {
-                    kind: TextureKind::Internal(glyph.tex_handle()),
-                    coords: glyph.tex_coords(),
-                },
-            ),
-        ));
-
-        offset_x += glyph.advance_width();
+    fn is_active(&self) -> bool {
+        self.active == Some(true)
     }
 }
 
@@ -488,6 +915,7 @@ impl<'a> TextSingleline<'a> {
             self.text.font_handle.unwrap_or(ctx.default_font_handle()),
             self.text.font_size.unwrap_or(ctx.default_font_size()),
         );
+
         draw_singleline_text(
             &self.text,
             0.0,
@@ -511,34 +939,11 @@ impl<'a> TextSingleline<'a> {
 pub struct TextSinglelineSelectable<'a> {
     text: Text<'a>,
     state: &'a mut TextState,
-
-    hot: Option<bool>,
-    active: Option<bool>,
 }
 
 impl<'a> TextSinglelineSelectable<'a> {
     fn new(text: Text<'a>, state: &'a mut TextState) -> Self {
-        Self {
-            text,
-            state,
-
-            hot: None,
-            active: None,
-        }
-    }
-
-    pub fn with_maybe_hot_or_active(mut self, hot: bool, active: bool) -> Self {
-        self.hot.replace(hot);
-        self.active.replace(active);
-        self
-    }
-
-    pub fn is_hot(&self) -> bool {
-        self.hot == Some(true)
-    }
-
-    pub fn is_active(&self) -> bool {
-        self.active == Some(true)
+        Self { text, state }
     }
 
     // TODO: get rid of maybe_set_hot_or_active
@@ -560,8 +965,11 @@ impl<'a> TextSinglelineSelectable<'a> {
             CursorShape::Text,
             input,
         );
-        self.hot.replace(interaction_state.is_hot(self.text.key));
-        self.active
+        self.text
+            .hot
+            .replace(interaction_state.is_hot(self.text.key));
+        self.text
+            .active
             .replace(interaction_state.is_active(self.text.key));
     }
 
@@ -570,10 +978,10 @@ impl<'a> TextSinglelineSelectable<'a> {
         mut font_instance: FontInstanceRefMut,
         texture_service: &mut TextureService<E>,
         interaction_state: &mut InteractionState,
-        clipboard_service: &mut ClipboardService,
+        clipboard_service: &mut ClipboardState,
         input: &input::State,
     ) {
-        if self.hot.is_none() && self.active.is_none() {
+        if self.text.hot.is_none() && self.text.active.is_none() {
             self.maybe_set_hot_or_active(
                 font_instance.reborrow_mut(),
                 texture_service,
@@ -581,7 +989,7 @@ impl<'a> TextSinglelineSelectable<'a> {
                 input,
             );
         }
-        if !self.is_active() {
+        if !self.text.is_active() {
             return;
         }
 
@@ -647,9 +1055,10 @@ impl<'a> TextSinglelineSelectable<'a> {
                             self.text.rect.contains(&Vec2::from(F64Vec2::from(*p)))
                         }) =>
                 {
-                    let byte_offset = locate_singleline_text_coord(
+                    let byte_offset = locate_singleline_coord(
                         self.text.buffer.as_str(),
-                        self.text.rect.min.x,
+                        self.text.rect,
+                        self.state.scroll.offset,
                         Vec2::from(F64Vec2::from(input.pointer.position)),
                         font_instance.reborrow_mut(),
                         texture_service,
@@ -681,30 +1090,15 @@ impl<'a> TextSinglelineSelectable<'a> {
             input,
         );
 
-        // TODO: singleline selectable text needs to support scroll (x) too.
-
-        if !self.state.selection.is_empty() {
-            let str = self.text.buffer.as_str();
-            let selection_start_x = font_instance.compute_text_width(
-                &str[..self.state.selection.byte_range.start],
-                &mut ctx.texture_service,
-            );
-            // TODO: don't recompute prefix width, sum prefix and "infix".
-            let selection_end_x = font_instance.compute_text_width(
-                &str[..self.state.selection.byte_range.end],
-                &mut ctx.texture_service,
-            );
-            draw_singleline_selection(
-                &self.text,
-                selection_start_x,
-                selection_end_x,
-                0.0,
-                None,
-                self.is_active(),
-                font_instance.reborrow_mut(),
-                &mut ctx.draw_buffer,
-            );
-        }
+        draw_singleline_selection(
+            &self.text,
+            self.state,
+            self.text.is_active(),
+            false,
+            font_instance.reborrow_mut(),
+            &mut ctx.texture_service,
+            &mut ctx.draw_buffer,
+        );
 
         draw_singleline_text(
             &self.text,
@@ -721,36 +1115,14 @@ impl<'a> TextSinglelineSelectable<'a> {
 pub struct TextSinglelineEditable<'a> {
     text: Text<'a>,
     state: &'a mut TextState,
-
-    hot: Option<bool>,
-    active: Option<bool>,
 }
 
 impl<'a> TextSinglelineEditable<'a> {
     fn new(text: Text<'a>, state: &'a mut TextState) -> Self {
-        Self {
-            text,
-            state,
-
-            hot: None,
-            active: None,
-        }
+        Self { text, state }
     }
 
-    pub fn with_maybe_hot_or_active(mut self, hot: bool, active: bool) -> Self {
-        self.hot.replace(hot);
-        self.active.replace(active);
-        self
-    }
-
-    pub fn is_hot(&self) -> bool {
-        self.hot == Some(true)
-    }
-
-    pub fn is_active(&self) -> bool {
-        self.active == Some(true)
-    }
-
+    // TODO: get rid of maybe_set_hot_or_active
     fn maybe_set_hot_or_active<E: Externs>(
         &mut self,
         mut font_instance: FontInstanceRefMut,
@@ -769,8 +1141,11 @@ impl<'a> TextSinglelineEditable<'a> {
             CursorShape::Text,
             input,
         );
-        self.hot.replace(interaction_state.is_hot(self.text.key));
-        self.active
+        self.text
+            .hot
+            .replace(interaction_state.is_hot(self.text.key));
+        self.text
+            .active
             .replace(interaction_state.is_active(self.text.key));
     }
 
@@ -779,10 +1154,10 @@ impl<'a> TextSinglelineEditable<'a> {
         mut font_instance: FontInstanceRefMut,
         texture_service: &mut TextureService<E>,
         interaction_state: &mut InteractionState,
-        clipboard_service: &mut ClipboardService,
+        clipboard_service: &mut ClipboardState,
         input: &input::State,
     ) {
-        if self.hot.is_none() && self.active.is_none() {
+        if self.text.hot.is_none() && self.text.active.is_none() {
             self.maybe_set_hot_or_active(
                 font_instance.reborrow_mut(),
                 texture_service,
@@ -790,7 +1165,7 @@ impl<'a> TextSinglelineEditable<'a> {
                 input,
             );
         }
-        if !self.is_active() {
+        if !self.text.is_active() {
             return;
         }
 
@@ -903,9 +1278,10 @@ impl<'a> TextSinglelineEditable<'a> {
                             self.text.rect.contains(&Vec2::from(F64Vec2::from(*p)))
                         }) =>
                 {
-                    let byte_offset = locate_singleline_text_coord(
+                    let byte_offset = locate_singleline_coord(
                         self.text.buffer.as_str(),
-                        self.text.rect.min.x - self.state.scroll.offset.x,
+                        self.text.rect,
+                        self.state.scroll.offset,
                         Vec2::from(F64Vec2::from(input.pointer.position)),
                         font_instance.reborrow_mut(),
                         texture_service,
@@ -926,6 +1302,16 @@ impl<'a> TextSinglelineEditable<'a> {
                 .selection
                 .paste(self.text.buffer.as_string_mut().unwrap(), pasta.as_str());
         }
+
+        // NOTE: cursor must be updated in reaction to possible interactions (above ^).
+        self.state.scroll.offset = scroll_into_singleline_cursor(
+            self.text.buffer.as_str(),
+            self.state.selection.byte_range.clone(),
+            self.text.rect,
+            self.state.scroll.offset,
+            font_instance,
+            texture_service,
+        );
     }
 
     pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>, input: &input::State) {
@@ -944,334 +1330,25 @@ impl<'a> TextSinglelineEditable<'a> {
             input,
         );
 
-        let str = self.text.buffer.as_str();
-        let rect_width = self.text.rect.width();
-        let text_width = font_instance.compute_text_width(str, &mut ctx.texture_service);
-        let cursor_width = font_instance.typical_advance_width();
-
-        let selection_start_x = font_instance.compute_text_width(
-            &str[..self.state.selection.byte_range.start],
-            &mut ctx.texture_service,
-        );
-        // TODO: don't recompute prefix width, sum prefix and "infix".
-        let selection_end_x = font_instance.compute_text_width(
-            &str[..self.state.selection.byte_range.end],
-            &mut ctx.texture_service,
-        );
-
-        let mut scroll_x = self.state.scroll.offset.x;
-        // right edge. scroll to show cursor + overscroll for cursor width.
-        if selection_end_x + cursor_width - scroll_x > rect_width {
-            scroll_x = selection_end_x + cursor_width - rect_width;
-        }
-        // left edge. scroll to show cursor.
-        if selection_end_x < scroll_x {
-            scroll_x = selection_end_x;
-        }
-        // undo overscroll when cursor moves back. if we can show all text without overscrolling,
-        // do that.
-        if selection_end_x + cursor_width <= text_width && text_width > rect_width {
-            scroll_x = scroll_x.min(text_width - rect_width);
-        }
-        // TODO: move scroll logic into `update` method.
-        self.state.scroll.offset.x = scroll_x;
-
         draw_singleline_selection(
             &self.text,
-            selection_start_x,
-            selection_end_x,
-            scroll_x,
-            Some(cursor_width),
-            self.is_active(),
+            self.state,
+            self.text.is_active(),
+            true,
             font_instance.reborrow_mut(),
+            &mut ctx.texture_service,
             &mut ctx.draw_buffer,
         );
 
         draw_singleline_text(
             &self.text,
-            scroll_x,
+            self.state.scroll.offset.x,
             font_instance,
             &mut ctx.texture_service,
             &mut ctx.draw_buffer,
         );
 
         ctx.draw_buffer.set_clip_rect(None);
-    }
-}
-
-// ----
-// update multline stuff
-
-// TODO: support different line break modes or whatever. current idea is break anywhere doesn't
-// matter where; if next char can't fit on current line it must move to the next one.
-
-fn should_break_line(ch: char, advance_width: f32, current_x: f32, rect: Rect) -> bool {
-    if ch == '\n' {
-        return true;
-    }
-
-    assert!(current_x >= rect.left());
-    let will_overflow = current_x + advance_width - rect.left() > rect.width();
-    will_overflow
-}
-
-// NOTE: don't advance if line break was cause by whitespace character (`\n` is considered a
-// whitespace).
-fn should_consume_post_line_break_char(ch: char) -> bool {
-    ch.is_whitespace()
-}
-
-fn layout_row<E: Externs>(
-    str: &str,
-    start_byte: usize,
-    rect: Rect,
-    mut font_instance: FontInstanceRefMut,
-    texture_service: &mut TextureService<E>,
-) -> Range<usize> {
-    let mut current_x: f32 = rect.left();
-    let mut end_byte: usize = start_byte;
-
-    for ch in (&str[start_byte..]).chars() {
-        let glyph = font_instance.get_or_rasterize_glyph(ch, texture_service);
-        let advance_width = glyph.advance_width();
-
-        if should_break_line(ch, advance_width, current_x, rect) {
-            if should_consume_post_line_break_char(ch) {
-                end_byte += ch.len_utf8();
-            }
-            return start_byte..end_byte;
-        }
-
-        current_x += advance_width;
-        end_byte += ch.len_utf8();
-    }
-
-    start_byte..str.len()
-}
-
-#[test]
-fn test_layout_row() {
-    // NOTE: it's a pretty poor test that makes very heavy assumptions about the fact that we're
-    // dealing with monospace font. it will not be correct with non-monospace font (although it
-    // might pass).
-
-    const CHARS_PER_ROW: usize = 16;
-
-    let mut ctx = tests::create_context();
-    let mut font_instance = ctx
-        .font_service
-        .get_font_instance(ctx.default_font_handle(), ctx.default_font_size());
-
-    let haiku = "With no bamboo hat\nDoes the drizzle fall on me?\nWhat care I of that?";
-    tests::assert_all_glyphs_have_equal_advance_width(
-        haiku,
-        font_instance.reborrow_mut(),
-        &mut ctx.texture_service,
-    );
-    // NOTE: assertion above /\ ensures that the width below \/ matches the assumption.
-    let width = font_instance.typical_advance_width() * CHARS_PER_ROW as f32;
-    let rect = Rect::new(Vec2::ZERO, Vec2::new(width, f32::INFINITY));
-
-    let mut last_row_range = 0..0;
-    while last_row_range.end < haiku.len() {
-        last_row_range = layout_row(
-            haiku,
-            last_row_range.end,
-            rect,
-            font_instance.reborrow_mut(),
-            &mut ctx.texture_service,
-        );
-        // NOTE: a line may include invisible(/ chars that must not be rendered) at the end.
-        let row = &haiku[last_row_range.clone()];
-        assert!(row.trim().len() <= CHARS_PER_ROW);
-    }
-}
-
-fn count_rows<E: Externs>(
-    str: &str,
-    rect: Rect,
-    mut font_instance: FontInstanceRefMut,
-    texture_service: &mut TextureService<E>,
-) -> usize {
-    let mut line_count = 0;
-    let mut last_row_range = 0..0;
-    while last_row_range.end < str.len() {
-        last_row_range = layout_row(
-            str,
-            last_row_range.end,
-            rect,
-            font_instance.reborrow_mut(),
-            texture_service,
-        );
-        line_count += 1;
-    }
-    line_count
-}
-
-fn locate_multiline_text_coord<E: Externs>(
-    text: &Text,
-    scroll_y: f32,
-    position: Vec2,
-    mut font_instance: FontInstanceRefMut,
-    texture_service: &mut TextureService<E>,
-) -> usize {
-    let top = text.rect.top() - scroll_y;
-    if position.y < top {
-        return 0;
-    }
-
-    let str = text.buffer.as_str();
-    let font_height = font_instance.height();
-
-    let mut line_num = 0;
-    let mut last_row_range = 0..0;
-    while last_row_range.end < str.len() {
-        last_row_range = layout_row(
-            str,
-            last_row_range.end,
-            text.rect,
-            font_instance.reborrow_mut(),
-            texture_service,
-        );
-
-        line_num += 1;
-
-        // maybe this is the line
-        let max_y = top + line_num as f32 * font_height;
-        if position.y < max_y {
-            break;
-        }
-    }
-
-    // maybe pointer is below
-    let max_y = top + line_num as f32 * font_height;
-    if position.y > max_y {
-        return str.len();
-    }
-
-    last_row_range.start
-        + locate_singleline_text_coord(
-            &str[last_row_range],
-            text.rect.left(),
-            position,
-            font_instance,
-            texture_service,
-        )
-}
-
-// ----
-// draw multline stuff
-
-// TODO: draw_multiline_text_selection should also draw cursor (if draw_cursor is on or something).
-fn draw_multiline_selection<E: Externs>(
-    text: &Text,
-    state: &TextState,
-    active: bool,
-    mut font_instance: FontInstanceRefMut,
-    texture_service: &mut TextureService<E>,
-    draw_buffer: &mut DrawBuffer<E>,
-) {
-    let str = text.buffer.as_str();
-    let top = text.rect.top() - state.scroll.offset.y;
-    let selection_range = state.selection.normalized_cursor();
-    let font_height = font_instance.height();
-    let fill = if active {
-        text.palette
-            .as_ref()
-            .map_or_else(|| SELECTION_ACTIVE, |a| a.selection_active)
-    } else {
-        text.palette
-            .as_ref()
-            .map_or_else(|| SELECTION_INACTIVE, |a| a.selection_inactive)
-    };
-
-    let mut line_num = 0;
-    let mut last_row_range = 0..0;
-    while last_row_range.end < str.len() {
-        last_row_range = layout_row(
-            str,
-            last_row_range.end,
-            text.rect,
-            font_instance.reborrow_mut(),
-            texture_service,
-        );
-        if selection_range.end < last_row_range.start || selection_range.start > last_row_range.end
-        {
-            // TODO: play around with the scope guard thing (aka defer).
-            line_num += 1;
-            continue;
-        }
-
-        let fragment_range = selection_range.start.max(last_row_range.start)
-            ..selection_range.end.min(last_row_range.end);
-        let relative_range =
-            fragment_range.start - last_row_range.start..fragment_range.end - last_row_range.start;
-
-        let row = &text.buffer.as_str()[last_row_range.clone()];
-        let prefix = &row[..relative_range.start];
-        let infix = &row[relative_range];
-
-        let prefix_width = font_instance.compute_text_width(prefix, texture_service);
-        let infix_width = font_instance.compute_text_width(infix, texture_service);
-
-        let min_x = prefix_width;
-        let max_x = prefix_width + infix_width;
-
-        let min_y = top + line_num as f32 * font_height;
-        let max_y = top + (line_num + 1) as f32 * font_height;
-
-        let rect = Rect::new(
-            Vec2::new(text.rect.left() + min_x, min_y),
-            Vec2::new(text.rect.left() + max_x, max_y),
-        );
-        draw_buffer.push_rect(RectShape::with_fill(rect, Fill::with_color(fill)));
-
-        line_num += 1;
-    }
-}
-
-// TODO: y scroll or something. i want to be able to "scroll to bottom".
-fn draw_multiline_text<E: Externs>(
-    text: &Text,
-    scroll_y: f32,
-    mut font_instance: FontInstanceRefMut,
-    texture_service: &mut TextureService<E>,
-    draw_buffer: &mut DrawBuffer<E>,
-) {
-    let str = text.buffer.as_str();
-    let fg = text.palette.as_ref().map(|a| a.fg).unwrap_or(FG);
-    let font_ascent = font_instance.ascent();
-    let font_height = font_instance.height();
-
-    let mut position = text.rect.top_left();
-    position.y -= scroll_y;
-    for ch in str.chars() {
-        let glyph = font_instance.get_or_rasterize_glyph(ch, texture_service);
-        let advance_width = glyph.advance_width();
-
-        if should_break_line(ch, advance_width, position.x, text.rect) {
-            position.x = text.rect.left();
-            position.y += font_height;
-
-            if should_consume_post_line_break_char(ch) {
-                continue;
-            }
-        }
-
-        draw_buffer.push_rect(RectShape::with_fill(
-            glyph
-                .bounding_rect()
-                .translate_by(&Vec2::new(position.x, position.y + font_ascent)),
-            Fill::new(
-                fg,
-                FillTexture {
-                    kind: TextureKind::Internal(glyph.tex_handle()),
-                    coords: glyph.tex_coords(),
-                },
-            ),
-        ));
-
-        position.x += advance_width;
     }
 }
 
@@ -1294,6 +1371,7 @@ impl<'a> TextMultiline<'a> {
             self.text.font_handle.unwrap_or(ctx.default_font_handle()),
             self.text.font_size.unwrap_or(ctx.default_font_size()),
         );
+
         draw_multiline_text(
             &self.text,
             0.0,
@@ -1308,43 +1386,16 @@ impl<'a> TextMultiline<'a> {
     pub fn selectable(self, state: &'a mut TextState) -> TextMultilineSelectable<'a> {
         TextMultilineSelectable::new(self.text, state)
     }
-
-    // pub fn editable(self, state: &'a mut TextState) -> TextMultilineEditable<'a> {
-    //     todo!()
-    // }
 }
 
 pub struct TextMultilineSelectable<'a> {
     text: Text<'a>,
     state: &'a mut TextState,
-
-    hot: Option<bool>,
-    active: Option<bool>,
 }
 
 impl<'a> TextMultilineSelectable<'a> {
     fn new(text: Text<'a>, state: &'a mut TextState) -> Self {
-        Self {
-            text,
-            state,
-
-            hot: None,
-            active: None,
-        }
-    }
-
-    pub fn with_maybe_hot_or_active(mut self, hot: bool, active: bool) -> Self {
-        self.hot.replace(hot);
-        self.active.replace(active);
-        self
-    }
-
-    pub fn is_hot(&self) -> bool {
-        self.hot == Some(true)
-    }
-
-    pub fn is_active(&self) -> bool {
-        self.active == Some(true)
+        Self { text, state }
     }
 
     // TODO: get rid of maybe_set_hot_or_active
@@ -1378,8 +1429,11 @@ impl<'a> TextMultilineSelectable<'a> {
             CursorShape::Text,
             input,
         );
-        self.hot.replace(interaction_state.is_hot(self.text.key));
-        self.active
+        self.text
+            .hot
+            .replace(interaction_state.is_hot(self.text.key));
+        self.text
+            .active
             .replace(interaction_state.is_active(self.text.key));
     }
 
@@ -1388,10 +1442,10 @@ impl<'a> TextMultilineSelectable<'a> {
         mut font_instance: FontInstanceRefMut,
         texture_service: &mut TextureService<E>,
         interaction_state: &mut InteractionState,
-        clipboard_service: &mut ClipboardService,
+        clipboard_service: &mut ClipboardState,
         input: &input::State,
     ) {
-        if self.hot.is_none() && self.active.is_none() {
+        if self.text.hot.is_none() && self.text.active.is_none() {
             self.maybe_set_hot_or_active(
                 font_instance.reborrow_mut(),
                 texture_service,
@@ -1399,7 +1453,7 @@ impl<'a> TextMultilineSelectable<'a> {
                 input,
             );
         }
-        if !self.is_active() {
+        if !self.text.is_active() {
             return;
         }
 
@@ -1465,9 +1519,10 @@ impl<'a> TextMultilineSelectable<'a> {
                             self.text.rect.contains(&Vec2::from(F64Vec2::from(*p)))
                         }) =>
                 {
-                    let byte_offset = locate_multiline_text_coord(
-                        &self.text,
-                        self.state.scroll.offset.y,
+                    let byte_offset = locate_multiline_coord(
+                        self.text.buffer.as_str(),
+                        self.text.rect,
+                        self.state.scroll.offset,
                         Vec2::from(F64Vec2::from(input.pointer.position)),
                         font_instance.reborrow_mut(),
                         texture_service,
@@ -1481,6 +1536,16 @@ impl<'a> TextMultilineSelectable<'a> {
                 _ => {}
             }
         }
+
+        // NOTE: cursor must be updated in reaction to possible interactions (above ^).
+        self.state.scroll.offset = scroll_into_multiline_cursor(
+            self.text.buffer.as_str(),
+            self.state.selection.byte_range.clone(),
+            self.text.rect,
+            self.state.scroll.offset,
+            font_instance,
+            texture_service,
+        );
     }
 
     pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>, input: &input::State) {
@@ -1499,80 +1564,23 @@ impl<'a> TextMultilineSelectable<'a> {
             input,
         );
 
-        let str = self.text.buffer.as_str();
-        let rect_height = self.text.rect.height();
-        let font_height = font_instance.height();
-
-        let text_row_count_before_cursor = count_rows(
-            &str[..self.state.selection.byte_range.end],
-            self.text.rect,
+        draw_multiline_selection(
+            &self.text,
+            self.state,
+            self.text.is_active(),
             font_instance.reborrow_mut(),
             &mut ctx.texture_service,
+            &mut ctx.draw_buffer,
         );
-        let cursor_max_y = text_row_count_before_cursor as f32 * font_height;
-        let cursor_min_y = (cursor_max_y - font_height).max(0.0);
-
-        let mut scroll_y = self.state.scroll.offset.y;
-        // bottom edge
-        if cursor_max_y - scroll_y > rect_height {
-            scroll_y = cursor_max_y - rect_height;
-        }
-        // top edge
-        if cursor_min_y < scroll_y {
-            scroll_y = cursor_min_y;
-        }
-        // TODO: move scroll logic into `update` method.
-        self.state.scroll.offset.y = scroll_y;
-
-        if !self.state.selection.is_empty() {
-            draw_multiline_selection(
-                &self.text,
-                self.state,
-                self.is_active(),
-                font_instance.reborrow_mut(),
-                &mut ctx.texture_service,
-                &mut ctx.draw_buffer,
-            );
-        }
 
         draw_multiline_text(
             &self.text,
-            scroll_y,
+            self.state.scroll.offset.y,
             font_instance,
             &mut ctx.texture_service,
             &mut ctx.draw_buffer,
         );
 
         ctx.draw_buffer.set_clip_rect(None);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    pub struct TestExterns;
-
-    impl Externs for TestExterns {
-        type TextureHandle = ();
-    }
-
-    pub fn create_context() -> Context<TestExterns> {
-        Context::<TestExterns>::default()
-    }
-
-    pub fn assert_all_glyphs_have_equal_advance_width(
-        str: &str,
-        mut font_instance: FontInstanceRefMut,
-        texture_service: &mut TextureService<TestExterns>,
-    ) {
-        let mut prev_advance_width: Option<f32> = None;
-        for ch in str.chars() {
-            let glyph = font_instance.get_or_rasterize_glyph(ch, texture_service);
-            let advance_width = glyph.advance_width();
-            if let Some(prev_advance_width) = prev_advance_width.replace(advance_width) {
-                assert_eq!(prev_advance_width, advance_width);
-            }
-        }
     }
 }
