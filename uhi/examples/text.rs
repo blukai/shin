@@ -224,7 +224,7 @@ impl AppHandler for App {
                 .expect("could not set cursor shape");
         }
 
-        if self.uhi_context.clipboard_service.is_awaiting_read() {
+        if self.uhi_context.clipboard_state.is_awaiting_read() {
             // TODO: figure out maybe how to incorporate reusable clipboard-read buffer into uhi
             // context or something?
             let mut buf = vec![];
@@ -232,10 +232,10 @@ impl AppHandler for App {
                 .window
                 .read_clipboard(window::MIME_TYPE_TEXT, &mut buf)
                 .and_then(|_| String::from_utf8(buf).context("invalid text"));
-            self.uhi_context.clipboard_service.fulfill_read(payload);
+            self.uhi_context.clipboard_state.fulfill_read(payload);
         }
 
-        if let Some(text) = self.uhi_context.clipboard_service.take_write() {
+        if let Some(text) = self.uhi_context.clipboard_state.take_write() {
             ctx.window
                 .provide_clipboard_data(Box::new(window::ClipboardTextProvider::new(text)))
                 // TODO: proper error handling

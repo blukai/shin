@@ -247,7 +247,7 @@ pub struct Context<E: Externs> {
     pub draw_buffer: DrawBuffer<E>,
 
     pub interaction_state: InteractionState,
-    pub clipboard_service: ClipboardState,
+    pub clipboard_state: ClipboardState,
 }
 
 impl<E: Externs> Default for Context<E> {
@@ -278,7 +278,7 @@ impl<E: Externs> Context<E> {
             draw_buffer: DrawBuffer::default(),
 
             interaction_state: InteractionState::default(),
-            clipboard_service: ClipboardState::default(),
+            clipboard_state: ClipboardState::default(),
         })
     }
 
@@ -288,13 +288,13 @@ impl<E: Externs> Context<E> {
         self.previous_frame_start = self.current_frame_start;
 
         self.interaction_state.begin_frame();
-        self.clipboard_service.begin_frame(self.current_frame_start);
+        self.clipboard_state.begin_frame(self.current_frame_start);
     }
 
     pub fn end_frame(&mut self) {
         self.draw_buffer.clear();
         self.interaction_state.end_frame();
-        self.clipboard_service.end_frame();
+        self.clipboard_state.end_frame();
     }
 
     pub fn dt(&self) -> f32 {

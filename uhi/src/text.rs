@@ -987,7 +987,7 @@ impl<'a> TextSinglelineSelectable<'a> {
         mut font_instance: FontInstanceRefMut,
         texture_service: &mut TextureService<E>,
         interaction_state: &mut InteractionState,
-        clipboard_service: &mut ClipboardState,
+        clipboard_state: &mut ClipboardState,
         input: &input::State,
     ) {
         if self.text.hot.is_none() && self.text.active.is_none() {
@@ -1002,13 +1002,13 @@ impl<'a> TextSinglelineSelectable<'a> {
             return;
         }
 
-        let KeyboardState { ref scancodes, .. } = input.keyboard;
+        let KeyboardState { ref keymods, .. } = input.keyboard;
         for event in input.events.iter() {
             match event {
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::ArrowLeft,
                     ..
-                }) if scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]) => {
+                }) if keymods.shift() => {
                     self.state
                         .selection
                         .move_left(self.text.buffer.as_str(), true);
@@ -1016,7 +1016,7 @@ impl<'a> TextSinglelineSelectable<'a> {
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::ArrowRight,
                     ..
-                }) if scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]) => {
+                }) if keymods.shift() => {
                     self.state
                         .selection
                         .move_right(self.text.buffer.as_str(), true);
@@ -1025,7 +1025,7 @@ impl<'a> TextSinglelineSelectable<'a> {
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::Home,
                     ..
-                }) if scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]) => {
+                }) if keymods.shift() => {
                     self.state
                         .selection
                         .move_home(self.text.buffer.as_str(), true);
@@ -1033,7 +1033,7 @@ impl<'a> TextSinglelineSelectable<'a> {
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::End,
                     ..
-                }) if scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]) => {
+                }) if keymods.shift() => {
                     self.state
                         .selection
                         .move_end(self.text.buffer.as_str(), true);
@@ -1042,11 +1042,11 @@ impl<'a> TextSinglelineSelectable<'a> {
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::C,
                     ..
-                }) if scancodes.any_pressed([Scancode::CtrlLeft, Scancode::CtrlRight]) => {
+                }) if keymods.ctrl() => {
                     let str = self.text.buffer.as_str();
                     if let Some(copy) = self.state.selection.copy(str) {
                         // TODO: consider allocating copy into single-frame arena or something.
-                        clipboard_service.request_write(copy.to_string());
+                        clipboard_state.request_write(copy.to_string());
                     }
                 }
 
@@ -1095,7 +1095,7 @@ impl<'a> TextSinglelineSelectable<'a> {
             font_instance.reborrow_mut(),
             &mut ctx.texture_service,
             &mut ctx.interaction_state,
-            &mut ctx.clipboard_service,
+            &mut ctx.clipboard_state,
             input,
         );
 
@@ -1163,7 +1163,7 @@ impl<'a> TextSinglelineEditable<'a> {
         mut font_instance: FontInstanceRefMut,
         texture_service: &mut TextureService<E>,
         interaction_state: &mut InteractionState,
-        clipboard_service: &mut ClipboardState,
+        clipboard_state: &mut ClipboardState,
         input: &input::State,
     ) {
         if self.text.hot.is_none() && self.text.active.is_none() {
@@ -1178,71 +1178,67 @@ impl<'a> TextSinglelineEditable<'a> {
             return;
         }
 
-        let KeyboardState { ref scancodes, .. } = input.keyboard;
+        let KeyboardState { ref keymods, .. } = input.keyboard;
         for event in input.events.iter() {
             match event {
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::ArrowLeft,
                     ..
                 }) => {
-                    self.state.selection.move_left(
-                        self.text.buffer.as_str(),
-                        scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]),
-                    );
+                    self.state
+                        .selection
+                        .move_left(self.text.buffer.as_str(), keymods.shift());
                 }
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::ArrowRight,
                     ..
                 }) => {
-                    self.state.selection.move_right(
-                        self.text.buffer.as_str(),
-                        scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]),
-                    );
+                    self.state
+                        .selection
+                        .move_right(self.text.buffer.as_str(), keymods.shift());
                 }
 
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::Home,
                     ..
                 }) => {
-                    self.state.selection.move_home(
-                        self.text.buffer.as_str(),
-                        scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]),
-                    );
+                    self.state
+                        .selection
+                        .move_home(self.text.buffer.as_str(), keymods.shift());
                 }
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::End,
                     ..
                 }) => {
-                    self.state.selection.move_end(
-                        self.text.buffer.as_str(),
-                        scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]),
-                    );
+                    self.state
+                        .selection
+                        .move_end(self.text.buffer.as_str(), keymods.shift());
                 }
 
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::V,
                     ..
-                }) if scancodes.any_pressed([Scancode::CtrlLeft, Scancode::CtrlRight]) => {
-                    clipboard_service.request_read(self.text.key);
+                }) if keymods.ctrl() => {
+                    clipboard_state.request_read(self.text.key);
                 }
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::C,
                     ..
-                }) if scancodes.any_pressed([Scancode::CtrlLeft, Scancode::CtrlRight]) => {
+                }) if keymods.ctrl() => {
                     let str = self.text.buffer.as_string_mut().unwrap();
                     if let Some(copy) = self.state.selection.copy(str) {
                         // TODO: consider allocating copy into single-frame arena or something.
-                        clipboard_service.request_write(copy.to_string());
+                        clipboard_state.request_write(copy.to_string());
                     }
                 }
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::X,
                     ..
-                }) if scancodes.any_pressed([Scancode::CtrlLeft, Scancode::CtrlRight]) => {
+                }) if keymods.ctrl() => {
                     let str = self.text.buffer.as_string_mut().unwrap();
                     if let Some(copy) = self.state.selection.copy(str) {
                         // TODO: consider allocating copy into single-frame arena or something.
-                        clipboard_service.request_write(copy.to_string());
+                        clipboard_state.request_write(copy.to_string());
                         self.state.selection.delete_selection(str);
                     }
                 }
@@ -1305,7 +1301,7 @@ impl<'a> TextSinglelineEditable<'a> {
             }
         }
 
-        if let Some(pasta) = clipboard_service.try_take_read(self.text.key) {
+        if let Some(pasta) = clipboard_state.try_take_read(self.text.key) {
             // TODO: consider removing line breaks or something.
             self.state
                 .selection
@@ -1335,7 +1331,7 @@ impl<'a> TextSinglelineEditable<'a> {
             font_instance.reborrow_mut(),
             &mut ctx.texture_service,
             &mut ctx.interaction_state,
-            &mut ctx.clipboard_service,
+            &mut ctx.clipboard_state,
             input,
         );
 
@@ -1451,7 +1447,7 @@ impl<'a> TextMultilineSelectable<'a> {
         mut font_instance: FontInstanceRefMut,
         texture_service: &mut TextureService<E>,
         interaction_state: &mut InteractionState,
-        clipboard_service: &mut ClipboardState,
+        clipboard_state: &mut ClipboardState,
         input: &input::State,
     ) {
         if self.text.hot.is_none() && self.text.active.is_none() {
@@ -1466,13 +1462,13 @@ impl<'a> TextMultilineSelectable<'a> {
             return;
         }
 
-        let KeyboardState { ref scancodes, .. } = input.keyboard;
+        let KeyboardState { ref keymods, .. } = input.keyboard;
         for event in input.events.iter() {
             match event {
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::ArrowLeft,
                     ..
-                }) if scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]) => {
+                }) if keymods.shift() => {
                     self.state
                         .selection
                         .move_left(self.text.buffer.as_str(), true);
@@ -1480,7 +1476,7 @@ impl<'a> TextMultilineSelectable<'a> {
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::ArrowRight,
                     ..
-                }) if scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]) => {
+                }) if keymods.shift() => {
                     self.state
                         .selection
                         .move_right(self.text.buffer.as_str(), true);
@@ -1489,7 +1485,7 @@ impl<'a> TextMultilineSelectable<'a> {
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::Home,
                     ..
-                }) if scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]) => {
+                }) if keymods.shift() => {
                     self.state
                         .selection
                         .move_home(self.text.buffer.as_str(), true);
@@ -1497,7 +1493,7 @@ impl<'a> TextMultilineSelectable<'a> {
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::End,
                     ..
-                }) if scancodes.any_pressed([Scancode::ShiftLeft, Scancode::ShiftRight]) => {
+                }) if keymods.shift() => {
                     self.state
                         .selection
                         .move_end(self.text.buffer.as_str(), true);
@@ -1506,11 +1502,11 @@ impl<'a> TextMultilineSelectable<'a> {
                 Event::Keyboard(KeyboardEvent::Press {
                     scancode: Scancode::C,
                     ..
-                }) if scancodes.any_pressed([Scancode::CtrlLeft, Scancode::CtrlRight]) => {
+                }) if keymods.ctrl() => {
                     let str = self.text.buffer.as_str();
                     if let Some(copy) = self.state.selection.copy(str) {
                         // TODO: consider allocating copy into single-frame arena or something.
-                        clipboard_service.request_write(copy.to_string());
+                        clipboard_state.request_write(copy.to_string());
                     }
                 }
 
@@ -1569,7 +1565,7 @@ impl<'a> TextMultilineSelectable<'a> {
             font_instance.reborrow_mut(),
             &mut ctx.texture_service,
             &mut ctx.interaction_state,
-            &mut ctx.clipboard_service,
+            &mut ctx.clipboard_state,
             input,
         );
 
