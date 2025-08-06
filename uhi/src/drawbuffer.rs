@@ -82,8 +82,7 @@ impl<E: Externs> Fill<E> {
         }
     }
 
-    // TODO: rename to something like new_color?
-    pub fn with_color(color: Rgba8) -> Self {
+    pub fn new_with_color(color: Rgba8) -> Self {
         Self {
             color,
             texture: None,
@@ -121,8 +120,7 @@ impl<E: Externs> RectShape<E> {
         }
     }
 
-    // TODO: rename to new_filled
-    pub fn with_fill(coords: Rect, fill: Fill<E>) -> Self {
+    pub fn new_with_fill(coords: Rect, fill: Fill<E>) -> Self {
         Self {
             coords,
             fill: Some(fill),
@@ -130,8 +128,7 @@ impl<E: Externs> RectShape<E> {
         }
     }
 
-    // TODO: rename to new_stroked
-    pub fn with_stroke(coords: Rect, stroke: Stroke) -> Self {
+    pub fn new_with_stroke(coords: Rect, stroke: Stroke) -> Self {
         Self {
             coords,
             fill: None,

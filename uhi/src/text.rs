@@ -403,7 +403,7 @@ fn draw_singleline_selection<E: Externs>(
                 .as_ref()
                 .map_or_else(|| SELECTION_INACTIVE, |a| a.selection_inactive)
         };
-        draw_buffer.push_rect(RectShape::with_fill(rect, Fill::with_color(fill)));
+        draw_buffer.push_rect(RectShape::new_with_fill(rect, Fill::new_with_color(fill)));
     }
 
     // TODO: draw inactive cursor, maybe outlined or something.
@@ -420,7 +420,7 @@ fn draw_singleline_selection<E: Externs>(
         let size = Vec2::new(cursor_width, font_instance.height());
         let rect = Rect::new(min, min + size);
         let fill = text.palette.as_ref().map_or_else(|| CURSOR, |a| a.cursor);
-        draw_buffer.push_rect(RectShape::with_fill(rect, Fill::with_color(fill)));
+        draw_buffer.push_rect(RectShape::new_with_fill(rect, Fill::new_with_color(fill)));
     }
 }
 
@@ -438,7 +438,7 @@ fn draw_singleline_text<E: Externs>(
     for ch in text.buffer.as_str().chars() {
         let glyph = font_instance.get_or_rasterize_glyph(ch, texture_service);
 
-        draw_buffer.push_rect(RectShape::with_fill(
+        draw_buffer.push_rect(RectShape::new_with_fill(
             glyph
                 .bounding_rect()
                 .translate_by(&Vec2::new(offset_x, text.rect.min.y + font_ascent)),
@@ -520,7 +520,7 @@ fn draw_multiline_selection<E: Externs>(
             Vec2::new(text.rect.min.x + min_x, min_y),
             Vec2::new(text.rect.min.x + max_x, max_y),
         );
-        draw_buffer.push_rect(RectShape::with_fill(rect, Fill::with_color(fill)));
+        draw_buffer.push_rect(RectShape::new_with_fill(rect, Fill::new_with_color(fill)));
     }
 }
 
@@ -552,7 +552,7 @@ fn draw_multiline_text<E: Externs>(
             }
         }
 
-        draw_buffer.push_rect(RectShape::with_fill(
+        draw_buffer.push_rect(RectShape::new_with_fill(
             glyph
                 .bounding_rect()
                 .translate_by(&Vec2::new(position.x, position.y + font_ascent)),

@@ -454,7 +454,7 @@ struct TempCStr {
 }
 
 impl TempCStr {
-    fn with_capacity(capacity: usize) -> Self {
+    fn new_with_capacity(capacity: usize) -> Self {
         Self {
             buf: Vec::with_capacity(capacity),
         }
@@ -1154,7 +1154,7 @@ impl WaylandBackend {
             serial_tracker: SerialTracker::default(),
             events: VecDeque::new(),
 
-            temp_cstr: TempCStr::with_capacity(255),
+            temp_cstr: TempCStr::new_with_capacity(255),
         });
 
         // init globals

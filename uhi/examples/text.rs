@@ -204,7 +204,7 @@ impl AppHandler for App {
                 let size = uhi::Vec2::from(uhi::U32Vec2::from(tp.size())) / scale_factor as f32;
                 self.uhi_context
                     .draw_buffer
-                    .push_rect(uhi::RectShape::with_fill(
+                    .push_rect(uhi::RectShape::new_with_fill(
                         uhi::Rect::new(rect.min, rect.min + size),
                         uhi::Fill::new(
                             uhi::Rgba8::WHITE,

@@ -177,7 +177,7 @@ impl Console {
         // background
         ctx.draw_buffer.push_rect(uhi::RectShape::new(
             rect,
-            uhi::Fill::with_color(uhi::Rgba8::from_u32(0xffffff0c)),
+            uhi::Fill::new_with_color(uhi::Rgba8::from_u32(0xffffff0c)),
             uhi::Stroke {
                 width: 1.0,
                 color: if active {
@@ -232,9 +232,9 @@ impl Console {
             let min = rect.min + uhi::Vec2::new(0.0, self.open_animation.get_value());
             uhi::Rect::new(min, min + uhi::Vec2::new(rect.max.x, Self::HEIGHT))
         };
-        ctx.draw_buffer.push_rect(uhi::RectShape::with_fill(
+        ctx.draw_buffer.push_rect(uhi::RectShape::new_with_fill(
             container_rect,
-            uhi::Fill::with_color(uhi::Rgba8::from_u32(0x1f1f1fff)),
+            uhi::Fill::new_with_color(uhi::Rgba8::from_u32(0x1f1f1fff)),
         ));
 
         let [history_container_rect, _gap, command_editor_container_rect] = uhi::vstack([

@@ -252,13 +252,13 @@ pub struct Context<E: Externs> {
 
 impl<E: Externs> Default for Context<E> {
     fn default() -> Self {
-        Self::with_default_font_slice(DEFAULT_FONT_DATA, 16.0)
+        Self::new_with_default_font_slice(DEFAULT_FONT_DATA, 16.0)
             .expect("somebody fucked things up; default font is invalid?")
     }
 }
 
 impl<E: Externs> Context<E> {
-    pub fn with_default_font_slice(
+    pub fn new_with_default_font_slice(
         font_data: &'static [u8],
         default_font_size: f32,
     ) -> anyhow::Result<Self> {
