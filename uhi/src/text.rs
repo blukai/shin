@@ -373,9 +373,9 @@ fn draw_singleline_selection<E: Externs>(
     }
 
     let str = text.buffer.as_str();
-
-    let pre_selection_text = &str[..state.selection.byte_range.start];
-    let selection_text = &str[state.selection.byte_range.clone()];
+    let normalized_selection_byte_range = state.selection.normalized_byte_range();
+    let pre_selection_text = &str[..normalized_selection_byte_range.start];
+    let selection_text = &str[normalized_selection_byte_range];
 
     let pre_selection_text_width =
         font_instance.compute_text_width(pre_selection_text, texture_service);
@@ -387,11 +387,11 @@ fn draw_singleline_selection<E: Externs>(
     // NOTE: end is where the cursor is. for example in `hello, sailor` selection may have started
     // at `,` and moved left to `e`.
     if !state.selection.is_empty() {
-        let min_x = selection_min_x.min(selection_max_x);
-        let max_x = selection_min_x.max(selection_max_x);
+        let selection_width = selection_max_x - selection_min_x;
 
-        let min = text.rect.min - Vec2::new(state.scroll.offset.x, 0.0) + Vec2::new(min_x, 0.0);
-        let size = Vec2::new(max_x - min_x, font_instance.height());
+        let min =
+            text.rect.min - Vec2::new(state.scroll.offset.x, 0.0) + Vec2::new(selection_min_x, 0.0);
+        let size = Vec2::new(selection_width, font_instance.height());
         let rect = Rect::new(min, min + size);
         let fill = if active {
             text.palette
@@ -407,10 +407,15 @@ fn draw_singleline_selection<E: Externs>(
 
     // TODO: draw inactive cursor, maybe outlined or something.
     if draw_cursor && active {
+        let cursor_min_x = if state.selection.is_byte_range_normalized() {
+            selection_max_x
+        } else {
+            selection_min_x
+        };
         let cursor_width = font_instance.typical_advance_width();
 
         let min =
-            text.rect.min - Vec2::new(state.scroll.offset.x, 0.0) + Vec2::new(selection_max_x, 0.0);
+            text.rect.min - Vec2::new(state.scroll.offset.x, 0.0) + Vec2::new(cursor_min_x, 0.0);
         let size = Vec2::new(cursor_width, font_instance.height());
         let rect = Rect::new(min, min + size);
         let fill = text.palette.as_ref().map_or_else(|| CURSOR, |a| a.cursor);
@@ -463,7 +468,7 @@ fn draw_multiline_selection<E: Externs>(
 ) {
     let str = text.buffer.as_str();
     let top = text.rect.min.y - state.scroll.offset.y;
-    let selection_range = state.selection.normalized_cursor();
+    let selection_range = state.selection.normalized_byte_range();
     let font_height = font_instance.height();
     let fill = if active {
         text.palette
@@ -631,10 +636,14 @@ impl TextSelection {
         self.byte_range = 0..0;
     }
 
-    fn normalized_cursor(&self) -> Range<usize> {
-        let left = self.byte_range.start.min(self.byte_range.end);
-        let right = self.byte_range.start.max(self.byte_range.end);
-        left..right
+    fn normalized_byte_range(&self) -> Range<usize> {
+        let min = self.byte_range.start.min(self.byte_range.end);
+        let max = self.byte_range.start.max(self.byte_range.end);
+        min..max
+    }
+
+    fn is_byte_range_normalized(&self) -> bool {
+        self.byte_range.start <= self.byte_range.end
     }
 
     // TODO: move modifiers (by char, by char type, by word, etc.)
@@ -692,9 +701,9 @@ impl TextSelection {
     }
 
     fn delete_selection(&mut self, text: &mut String) {
-        let normalized_cursor = self.normalized_cursor();
-        if normalized_cursor.end > normalized_cursor.start {
-            text.replace_range(normalized_cursor, "");
+        let normalized_byte_range = self.normalized_byte_range();
+        if normalized_byte_range.end > normalized_byte_range.start {
+            text.replace_range(normalized_byte_range, "");
         }
         self.byte_range.end = self.byte_range.end.min(self.byte_range.start);
         self.byte_range.start = self.byte_range.end;
@@ -727,13 +736,13 @@ impl TextSelection {
     }
 
     fn paste(&mut self, text: &mut String, pasta: &str) {
-        let normalized_cursor = self.normalized_cursor();
+        let normalized_byte_range = self.normalized_byte_range();
         if self.is_empty() {
-            text.insert_str(normalized_cursor.start, pasta);
+            text.insert_str(normalized_byte_range.start, pasta);
         } else {
-            text.replace_range(normalized_cursor.clone(), pasta);
+            text.replace_range(normalized_byte_range.clone(), pasta);
         }
-        self.byte_range.end = normalized_cursor.start + pasta.len();
+        self.byte_range.end = normalized_byte_range.start + pasta.len();
         self.byte_range.start = self.byte_range.end;
     }
 
@@ -741,8 +750,8 @@ impl TextSelection {
         if self.is_empty() {
             return None;
         }
-        let normalized_cursor = self.normalized_cursor();
-        Some(&text[normalized_cursor])
+        let normalized_byte_range = self.normalized_byte_range();
+        Some(&text[normalized_byte_range])
     }
 }
 
