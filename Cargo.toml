@@ -8,6 +8,7 @@ members = [
   "input",
   "nohash",
   "rangealloc",
+  "scopeguard",
   "uhi",
   "wayland",
   "wayland-scanner",
@@ -33,6 +34,7 @@ gl-generator = { path = "gl-generator" }
 input = { path = "input" }
 nohash = { path = "nohash" }
 rangealloc = { path = "rangealloc" }
+scopeguard = { path = "scopeguard" }
 uhi = { path = "uhi" }
 wayland = { path = "wayland" }
 wayland-scanner = { path = "wayland-scanner" }

@@ -4,6 +4,7 @@ use input::{
     CursorShape, Event, KeyboardEvent, KeyboardState, Keycode, PointerButton, PointerEvent,
     Scancode,
 };
+use scopeguard::ScopeGuard;
 
 use crate::{
     ClipboardState, Context, DrawBuffer, Externs, F64Vec2, Fill, FillTexture, FontHandle,
@@ -483,6 +484,8 @@ fn draw_multiline_selection<E: Externs>(
     let mut line_num = 0;
     let mut last_row_range = 0..0;
     while last_row_range.end < str.len() {
+        let line_num = ScopeGuard::new_with_data(line_num, |_| line_num += 1);
+
         last_row_range = layout_row(
             str,
             last_row_range.end,
@@ -492,8 +495,6 @@ fn draw_multiline_selection<E: Externs>(
         );
         if selection_range.end < last_row_range.start || selection_range.start > last_row_range.end
         {
-            // TODO: play around with the scope guard thing (aka defer).
-            line_num += 1;
             continue;
         }
 
@@ -512,16 +513,14 @@ fn draw_multiline_selection<E: Externs>(
         let min_x = prefix_width;
         let max_x = prefix_width + infix_width;
 
-        let min_y = top + line_num as f32 * font_height;
-        let max_y = top + (line_num + 1) as f32 * font_height;
+        let min_y = top + *line_num as f32 * font_height;
+        let max_y = top + *line_num as f32 * font_height + font_height;
 
         let rect = Rect::new(
             Vec2::new(text.rect.min.x + min_x, min_y),
             Vec2::new(text.rect.min.x + max_x, max_y),
         );
         draw_buffer.push_rect(RectShape::with_fill(rect, Fill::with_color(fill)));
-
-        line_num += 1;
     }
 }
 
@@ -918,7 +917,7 @@ impl<'a> TextSingleline<'a> {
     }
 
     pub fn draw<E: Externs>(self, ctx: &mut Context<E>) {
-        ctx.draw_buffer.set_clip_rect(Some(self.text.rect));
+        let _clip_guard = ctx.draw_buffer.clip_scope(self.text.rect);
 
         let font_instance = ctx.font_service.get_font_instance(
             self.text.font_handle.unwrap_or(ctx.default_font_handle()),
@@ -932,8 +931,6 @@ impl<'a> TextSingleline<'a> {
             &mut ctx.texture_service,
             &mut ctx.draw_buffer,
         );
-
-        ctx.draw_buffer.set_clip_rect(None);
     }
 
     pub fn selectable(self, state: &'a mut TextState) -> TextSinglelineSelectable<'a> {
@@ -1084,7 +1081,7 @@ impl<'a> TextSinglelineSelectable<'a> {
     }
 
     pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>, input: &input::State) {
-        ctx.draw_buffer.set_clip_rect(Some(self.text.rect));
+        let _clip_guard = ctx.draw_buffer.clip_scope(self.text.rect);
 
         let mut font_instance = ctx.font_service.get_font_instance(
             self.text.font_handle.unwrap_or(ctx.default_font_handle()),
@@ -1116,8 +1113,6 @@ impl<'a> TextSinglelineSelectable<'a> {
             &mut ctx.texture_service,
             &mut ctx.draw_buffer,
         );
-
-        ctx.draw_buffer.set_clip_rect(None);
     }
 }
 
@@ -1320,7 +1315,7 @@ impl<'a> TextSinglelineEditable<'a> {
     }
 
     pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>, input: &input::State) {
-        ctx.draw_buffer.set_clip_rect(Some(self.text.rect));
+        let _clip_guard = ctx.draw_buffer.clip_scope(self.text.rect);
 
         let mut font_instance = ctx.font_service.get_font_instance(
             self.text.font_handle.unwrap_or(ctx.default_font_handle()),
@@ -1352,8 +1347,6 @@ impl<'a> TextSinglelineEditable<'a> {
             &mut ctx.texture_service,
             &mut ctx.draw_buffer,
         );
-
-        ctx.draw_buffer.set_clip_rect(None);
     }
 }
 
@@ -1370,7 +1363,7 @@ impl<'a> TextMultiline<'a> {
     }
 
     pub fn draw<E: Externs>(self, ctx: &mut Context<E>) {
-        ctx.draw_buffer.set_clip_rect(Some(self.text.rect));
+        let _clip_guard = ctx.draw_buffer.clip_scope(self.text.rect);
 
         let font_instance = ctx.font_service.get_font_instance(
             self.text.font_handle.unwrap_or(ctx.default_font_handle()),
@@ -1384,8 +1377,6 @@ impl<'a> TextMultiline<'a> {
             &mut ctx.texture_service,
             &mut ctx.draw_buffer,
         );
-
-        ctx.draw_buffer.set_clip_rect(None);
     }
 
     pub fn selectable(self, state: &'a mut TextState) -> TextMultilineSelectable<'a> {
@@ -1554,7 +1545,7 @@ impl<'a> TextMultilineSelectable<'a> {
     }
 
     pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>, input: &input::State) {
-        ctx.draw_buffer.set_clip_rect(Some(self.text.rect));
+        let _clip_guard = ctx.draw_buffer.clip_scope(self.text.rect);
 
         let mut font_instance = ctx.font_service.get_font_instance(
             self.text.font_handle.unwrap_or(ctx.default_font_handle()),
@@ -1585,7 +1576,5 @@ impl<'a> TextMultilineSelectable<'a> {
             &mut ctx.texture_service,
             &mut ctx.draw_buffer,
         );
-
-        ctx.draw_buffer.set_clip_rect(None);
     }
 }

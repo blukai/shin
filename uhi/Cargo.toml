@@ -13,6 +13,7 @@ gl.workspace = true
 input.workspace = true
 nohash.workspace = true
 rangealloc.workspace = true
+scopeguard.workspace = true
 
 [dev-dependencies]
 raw-window-handle.workspace = true

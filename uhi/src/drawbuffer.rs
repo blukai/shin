@@ -1,4 +1,6 @@
-use std::{mem, ops::Range};
+use std::{cell::Cell, mem, ops::Range, rc::Rc};
+
+use scopeguard::ScopeGuard;
 
 use crate::{Externs, Rect, TextureKind, Vec2};
 
@@ -207,7 +209,10 @@ pub struct DrawData<'a, E: Externs> {
 
 #[derive(Debug)]
 pub struct DrawBuffer<E: Externs> {
-    clip_rect: Option<Rect>,
+    // i kind of hate the fact that this has to be this way, but that the rust way of enabling
+    // interior mutability i guess (because scissor scope must borrow DrawBuffer for as long as the
+    // scope is alive).
+    clip_rect: Rc<Cell<Option<Rect>>>,
     vertices: Vec<Vertex>,
     indices: Vec<u32>,
     pending_indices: usize,
@@ -217,7 +222,7 @@ pub struct DrawBuffer<E: Externs> {
 impl<E: Externs> Default for DrawBuffer<E> {
     fn default() -> Self {
         Self {
-            clip_rect: None,
+            clip_rect: Rc::new(Cell::new(None)),
             vertices: Vec::new(),
             indices: Vec::new(),
             pending_indices: 0,
@@ -234,8 +239,11 @@ impl<E: Externs> DrawBuffer<E> {
         self.draw_commands.clear();
     }
 
-    pub fn set_clip_rect(&mut self, clip_rect: Option<Rect>) {
-        self.clip_rect = clip_rect;
+    pub fn clip_scope<'a>(&mut self, rect: Rect) -> ScopeGuard<(), impl FnOnce(()) + 'a> {
+        let clip_rect = Rc::clone(&self.clip_rect);
+        let prev = clip_rect.replace(Some(rect));
+        assert!(prev.is_none());
+        ScopeGuard::new(move || _ = clip_rect.replace(None))
     }
 
     fn push_vertex(&mut self, vertex: Vertex) {
@@ -256,7 +264,7 @@ impl<E: Externs> DrawBuffer<E> {
         let start_index = (self.indices.len() - self.pending_indices) as u32;
         let end_index = self.indices.len() as u32;
         self.draw_commands.push(DrawCommand {
-            clip_rect: self.clip_rect,
+            clip_rect: self.clip_rect.get(),
             index_range: start_index..end_index,
             texture,
         });
