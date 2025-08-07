@@ -42,14 +42,12 @@ impl<T, F: FnOnce(T)> Deref for ScopeGuard<T, F> {
     type Target = T;
 
     fn deref(&self) -> &T {
-        // The type invariants guarantee that `unwrap` will succeed.
         &self.0.as_ref().unwrap().0
     }
 }
 
 impl<T, F: FnOnce(T)> DerefMut for ScopeGuard<T, F> {
     fn deref_mut(&mut self) -> &mut T {
-        // The type invariants guarantee that `unwrap` will succeed.
         &mut self.0.as_mut().unwrap().0
     }
 }

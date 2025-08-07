@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::ops::{DerefMut, Range};
 
 use input::{
     CursorShape, Event, KeyboardEvent, KeyboardState, Keycode, PointerButton, PointerEvent,
@@ -917,19 +917,18 @@ impl<'a> TextSingleline<'a> {
     }
 
     pub fn draw<E: Externs>(self, ctx: &mut Context<E>) {
-        let _clip_guard = ctx.draw_buffer.clip_scope(self.text.rect);
-
         let font_instance = ctx.font_service.get_font_instance(
             self.text.font_handle.unwrap_or(ctx.default_font_handle()),
             self.text.font_size.unwrap_or(ctx.default_font_size()),
         );
+        let mut draw_buffer = ctx.draw_buffer.clip_scope(self.text.rect);
 
         draw_singleline_text(
             &self.text,
             0.0,
             font_instance,
             &mut ctx.texture_service,
-            &mut ctx.draw_buffer,
+            draw_buffer.deref_mut(),
         );
     }
 
@@ -1081,12 +1080,11 @@ impl<'a> TextSinglelineSelectable<'a> {
     }
 
     pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>, input: &input::State) {
-        let _clip_guard = ctx.draw_buffer.clip_scope(self.text.rect);
-
         let mut font_instance = ctx.font_service.get_font_instance(
             self.text.font_handle.unwrap_or(ctx.default_font_handle()),
             self.text.font_size.unwrap_or(ctx.default_font_size()),
         );
+        let mut draw_buffer = ctx.draw_buffer.clip_scope(self.text.rect);
 
         self.update(
             font_instance.reborrow_mut(),
@@ -1103,7 +1101,7 @@ impl<'a> TextSinglelineSelectable<'a> {
             false,
             font_instance.reborrow_mut(),
             &mut ctx.texture_service,
-            &mut ctx.draw_buffer,
+            draw_buffer.deref_mut(),
         );
 
         draw_singleline_text(
@@ -1111,7 +1109,7 @@ impl<'a> TextSinglelineSelectable<'a> {
             0.0,
             font_instance,
             &mut ctx.texture_service,
-            &mut ctx.draw_buffer,
+            draw_buffer.deref_mut(),
         );
     }
 }
@@ -1315,12 +1313,11 @@ impl<'a> TextSinglelineEditable<'a> {
     }
 
     pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>, input: &input::State) {
-        let _clip_guard = ctx.draw_buffer.clip_scope(self.text.rect);
-
         let mut font_instance = ctx.font_service.get_font_instance(
             self.text.font_handle.unwrap_or(ctx.default_font_handle()),
             self.text.font_size.unwrap_or(ctx.default_font_size()),
         );
+        let mut draw_buffer = ctx.draw_buffer.clip_scope(self.text.rect);
 
         self.update(
             font_instance.reborrow_mut(),
@@ -1337,7 +1334,7 @@ impl<'a> TextSinglelineEditable<'a> {
             true,
             font_instance.reborrow_mut(),
             &mut ctx.texture_service,
-            &mut ctx.draw_buffer,
+            draw_buffer.deref_mut(),
         );
 
         draw_singleline_text(
@@ -1345,7 +1342,7 @@ impl<'a> TextSinglelineEditable<'a> {
             self.state.scroll.offset.x,
             font_instance,
             &mut ctx.texture_service,
-            &mut ctx.draw_buffer,
+            draw_buffer.deref_mut(),
         );
     }
 }
@@ -1363,19 +1360,18 @@ impl<'a> TextMultiline<'a> {
     }
 
     pub fn draw<E: Externs>(self, ctx: &mut Context<E>) {
-        let _clip_guard = ctx.draw_buffer.clip_scope(self.text.rect);
-
         let font_instance = ctx.font_service.get_font_instance(
             self.text.font_handle.unwrap_or(ctx.default_font_handle()),
             self.text.font_size.unwrap_or(ctx.default_font_size()),
         );
+        let mut draw_buffer = ctx.draw_buffer.clip_scope(self.text.rect);
 
         draw_multiline_text(
             &self.text,
             0.0,
             font_instance,
             &mut ctx.texture_service,
-            &mut ctx.draw_buffer,
+            draw_buffer.deref_mut(),
         );
     }
 
@@ -1545,12 +1541,11 @@ impl<'a> TextMultilineSelectable<'a> {
     }
 
     pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>, input: &input::State) {
-        let _clip_guard = ctx.draw_buffer.clip_scope(self.text.rect);
-
         let mut font_instance = ctx.font_service.get_font_instance(
             self.text.font_handle.unwrap_or(ctx.default_font_handle()),
             self.text.font_size.unwrap_or(ctx.default_font_size()),
         );
+        let mut draw_buffer = ctx.draw_buffer.clip_scope(self.text.rect);
 
         self.update(
             font_instance.reborrow_mut(),
@@ -1566,7 +1561,7 @@ impl<'a> TextMultilineSelectable<'a> {
             self.text.is_active(),
             font_instance.reborrow_mut(),
             &mut ctx.texture_service,
-            &mut ctx.draw_buffer,
+            draw_buffer.deref_mut(),
         );
 
         draw_multiline_text(
@@ -1574,7 +1569,7 @@ impl<'a> TextMultilineSelectable<'a> {
             self.state.scroll.offset.y,
             font_instance,
             &mut ctx.texture_service,
-            &mut ctx.draw_buffer,
+            draw_buffer.deref_mut(),
         );
     }
 }
