@@ -89,6 +89,7 @@ pub struct TextureService<E: Externs> {
     materializations: HashMap<TextureHandle, Materialization<E>>,
 }
 
+// @BlindDerive
 impl<E: Externs> Default for TextureService<E> {
     fn default() -> Self {
         Self {

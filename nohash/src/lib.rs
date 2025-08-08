@@ -80,18 +80,21 @@ impl<T> fmt::Debug for NoHashHasher<T> {
     }
 }
 
+// @BlindDerive
 impl<T> Default for NoHashHasher<T> {
     fn default() -> Self {
         Self(0, PhantomData)
     }
 }
 
+// @BlindDerive
 impl<T> Clone for NoHashHasher<T> {
     fn clone(&self) -> Self {
         Self(self.0, PhantomData)
     }
 }
 
+// @BlindDerive
 impl<T> Copy for NoHashHasher<T> {}
 
 pub type BuildNoHashHasher<T> = BuildHasherDefault<NoHashHasher<T>>;

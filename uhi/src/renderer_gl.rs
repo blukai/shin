@@ -288,8 +288,6 @@ impl GlRenderer {
         self.setup_state(gl_api);
         self.handle_textures(gl_api, &mut ctx.texture_service)?;
 
-        let draw_data = ctx.draw_buffer.get_draw_data();
-
         unsafe {
             gl_api.viewport(
                 0,
@@ -297,64 +295,69 @@ impl GlRenderer {
                 physical_view_size.0 as gl::api::GLsizei,
                 physical_view_size.1 as gl::api::GLsizei,
             );
-
             gl_api.uniform_2f(
                 self.u_view_size_location,
                 (physical_view_size.0 as f32 / scale_factor) as gl::api::GLfloat,
                 (physical_view_size.1 as f32 / scale_factor) as gl::api::GLfloat,
             );
+        }
 
-            gl_api.buffer_data(
-                gl::api::ARRAY_BUFFER,
-                (draw_data.vertices.len() * size_of::<Vertex>()) as gl::api::GLsizeiptr,
-                draw_data.vertices.as_ptr() as *const c_void,
-                gl::api::STREAM_DRAW,
-            );
-            gl_api.buffer_data(
-                gl::api::ELEMENT_ARRAY_BUFFER,
-                (draw_data.indices.len() * size_of::<u32>()) as gl::api::GLsizeiptr,
-                draw_data.indices.as_ptr() as *const c_void,
-                gl::api::STREAM_DRAW,
-            );
-
-            for DrawCommand {
-                clip_rect,
-                index_range,
-                texture,
-            } in draw_data.commands.iter()
-            {
-                if let Some(clip_rect) = clip_rect {
-                    gl_api.enable(gl::api::SCISSOR_TEST);
-
-                    let x = (clip_rect.min.x * scale_factor).round() as i32;
-                    let y = physical_view_size.1 as i32
-                        - (clip_rect.max.y * scale_factor).round() as i32;
-                    let width = (clip_rect.width() * scale_factor).round() as i32;
-                    let height = (clip_rect.height() * scale_factor).round() as i32;
-                    gl_api.scissor(x, y, width, height);
-                }
-
-                gl_api.active_texture(gl::api::TEXTURE0);
-                gl_api.bind_texture(
-                    gl::api::TEXTURE_2D,
-                    Some(texture.as_ref().map_or_else(
-                        || self.default_white_tex,
-                        |tex_kind| match tex_kind {
-                            TextureKind::Internal(internal) => *ctx.texture_service.get(*internal),
-                            TextureKind::External(external) => *external,
-                        },
-                    )),
+        for draw_data in ctx.draw_buffer.iter_draw_data() {
+            unsafe {
+                gl_api.buffer_data(
+                    gl::api::ARRAY_BUFFER,
+                    (draw_data.vertices.len() * size_of::<Vertex>()) as gl::api::GLsizeiptr,
+                    draw_data.vertices.as_ptr() as *const c_void,
+                    gl::api::STREAM_DRAW,
+                );
+                gl_api.buffer_data(
+                    gl::api::ELEMENT_ARRAY_BUFFER,
+                    (draw_data.indices.len() * size_of::<u32>()) as gl::api::GLsizeiptr,
+                    draw_data.indices.as_ptr() as *const c_void,
+                    gl::api::STREAM_DRAW,
                 );
 
-                gl_api.draw_elements(
-                    gl::api::TRIANGLES,
-                    (index_range.end - index_range.start) as gl::api::GLsizei,
-                    gl::api::UNSIGNED_INT,
-                    (index_range.start * size_of::<u32>() as u32) as *const c_void,
-                );
+                for DrawCommand {
+                    clip_rect,
+                    index_range,
+                    texture,
+                } in draw_data.commands.iter()
+                {
+                    if let Some(clip_rect) = clip_rect {
+                        gl_api.enable(gl::api::SCISSOR_TEST);
 
-                if let Some(_) = clip_rect {
-                    gl_api.disable(gl::api::SCISSOR_TEST);
+                        let x = (clip_rect.min.x * scale_factor).round() as i32;
+                        let y = physical_view_size.1 as i32
+                            - (clip_rect.max.y * scale_factor).round() as i32;
+                        let width = (clip_rect.width() * scale_factor).round() as i32;
+                        let height = (clip_rect.height() * scale_factor).round() as i32;
+                        gl_api.scissor(x, y, width, height);
+                    }
+
+                    gl_api.active_texture(gl::api::TEXTURE0);
+                    gl_api.bind_texture(
+                        gl::api::TEXTURE_2D,
+                        Some(texture.as_ref().map_or_else(
+                            || self.default_white_tex,
+                            |tex_kind| match tex_kind {
+                                TextureKind::Internal(internal) => {
+                                    *ctx.texture_service.get(*internal)
+                                }
+                                TextureKind::External(external) => *external,
+                            },
+                        )),
+                    );
+
+                    gl_api.draw_elements(
+                        gl::api::TRIANGLES,
+                        (index_range.end - index_range.start) as gl::api::GLsizei,
+                        gl::api::UNSIGNED_INT,
+                        (index_range.start * size_of::<u32>() as u32) as *const c_void,
+                    );
+
+                    if let Some(_) = clip_rect {
+                        gl_api.disable(gl::api::SCISSOR_TEST);
+                    }
                 }
             }
         }

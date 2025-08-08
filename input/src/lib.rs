@@ -302,6 +302,7 @@ where
     states: NoHashMap<B, ButtonStates>,
 }
 
+// @BlindDerive
 impl<B> Default for ButtonInput<B>
 where
     B: Copy + Eq + NoHash,

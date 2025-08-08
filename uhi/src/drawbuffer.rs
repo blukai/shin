@@ -1,4 +1,4 @@
-use std::{mem, ops::Range};
+use std::{array, mem, ops::Range};
 
 use scopeguard::ScopeGuard;
 
@@ -6,12 +6,6 @@ use crate::{Externs, Rect, TextureKind, Vec2};
 
 // TODO: consider offloading vertex generation and stuff for the gpu (or maybe for software
 // renderer?) to the renderer. accumulate shapes, not verticies.
-
-// TODO: layers. i want to be able to put some stuff behind, some stuff ~above while drawing.
-//
-// can layers be relative? should i try to entertain idea of relative layers? for example tooltips
-// at base layer must have lower priority and not be show when popup is active or something like
-// that.
 
 // NOTE: repr(C) is here to ensure that ordering is correct in into_array transmutation.
 #[repr(C)]
@@ -198,47 +192,31 @@ pub struct DrawCommand<E: Externs> {
 }
 
 #[derive(Debug)]
-pub struct DrawData<'a, E: Externs> {
-    pub indices: &'a [u32],
-    pub vertices: &'a [Vertex],
-    pub commands: &'a [DrawCommand<E>],
-}
-
-#[derive(Debug)]
-pub struct DrawBuffer<E: Externs> {
-    clip_rect: Option<Rect>,
-    vertices: Vec<Vertex>,
-    indices: Vec<u32>,
+pub struct DrawData<E: Externs> {
+    pub vertices: Vec<Vertex>,
+    pub indices: Vec<u32>,
     pending_indices: usize,
-    draw_commands: Vec<DrawCommand<E>>,
+    pub commands: Vec<DrawCommand<E>>,
 }
 
-impl<E: Externs> Default for DrawBuffer<E> {
+// @BlindDerive
+impl<E: Externs> Default for DrawData<E> {
     fn default() -> Self {
         Self {
-            clip_rect: None,
             vertices: Vec::new(),
             indices: Vec::new(),
             pending_indices: 0,
-            draw_commands: Vec::new(),
+            commands: Vec::new(),
         }
     }
 }
 
-impl<E: Externs> DrawBuffer<E> {
-    pub fn clear(&mut self) {
-        assert!(self.pending_indices == 0);
+impl<E: Externs> DrawData<E> {
+    fn clear(&mut self) {
+        assert_eq!(self.pending_indices, 0);
         self.vertices.clear();
         self.indices.clear();
-        self.draw_commands.clear();
-    }
-
-    pub fn clip_scope<'a>(
-        &'a mut self,
-        rect: Rect,
-    ) -> ScopeGuard<&'a mut Self, impl FnOnce(&'a mut Self)> {
-        self.clip_rect = Some(rect);
-        ScopeGuard::new_with_data(self, |this| this.clip_rect = None)
+        self.commands.clear();
     }
 
     fn push_vertex(&mut self, vertex: Vertex) {
@@ -252,26 +230,80 @@ impl<E: Externs> DrawBuffer<E> {
         self.pending_indices += 3;
     }
 
-    fn commit_primitive(&mut self, texture: Option<TextureKind<E>>) {
-        if self.pending_indices == 0 {
-            return;
-        }
+    fn commit_primitive(&mut self, clip_rect: Option<Rect>, texture: Option<TextureKind<E>>) {
+        assert!(self.pending_indices > 0);
         let start_index = (self.indices.len() - self.pending_indices) as u32;
         let end_index = self.indices.len() as u32;
-        self.draw_commands.push(DrawCommand {
-            clip_rect: self.clip_rect,
+        self.commands.push(DrawCommand {
+            clip_rect,
             index_range: start_index..end_index,
             texture,
         });
         self.pending_indices = 0;
     }
+}
 
-    pub fn get_draw_data<'a>(&'a self) -> DrawData<'a, E> {
-        DrawData {
-            indices: self.indices.as_slice(),
-            vertices: self.vertices.as_slice(),
-            commands: self.draw_commands.as_slice(),
+#[repr(usize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum DrawLayer {
+    Underlay = 0,
+    #[default]
+    Primary = 1,
+}
+
+impl DrawLayer {
+    pub const MAX: usize = 2;
+}
+
+#[derive(Debug)]
+pub struct DrawBuffer<E: Externs> {
+    clip_rect: Option<Rect>,
+    layers: [DrawData<E>; DrawLayer::MAX],
+    layer: DrawLayer,
+}
+
+// @BlindDerive
+impl<E: Externs> Default for DrawBuffer<E> {
+    fn default() -> Self {
+        Self {
+            clip_rect: None,
+            layers: array::from_fn(|_| DrawData::default()),
+            layer: DrawLayer::default(),
         }
+    }
+}
+
+impl<E: Externs> DrawBuffer<E> {
+    pub fn clear(&mut self) {
+        self.layers
+            .iter_mut()
+            .for_each(|draw_data| draw_data.clear());
+    }
+
+    pub fn clip_scope<'a>(
+        &'a mut self,
+        rect: Rect,
+    ) -> ScopeGuard<&'a mut Self, impl FnOnce(&'a mut Self)> {
+        self.clip_rect = Some(rect);
+        ScopeGuard::new_with_data(self, |this| this.clip_rect = None)
+    }
+
+    pub fn layer_scope<'a>(
+        &'a mut self,
+        layer: DrawLayer,
+    ) -> ScopeGuard<&'a mut Self, impl FnOnce(&'a mut Self)> {
+        let layer_backup = self.layer;
+        self.layer = layer;
+        ScopeGuard::new_with_data(self, move |this| this.layer = layer_backup)
+    }
+
+    pub fn iter_draw_data<'a>(&'a self) -> impl Iterator<Item = &'a DrawData<E>> {
+        self.layers.iter()
+    }
+
+    #[inline(always)]
+    fn get_draw_data_mut(&mut self) -> &mut DrawData<E> {
+        &mut self.layers[self.layer as usize]
     }
 
     pub fn push_line(&mut self, line: LineShape) {
@@ -279,7 +311,9 @@ impl<E: Externs> DrawBuffer<E> {
         // makes sense only for shapes that need an outline (/ need to be stroked).
         assert!(matches!(line.stroke.alignment, StrokeAlignment::Center));
 
-        let idx = self.vertices.len() as u32;
+        let clip_rect = self.clip_rect;
+        let draw_data = self.get_draw_data_mut();
+        let idx = draw_data.vertices.len() as u32;
 
         let [a, b] = line.points;
         let Stroke { width, color, .. } = line.stroke;
@@ -287,40 +321,42 @@ impl<E: Externs> DrawBuffer<E> {
         let offset = compute_line_width_offset(a, b, width);
 
         // top left
-        self.push_vertex(Vertex {
+        draw_data.push_vertex(Vertex {
             position: a + offset,
             tex_coord: Vec2::new(0.0, 0.0),
             color,
         });
         // top right
-        self.push_vertex(Vertex {
+        draw_data.push_vertex(Vertex {
             position: b + offset,
             tex_coord: Vec2::new(1.0, 0.0),
             color,
         });
         // bottom right
-        self.push_vertex(Vertex {
+        draw_data.push_vertex(Vertex {
             position: b - offset,
             tex_coord: Vec2::new(1.0, 1.0),
             color,
         });
         // bottom left
-        self.push_vertex(Vertex {
+        draw_data.push_vertex(Vertex {
             position: a - offset,
             tex_coord: Vec2::new(0.0, 1.0),
             color,
         });
 
         // top left -> top right -> bottom right
-        self.push_triangle(idx + 0, idx + 1, idx + 2);
+        draw_data.push_triangle(idx + 0, idx + 1, idx + 2);
         // bottom right -> bottom left -> top left
-        self.push_triangle(idx + 2, idx + 3, idx + 0);
+        draw_data.push_triangle(idx + 2, idx + 3, idx + 0);
 
-        self.commit_primitive(None);
+        draw_data.commit_primitive(clip_rect, None);
     }
 
     fn push_rect_filled(&mut self, coords: Rect, fill: Fill<E>) {
-        let idx = self.vertices.len() as u32;
+        let clip_rect = self.clip_rect;
+        let draw_data = self.get_draw_data_mut();
+        let idx = draw_data.vertices.len() as u32;
 
         let (color, texture, tex_coords) = if let Some(fill_texture) = fill.texture {
             (
@@ -333,7 +369,7 @@ impl<E: Externs> DrawBuffer<E> {
         };
 
         // top left
-        self.push_vertex(Vertex {
+        draw_data.push_vertex(Vertex {
             position: coords.top_left(),
             tex_coord: tex_coords
                 .as_ref()
@@ -342,7 +378,7 @@ impl<E: Externs> DrawBuffer<E> {
             color,
         });
         // top right
-        self.push_vertex(Vertex {
+        draw_data.push_vertex(Vertex {
             position: coords.top_right(),
             tex_coord: tex_coords
                 .as_ref()
@@ -351,7 +387,7 @@ impl<E: Externs> DrawBuffer<E> {
             color,
         });
         // bottom right
-        self.push_vertex(Vertex {
+        draw_data.push_vertex(Vertex {
             position: coords.bottom_right(),
             tex_coord: tex_coords
                 .as_ref()
@@ -360,7 +396,7 @@ impl<E: Externs> DrawBuffer<E> {
             color,
         });
         // bottom left
-        self.push_vertex(Vertex {
+        draw_data.push_vertex(Vertex {
             position: coords.bottom_left(),
             tex_coord: tex_coords
                 .as_ref()
@@ -370,11 +406,11 @@ impl<E: Externs> DrawBuffer<E> {
         });
 
         // top left -> top right -> bottom right
-        self.push_triangle(idx + 0, idx + 1, idx + 2);
+        draw_data.push_triangle(idx + 0, idx + 1, idx + 2);
         // bottom right -> bottom left -> top left
-        self.push_triangle(idx + 2, idx + 3, idx + 0);
+        draw_data.push_triangle(idx + 2, idx + 3, idx + 0);
 
-        self.commit_primitive(texture);
+        draw_data.commit_primitive(clip_rect, texture);
     }
 
     fn push_rect_stroked(&mut self, coords: Rect, stroke: Stroke) {
@@ -419,8 +455,6 @@ impl<E: Externs> DrawBuffer<E> {
             Vec2::new(bottom_left.x, bottom_left.y - half_width),
             stroke,
         ));
-
-        self.commit_primitive(None);
     }
 
     pub fn push_rect(&mut self, rect: RectShape<E>) {
