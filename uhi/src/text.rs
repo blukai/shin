@@ -9,9 +9,9 @@ use input::{
 };
 
 use crate::{
-    Appearance, ClipboardState, Context, DrawBuffer, DrawLayer, Externs, F64Vec2, Fill,
-    FillTexture, FontHandle, FontInstanceRefMut, InteractionState, Key, Rect, RectShape, Rgba8,
-    TextureKind, TextureService, Vec2,
+    Appearance, ClipboardState, Context, DrawBuffer, Externs, F64Vec2, Fill, FillTexture,
+    FontHandle, FontInstanceRefMut, InteractionState, Key, Rect, RectShape, Rgba8, TextureKind,
+    TextureService, Vec2,
 };
 
 // TODO: per-char layout styling
@@ -200,7 +200,7 @@ impl TextSelection {
         }
     }
 
-    // NOCOMMIT: test this, make sure it's correct.
+    // TODO: test this, make sure it's correct.
     fn delete_selection(&mut self, text: &mut String) {
         if self.is_empty() {
             return;
@@ -566,8 +566,6 @@ fn scroll_into_multiline_cursor<E: Externs>(
 // draw
 
 // TODO: draw_singleline_text has way too many args. unfuck this please.
-//
-// draws individual glyphs and merged selection in a single iteration.
 fn draw_singleline_text<E: Externs>(
     str: &str,
     container_rect: Rect,
@@ -588,6 +586,11 @@ fn draw_singleline_text<E: Externs>(
     let normalized_selection = selection.normalized();
     let may_draw_selection = should_draw_selection && !normalized_selection.is_empty();
 
+    let mut staging_scopes = draw_buffer.multi_staging_scope();
+    // NOTE: cursor_stage is techinaclly not needed because cursor can be pushed into other stage;
+    // but it's nice, so why not.
+    let [selection_stage, cursor_stage, glyph_stage] = staging_scopes.deref_mut();
+
     let mut byte_offset: usize = 0;
     let mut x_offset: f32 = container_rect.min.x - scroll.offset.x;
     let mut selection_min_x: Option<f32> = None;
@@ -607,8 +610,7 @@ fn draw_singleline_text<E: Externs>(
                 let min = Vec2::new(min_x, container_rect.min.y);
                 let size = Vec2::new(max_x - min_x, font_height);
                 let rect = Rect::new(min, min + size);
-                let mut draw_buffer = draw_buffer.layer_scope(DrawLayer::Underlay);
-                draw_buffer.push_rect(RectShape::new_with_fill(
+                selection_stage.push_rect(RectShape::new_with_fill(
                     rect,
                     Fill::new_with_color(appearance.selection_bg(active)),
                 ));
@@ -623,6 +625,8 @@ fn draw_singleline_text<E: Externs>(
                 // draw cursor after current character (note that end is exclusive).
                 Some(x_offset)
             } else if selection.end == str.len() && byte_offset == str.len() - 1 {
+                // TODO: ^ 99% sure the condition above is broken for wider-then-ascii chars.
+                //
                 // draw cursor after last character.
                 Some(x_offset + glyph_advance_width)
             } else {
@@ -631,16 +635,14 @@ fn draw_singleline_text<E: Externs>(
                 let min = Vec2::new(min_x, container_rect.min.y);
                 let size = Vec2::new(font_typical_advance_width, font_height);
                 let rect = Rect::new(min, min + size);
-                // NOTE: don't need to draw onto underlay here because we're drawing cursor after
-                // the current character meaning that nothing will cover it.
-                draw_buffer.push_rect(RectShape::new_with_fill(
+                cursor_stage.push_rect(RectShape::new_with_fill(
                     rect,
                     Fill::new_with_color(appearance.cursor_bg),
                 ));
             }
         }
 
-        draw_buffer.push_rect(RectShape::new_with_fill(
+        glyph_stage.push_rect(RectShape::new_with_fill(
             glyph
                 .bounding_rect()
                 .translate_by(&Vec2::new(x_offset, container_rect.min.y + font_ascent)),
@@ -677,6 +679,9 @@ fn draw_multiline_text<E: Externs>(
     let normalized_selection = selection.normalized();
     let may_draw_selection = should_draw_selection && !normalized_selection.is_empty();
 
+    let mut staging_scopes = draw_buffer.multi_staging_scope();
+    let [selection_stage, glyph_stage] = staging_scopes.deref_mut();
+
     let mut byte_offset: usize = 0;
     let mut xy_offset = container_rect.top_left();
     xy_offset.y -= -scroll.offset.y;
@@ -695,8 +700,7 @@ fn draw_multiline_text<E: Externs>(
                 let max_xy = xy_offset + Vec2::new(glyph_advance_width, font_height);
 
                 let rect = Rect::new(min_xy, max_xy);
-                let mut draw_buffer = draw_buffer.layer_scope(DrawLayer::Underlay);
-                draw_buffer.push_rect(RectShape::new_with_fill(
+                selection_stage.push_rect(RectShape::new_with_fill(
                     rect,
                     Fill::new_with_color(appearance.selection_bg(active)),
                 ));
@@ -710,8 +714,7 @@ fn draw_multiline_text<E: Externs>(
                 let max_xy = xy_offset + Vec2::new(glyph_advance_width, font_height);
 
                 let rect = Rect::new(min_xy, max_xy);
-                let mut draw_buffer = draw_buffer.layer_scope(DrawLayer::Underlay);
-                draw_buffer.push_rect(RectShape::new_with_fill(
+                selection_stage.push_rect(RectShape::new_with_fill(
                     rect,
                     Fill::new_with_color(appearance.selection_bg(active)),
                 ));
@@ -734,7 +737,7 @@ fn draw_multiline_text<E: Externs>(
             }
         }
 
-        draw_buffer.push_rect(RectShape::new_with_fill(
+        glyph_stage.push_rect(RectShape::new_with_fill(
             glyph
                 .bounding_rect()
                 .translate_by(&Vec2::new(xy_offset.x, xy_offset.y + font_ascent)),

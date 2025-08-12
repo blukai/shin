@@ -145,6 +145,40 @@ impl LineShape {
         }
     }
 }
+
+// NOTE: StagingDrawBufferCommand is what it is and not something like just Shape because the idea
+// is that it might need to support clip scopes and maybe layers at some point - meaning it might
+// be a good idea to design it with the same potential api as DrawBuffer.
+#[derive(Debug)]
+enum StagingDrawBufferCommand<E: Externs> {
+    PushRect(RectShape<E>),
+    PushLine(LineShape),
+}
+
+#[derive(Debug)]
+pub struct StagingDrawBuffer<E: Externs> {
+    commands: Vec<StagingDrawBufferCommand<E>>,
+}
+
+// @BlindDerive
+impl<E: Externs> Default for StagingDrawBuffer<E> {
+    fn default() -> Self {
+        Self {
+            commands: Vec::default(),
+        }
+    }
+}
+
+impl<E: Externs> StagingDrawBuffer<E> {
+    pub fn push_line(&mut self, line: LineShape) {
+        self.commands.push(StagingDrawBufferCommand::PushLine(line));
+    }
+
+    pub fn push_rect(&mut self, rect: RectShape<E>) {
+        self.commands.push(StagingDrawBufferCommand::PushRect(rect));
+    }
+}
+
 /// computes the vertex position offset away the from center caused by line width.
 fn compute_line_width_offset(a: Vec2, b: Vec2, width: f32) -> Vec2 {
     // direction defines how the line is oriented in space. it allows to know
@@ -243,23 +277,26 @@ impl<E: Externs> DrawData<E> {
     }
 }
 
+// NOTE: the initial idea for why i did implement this didn't work out, but it doesn't mean that
+// the implementation is completely useless. this will probably work pretty well for tooptips and
+// stuff.
 #[repr(usize)]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum DrawLayer {
-    Underlay = 0,
     #[default]
-    Primary = 1,
+    Primary,
 }
 
 impl DrawLayer {
-    pub const MAX: usize = 2;
+    pub const MAX: usize = 1;
 }
 
 #[derive(Debug)]
 pub struct DrawBuffer<E: Externs> {
     clip_rect: Option<Rect>,
-    layers: [DrawData<E>; DrawLayer::MAX],
     layer: DrawLayer,
+    layers: [DrawData<E>; DrawLayer::MAX],
+    splits: Vec<StagingDrawBuffer<E>>,
 }
 
 // @BlindDerive
@@ -267,8 +304,9 @@ impl<E: Externs> Default for DrawBuffer<E> {
     fn default() -> Self {
         Self {
             clip_rect: None,
-            layers: array::from_fn(|_| DrawData::default()),
             layer: DrawLayer::default(),
+            layers: array::from_fn(|_| DrawData::default()),
+            splits: Vec::default(),
         }
     }
 }
@@ -288,6 +326,7 @@ impl<E: Externs> DrawBuffer<E> {
         ScopeGuard::new_with_data(self, |this| this.clip_rect = None)
     }
 
+    // allows to create absolute layers.
     pub fn layer_scope<'a>(
         &'a mut self,
         layer: DrawLayer,
@@ -295,6 +334,32 @@ impl<E: Externs> DrawBuffer<E> {
         let layer_backup = self.layer;
         self.layer = layer;
         ScopeGuard::new_with_data(self, move |this| this.layer = layer_backup)
+    }
+
+    // allows to create relative layers.
+    pub fn multi_staging_scope<'a, const N: usize>(
+        &'a mut self,
+    ) -> ScopeGuard<[StagingDrawBuffer<E>; N], impl FnOnce([StagingDrawBuffer<E>; N])> {
+        let splits = array::from_fn::<_, N, _>(|_| {
+            let split = if self.splits.len() > 1 {
+                self.splits.remove(self.splits.len() - 1)
+            } else {
+                StagingDrawBuffer::default()
+            };
+            assert!(split.commands.is_empty());
+            split
+        });
+        ScopeGuard::new_with_data(splits, |splits| {
+            for mut split in splits.into_iter() {
+                for command in split.commands.drain(..) {
+                    match command {
+                        StagingDrawBufferCommand::PushRect(rect) => self.push_rect(rect),
+                        StagingDrawBufferCommand::PushLine(line) => self.push_line(line),
+                    }
+                }
+                self.splits.push(split);
+            }
+        })
     }
 
     pub fn iter_draw_data<'a>(&'a self) -> impl Iterator<Item = &'a DrawData<E>> {
