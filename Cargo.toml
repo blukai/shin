@@ -6,9 +6,6 @@ members = [
   "gl",
   "gl-generator",
   "input",
-  "nohash",
-  "rangealloc",
-  "scopeguard",
   "uhi",
   "wayland",
   "wayland-scanner",
@@ -26,21 +23,24 @@ libc = "0.2"
 log = "0.4"
 raw-window-handle = { version = "0.6", features = ["std"] } # TODO: get rid of rwh
 winit = "0.30"
+# my other repos
+nohash = { git = "https://github.com/blukai/dungers.git", rev = "057eb14", package = "nohash" }
+rangealloc = { git = "https://github.com/blukai/dungers.git", rev = "057eb14", package = "rangealloc" }
+scopeguard = { git = "https://github.com/blukai/dungers.git", rev = "057eb14", package = "scopeguard" }
 # workspace
 app = { path = "app" } # TODO: make the app thing non-serious prototype-only oriented thing.
 dynlib = { path = "dynlib" }
 gl = { path = "gl" }
 gl-generator = { path = "gl-generator" }
 input = { path = "input" }
-nohash = { path = "nohash" }
-rangealloc = { path = "rangealloc" }
-scopeguard = { path = "scopeguard" }
 uhi = { path = "uhi" }
 wayland = { path = "wayland" }
 wayland-scanner = { path = "wayland-scanner" }
 window = { path = "window" }
 xml-iterator = { path = "xml-iterator" }
 
+# TODO: do i need this package declaration here? probably yes, just for the
+# examples/first.rs?
 [package]
 name = "shin"
 version = "0.0.0"
