@@ -1,7 +1,5 @@
-use std::{
-    ffi::{CStr, c_char, c_void},
-    num::NonZero,
-};
+use std::ffi::{CStr, c_char, c_void};
+use std::num::NonZero;
 
 use anyhow::{Context as _, anyhow};
 

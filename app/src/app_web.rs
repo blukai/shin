@@ -1,4 +1,5 @@
-use std::{ffi::CString, panic};
+use std::ffi::CString;
+use std::panic;
 
 use raw_window_handle as rwh;
 use window::{Event, Window, WindowAttrs, WindowEvent};

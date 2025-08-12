@@ -1,7 +1,5 @@
-use std::{
-    marker::PhantomData,
-    ops::{DerefMut, Range},
-};
+use std::marker::PhantomData;
+use std::ops::{DerefMut, Range};
 
 use input::{
     CursorShape, Event, KeyboardEvent, KeyboardState, Keycode, PointerButton, PointerEvent,

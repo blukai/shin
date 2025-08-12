@@ -1,7 +1,5 @@
-use std::{
-    collections::{HashMap, HashSet},
-    ops::Range,
-};
+use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 
 use rangealloc::RangeAlloc;
 

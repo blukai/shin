@@ -1,7 +1,6 @@
 use std::ffi::{CStr, CString, c_void};
-use std::mem;
 use std::ptr::NonNull;
-use std::{error, fmt};
+use std::{error, fmt, mem};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Error(Option<CString>);

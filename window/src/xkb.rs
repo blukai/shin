@@ -1,11 +1,9 @@
-use std::{
-    ffi::{c_char, c_int},
-    ptr::null_mut,
-};
-
-use crate::libxkbcommon::*;
+use std::ffi::{c_char, c_int};
+use std::ptr::null_mut;
 
 use anyhow::anyhow;
+
+use crate::libxkbcommon::*;
 
 pub struct Context {
     pub context: *mut xkb_context,

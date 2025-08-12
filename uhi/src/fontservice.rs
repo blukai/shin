@@ -1,12 +1,13 @@
-use std::{hash::Hash, mem};
+use std::hash::Hash;
+use std::mem;
+
+use ab_glyph::{Font as _, FontArc, PxScale, ScaleFont as _};
+use nohash::NoHashMap;
 
 use crate::{
     Externs, Rect, TextureDesc, TextureFormat, TextureHandle, TexturePacker, TextureRegion,
     TextureService, Vec2,
 };
-
-use ab_glyph::{Font as _, FontArc, PxScale, ScaleFont as _};
-use nohash::NoHashMap;
 
 const TEXTURE_WIDTH: u32 = 256;
 const TEXTURE_HEIGHT: u32 = 256;

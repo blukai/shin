@@ -19,14 +19,12 @@ mod api_gl46;
 #[path = "api_webgl2.rs"]
 mod api_webgl2;
 
-pub use enums::*;
-pub use types::*;
-
 #[cfg(not(target_family = "wasm"))]
 pub use api_gl46::*;
-
 #[cfg(target_family = "wasm")]
 pub use api_webgl2::*;
+pub use enums::*;
+pub use types::*;
 
 pub trait Apier {
     type Buffer;

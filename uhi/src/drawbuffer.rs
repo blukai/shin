@@ -1,4 +1,5 @@
-use std::{array, mem, ops::Range};
+use std::ops::Range;
+use std::{array, mem};
 
 use scopeguard::ScopeGuard;
 

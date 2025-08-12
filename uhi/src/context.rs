@@ -1,7 +1,5 @@
-use std::{
-    hash::{DefaultHasher, Hash, Hasher},
-    time::{Duration, Instant},
-};
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::time::{Duration, Instant};
 
 use input::{CursorShape, PointerButton};
 use nohash::NoHash;

@@ -1,11 +1,12 @@
-use std::{ffi::c_void, mem::offset_of, ptr::null};
+use std::ffi::c_void;
+use std::mem::offset_of;
+use std::ptr::null;
 
 use anyhow::{Context as _, anyhow};
 use gl::api::Apier as _;
 
-use crate::{Context, DrawCommand, Externs, TextureKind, TextureService, Vertex};
-
 use super::Renderer;
+use crate::{Context, DrawCommand, Externs, TextureKind, TextureService, Vertex};
 
 const SHADER_SOURCE: &str = include_str!("shader.glsl");
 

@@ -1,9 +1,7 @@
 #![allow(non_camel_case_types)]
 
-use std::{
-    ffi::{c_char, c_int, c_void},
-    marker,
-};
+use std::ffi::{c_char, c_int, c_void};
+use std::marker;
 
 use dynlib::DynLib;
 
