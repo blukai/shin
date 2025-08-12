@@ -283,7 +283,6 @@ impl TextState {
 }
 
 // ----
-// actual stuff
 
 fn should_break_line(ch: char, advance_width: f32, current_x: f32, container_rect: Rect) -> bool {
     if ch == '\n' {
@@ -484,6 +483,9 @@ fn locate_multiline_coord<E: Externs>(
     last_row_range.start + offset_within_row
 }
 
+// ----
+// scrolling
+
 fn scroll_into_singleline_cursor<E: Externs>(
     str: &str,
     selection: TextSelection,
@@ -563,7 +565,7 @@ fn scroll_into_multiline_cursor<E: Externs>(
 }
 
 // ----
-// draw
+// drawing
 
 // TODO: draw_singleline_text has way too many args. unfuck this please.
 fn draw_singleline_text<E: Externs>(
@@ -583,17 +585,38 @@ fn draw_singleline_text<E: Externs>(
     let font_height = font_instance.height();
     let font_typical_advance_width = font_instance.typical_advance_width();
 
-    let normalized_selection = selection.normalized();
-    let may_draw_selection = should_draw_selection && !normalized_selection.is_empty();
-
     let mut staging_scopes = draw_buffer.multi_staging_scope();
     // NOTE: cursor_stage is techinaclly not needed because cursor can be pushed into other stage;
     // but it's nice, so why not.
     let [selection_stage, cursor_stage, glyph_stage] = staging_scopes.deref_mut();
 
+    let normalized_selection = selection.normalized();
+    let may_draw_selection = should_draw_selection && !normalized_selection.is_empty();
+    let may_draw_cursor = should_draw_cursor && active;
+
     let mut byte_offset: usize = 0;
     let mut x_offset: f32 = container_rect.min.x - scroll.offset.x;
     let mut selection_min_x: Option<f32> = None;
+
+    let mut draw_cursor = |min_x: f32| {
+        let min = Vec2::new(min_x, container_rect.min.y);
+        let size = Vec2::new(font_typical_advance_width, font_height);
+        let rect = Rect::new(min, min + size);
+        cursor_stage.push_rect(RectShape::new_with_fill(
+            rect,
+            Fill::new_with_color(appearance.cursor_bg),
+        ));
+    };
+
+    // NOTE: if str is empty and we are expected to draw cursor - do it and bail out.
+    if str.is_empty() {
+        assert!(selection.is_empty());
+        if may_draw_cursor {
+            draw_cursor(x_offset);
+        }
+        return;
+    }
+
     for ch in str.chars() {
         let glyph = font_instance.get_or_rasterize_glyph(ch, texture_service);
         let glyph_advance_width = glyph.advance_width();
@@ -617,28 +640,13 @@ fn draw_singleline_text<E: Externs>(
             }
         }
 
-        // TODO: if str.len() == 0 this will never be reached.
-        //
-        // TODO: draw inactive cursor too, maybe outlined or something.
-        if should_draw_cursor && active {
-            if let Some(min_x) = if selection.end == byte_offset {
-                // draw cursor after current character (note that end is exclusive).
-                Some(x_offset)
-            } else if selection.end == str.len() && byte_offset == str.len() - 1 {
-                // TODO: ^ 99% sure the condition above is broken for wider-then-ascii chars.
-                //
-                // draw cursor after last character.
-                Some(x_offset + glyph_advance_width)
-            } else {
-                None
-            } {
-                let min = Vec2::new(min_x, container_rect.min.y);
-                let size = Vec2::new(font_typical_advance_width, font_height);
-                let rect = Rect::new(min, min + size);
-                cursor_stage.push_rect(RectShape::new_with_fill(
-                    rect,
-                    Fill::new_with_color(appearance.cursor_bg),
-                ));
+        // TODO: consider drawing inactive cursor too, maybe outlined or something.
+        if may_draw_cursor {
+            if byte_offset + ch.len_utf8() == selection.end {
+                draw_cursor(x_offset + glyph_advance_width);
+            } else if byte_offset == 0 && selection.end == 0 {
+                // ^ this works for when cursor is at the very beginning
+                draw_cursor(x_offset);
             }
         }
 
@@ -719,9 +727,7 @@ fn draw_multiline_text<E: Externs>(
                     Fill::new_with_color(appearance.selection_bg(active)),
                 ));
 
-                // TODO: this is most likely wrong! might need to byte_offset + ch.len_utf8() and
-                // change <= and -1 ...
-                if byte_offset <= normalized_selection.end - 1 {
+                if byte_offset + ch.len_utf8() < normalized_selection.end {
                     // the selection needs to be extended onto the next row
                     selection_min_xy =
                         Some(Vec2::new(container_rect.min.x, xy_offset.y + font_height));
@@ -730,7 +736,6 @@ fn draw_multiline_text<E: Externs>(
 
             xy_offset.x = container_rect.min.x;
             xy_offset.y += font_height;
-
             if should_consume_post_line_break_char(ch) {
                 byte_offset += ch.len_utf8();
                 continue;
@@ -756,7 +761,7 @@ fn draw_multiline_text<E: Externs>(
 }
 
 // ----
-// text builders
+// builders
 
 pub struct TextInteractNone;
 pub struct TextInteractSelect;
@@ -1092,7 +1097,18 @@ impl<'a> TextEditableSingle<'a> {
         input: &input::State,
     ) {
         let height = font_instance.height();
-        let width = font_instance.compute_text_width(self.str, texture_service);
+        let width = if self.str.is_empty() {
+            // NOTE: the problem is that if the string is empty and you are supposed to be able to
+            // activate the input and start typing - with width 0 you cant.
+            // this solution is not perfect, but it'll allow at least give you a tiny activation
+            // area instead of none.
+            //
+            // TODO: how can activation (/interaction) rect of empty editable string be non-zero
+            // for empty strings?
+            font_instance.typical_advance_width()
+        } else {
+            font_instance.compute_text_width(self.str, texture_service)
+        };
         let size = Vec2::new(width, height);
         let interaction_rect = Rect::new(self.container_rect.min, self.container_rect.min + size);
 
