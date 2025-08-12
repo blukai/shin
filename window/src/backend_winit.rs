@@ -1,11 +1,11 @@
 use std::collections::VecDeque;
 
-use anyhow::{Context, anyhow};
+use anyhow::{anyhow, Context};
 use input::{CursorShape, KeyboardEvent, Keycode, PointerButton, PointerEvent, Scancode};
 use raw_window_handle as rwh;
 use winit::platform::pump_events::EventLoopExtPumpEvents;
 
-use crate::{DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent};
+use crate::{ClipboardDataProvider, Event, Window, WindowAttrs, WindowEvent, DEFAULT_LOGICAL_SIZE};
 
 #[inline]
 fn map_pointer_button(button: winit::event::MouseButton) -> Option<PointerButton> {
@@ -337,6 +337,21 @@ impl Window for WinitBackend {
         if let Some(ref mut window) = self.app.window {
             window.set_cursor(map_cursor_shape(cursor_shape));
         }
+        Ok(())
+    }
+
+    fn read_clipboard(&mut self, mime_type: &str, buf: &mut Vec<u8>) -> anyhow::Result<usize> {
+        log::warn!("winit backend does not support clipboard");
+        // TODO: support wayland clipboard (but first separate it out from wayland backend).
+        Ok(0)
+    }
+
+    fn provide_clipboard_data(
+        &mut self,
+        data_provider: Box<dyn ClipboardDataProvider>,
+    ) -> anyhow::Result<()> {
+        log::warn!("winit backend does not support clipboard");
+        // TODO: support wayland clipboard (but first separate it out from wayland backend).
         Ok(())
     }
 

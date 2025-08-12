@@ -5,7 +5,7 @@ use anyhow::anyhow;
 use input::CursorShape;
 use raw_window_handle as rwh;
 
-use crate::{DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent};
+use crate::{ClipboardDataProvider, Event, Window, WindowAttrs, WindowEvent, DEFAULT_LOGICAL_SIZE};
 
 pub mod js_sys {
     use std::ffi::{c_char, c_void};
@@ -95,7 +95,18 @@ impl Window for WebBackend {
         self.events.pop_front()
     }
 
-    fn set_cursor_shape(&mut self, cursor_shape: CursorShape) -> anyhow::Result<()> {
+    fn set_cursor_shape(&mut self, _cursor_shape: CursorShape) -> anyhow::Result<()> {
+        unimplemented!()
+    }
+
+    fn read_clipboard(&mut self, mime_type: &str, buf: &mut Vec<u8>) -> anyhow::Result<usize> {
+        unimplemented!()
+    }
+
+    fn provide_clipboard_data(
+        &mut self,
+        data_provider: Box<dyn ClipboardDataProvider>,
+    ) -> anyhow::Result<()> {
         unimplemented!()
     }
 
