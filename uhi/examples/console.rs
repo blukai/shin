@@ -116,10 +116,13 @@ impl Console {
     ) {
         assert!(self.is_open());
 
-        uhi::Text::new(self.history.as_str(), rect.shrink(&uhi::Vec2::splat(16.0)))
-            .multiline()
-            .selectable(&mut self.history_state)
-            .draw(ctx, input);
+        uhi::Text::new_selectable(
+            self.history.as_str(),
+            rect.shrink(&uhi::Vec2::splat(16.0)),
+            &mut self.history_state,
+        )
+        .multiline()
+        .draw(ctx, input);
     }
 
     fn update_command_editor<E: uhi::Externs>(
@@ -191,18 +194,18 @@ impl Console {
 
         let font_height = ctx
             .font_service
-            .get_font_instance(ctx.default_font_handle(), ctx.default_font_size())
+            .get_font_instance(ctx.appearance.font_handle, ctx.appearance.font_size)
             .height();
         let py = (rect.height() - font_height) / 2.0;
 
-        uhi::Text::new(
+        uhi::Text::new_editable(
             &mut self.command_editor,
             rect.shrink(&uhi::Vec2::new(16.0, py)),
+            &mut self.command_editor_state,
         )
         .with_key(key)
         .with_maybe_hot_or_active(ctx.interaction_state.is_hot(key), active)
         .singleline()
-        .editable(&mut self.command_editor_state)
         .draw(ctx, input);
     }
 
@@ -302,7 +305,7 @@ impl AppHandler for App {
             uhi::Vec2::from(uhi::U32Vec2::from(physical_window_size)) / scale_factor as f32,
         );
 
-        uhi::Text::new(
+        uhi::Text::new_non_interactive(
             "press ` to open console",
             logical_window_rect.shrink(&uhi::Vec2::new(16.0, 16.0 * 1.0)),
         )

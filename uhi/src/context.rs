@@ -6,7 +6,9 @@ use std::{
 use input::{CursorShape, PointerButton};
 use nohash::NoHash;
 
-use crate::{DrawBuffer, Externs, F64Vec2, FontHandle, FontService, Rect, TextureService, Vec2};
+use crate::{
+    DrawBuffer, Externs, F64Vec2, FontHandle, FontService, Rect, Rgba8, TextureService, Vec2,
+};
 
 const DEFAULT_FONT_DATA: &[u8] = include_bytes!("../fixtures/JetBrainsMono-Regular.ttf");
 
@@ -234,13 +236,35 @@ impl ClipboardState {
     }
 }
 
+#[derive(Clone)]
+pub struct Appearance {
+    pub font_handle: FontHandle,
+    pub font_size: f32,
+
+    pub fg: Rgba8,
+    pub selection_active_bg: Rgba8,
+    pub selection_inactive_bg: Rgba8,
+    pub cursor_bg: Rgba8,
+}
+
+impl Appearance {
+    pub fn new_dark(font_handle: FontHandle) -> Self {
+        Self {
+            font_handle,
+            font_size: 16.0,
+
+            fg: Rgba8::WHITE,
+            selection_active_bg: Rgba8::from_u32(0x304a3dff),
+            selection_inactive_bg: Rgba8::from_u32(0x484848ff),
+            cursor_bg: Rgba8::from_u32(0x8faf9fff),
+        }
+    }
+}
+
 pub struct Context<E: Externs> {
     previous_frame_start: Instant,
     current_frame_start: Instant,
     delta_time: Duration,
-
-    default_font_handle: FontHandle,
-    default_font_size: f32,
 
     pub font_service: FontService,
     pub texture_service: TextureService<E>,
@@ -248,30 +272,26 @@ pub struct Context<E: Externs> {
 
     pub interaction_state: InteractionState,
     pub clipboard_state: ClipboardState,
+
+    pub appearance: Appearance,
 }
 
 impl<E: Externs> Default for Context<E> {
     fn default() -> Self {
-        Self::new_with_default_font_slice(DEFAULT_FONT_DATA, 16.0)
+        Self::new_with_default_font_slice(DEFAULT_FONT_DATA)
             .expect("somebody fucked things up; default font is invalid?")
     }
 }
 
 impl<E: Externs> Context<E> {
-    pub fn new_with_default_font_slice(
-        font_data: &'static [u8],
-        default_font_size: f32,
-    ) -> anyhow::Result<Self> {
+    pub fn new_with_default_font_slice(default_font_data: &'static [u8]) -> anyhow::Result<Self> {
         let mut font_service = FontService::default();
-        let default_font_handle = font_service.register_font_slice(font_data)?;
+        let default_font_handle = font_service.register_font_slice(default_font_data)?;
 
         Ok(Self {
             previous_frame_start: Instant::now(),
             current_frame_start: Instant::now(),
             delta_time: Duration::ZERO,
-
-            default_font_handle,
-            default_font_size,
 
             texture_service: TextureService::default(),
             font_service,
@@ -279,6 +299,8 @@ impl<E: Externs> Context<E> {
 
             interaction_state: InteractionState::default(),
             clipboard_state: ClipboardState::default(),
+
+            appearance: Appearance::new_dark(default_font_handle),
         })
     }
 
@@ -299,13 +321,5 @@ impl<E: Externs> Context<E> {
 
     pub fn dt(&self) -> f32 {
         self.delta_time.as_secs_f32()
-    }
-
-    pub fn default_font_handle(&self) -> FontHandle {
-        self.default_font_handle
-    }
-
-    pub fn default_font_size(&self) -> f32 {
-        self.default_font_size
     }
 }

@@ -72,20 +72,23 @@ impl AppHandler for App {
             uhi::Vec2::from(uhi::U32Vec2::from(physical_window_size)) / scale_factor as f32,
         );
 
-        let primary_font_size = self.uhi_context.default_font_size();
-        let caption_font_size = primary_font_size * 0.8;
-        let caption_text_palette = uhi::TextPalette::default().with_fg(uhi::Rgba8::GRAY);
+        let primary_text_appearance =
+            uhi::TextAppearance::from_appearance(&self.uhi_context.appearance);
+        let caption_text_appearance =
+            uhi::TextAppearance::from_appearance(&self.uhi_context.appearance)
+                .with_font_size(primary_text_appearance.font_size * 0.8)
+                .with_fg(uhi::Rgba8::GRAY);
 
         // TODO: automatic layout or something
         let font_height_factor = self
             .uhi_context
             .font_service
             .get_font_instance(
-                self.uhi_context.default_font_handle(),
-                self.uhi_context.default_font_size(),
+                self.uhi_context.appearance.font_handle,
+                self.uhi_context.appearance.font_size,
             )
             .height()
-            / self.uhi_context.default_font_size();
+            / self.uhi_context.appearance.font_size;
         let mut rect = logical_window_rect.shrink(&uhi::Vec2::splat(16.0));
         let mut use_rect = |font_size: f32, times: usize, add_gap: bool| -> uhi::Rect {
             let prev = rect;
@@ -98,106 +101,90 @@ impl AppHandler for App {
         };
 
         {
-            uhi::Text::new(
+            uhi::Text::new_non_interactive(
                 "singleline non-selectable and non-editable:",
-                use_rect(caption_font_size, 1, false),
+                use_rect(caption_text_appearance.font_size, 1, false),
             )
-            .with_font_size(caption_font_size)
-            .with_palette(caption_text_palette.clone())
+            .with_appearance(caption_text_appearance.clone())
             .singleline()
             .draw(&mut self.uhi_context);
 
             let (x, y) = self.input_state.pointer.position;
-            uhi::Text::new(
+            uhi::Text::new_non_interactive(
                 format!("x: {}, y: {}", x.round(), y.round()).as_str(),
-                use_rect(primary_font_size, 1, true),
+                use_rect(primary_text_appearance.font_size, 1, true),
             )
-            .with_font_size(primary_font_size)
+            .with_appearance(primary_text_appearance.clone())
             .singleline()
             .draw(&mut self.uhi_context);
         }
 
         {
-            uhi::Text::new(
+            uhi::Text::new_non_interactive(
                 "singleline selectable:",
-                use_rect(caption_font_size, 1, false),
+                use_rect(caption_text_appearance.font_size, 1, false),
             )
-            .with_font_size(caption_font_size)
-            .with_palette(caption_text_palette.clone())
+            .with_appearance(caption_text_appearance.clone())
             .singleline()
             .draw(&mut self.uhi_context);
 
-            uhi::Text::new(
+            uhi::Text::new_selectable(
                 "なかなか興味深いですね",
-                use_rect(primary_font_size, 1, true),
+                use_rect(primary_text_appearance.font_size, 1, true),
+                &mut self.text_singleline_state,
             )
-            .with_font_size(primary_font_size)
+            .with_appearance(primary_text_appearance.clone())
             .singleline()
-            .selectable(&mut self.text_singleline_state)
             .draw(&mut self.uhi_context, &self.input_state);
         }
 
         {
-            uhi::Text::new(
+            uhi::Text::new_non_interactive(
                 "singleline editable:",
-                use_rect(caption_font_size, 1, false),
+                use_rect(caption_text_appearance.font_size, 1, false),
             )
-            .with_font_size(caption_font_size)
-            .with_palette(caption_text_palette.clone())
+            .with_appearance(caption_text_appearance.clone())
             .singleline()
             .draw(&mut self.uhi_context);
 
-            uhi::Text::new(
+            uhi::Text::new_editable(
                 &mut self.text_singleline_editable,
-                use_rect(primary_font_size, 1, true),
+                use_rect(primary_text_appearance.font_size, 1, true),
+                &mut self.text_singleline_editable_state,
             )
-            .with_font_size(primary_font_size)
+            .with_appearance(primary_text_appearance.clone())
             .singleline()
-            .editable(&mut self.text_singleline_editable_state)
             .draw(&mut self.uhi_context, &self.input_state);
         }
 
         {
-            uhi::Text::new(
+            uhi::Text::new_non_interactive(
                 "multiline selectable:",
-                use_rect(caption_font_size, 1, false),
+                use_rect(caption_text_appearance.font_size, 1, false),
             )
-            .with_font_size(caption_font_size)
-            .with_palette(caption_text_palette.clone())
+            .with_appearance(caption_text_appearance.clone())
             .singleline()
             .draw(&mut self.uhi_context);
 
-            uhi::Text::new(
+            uhi::Text::new_selectable(
                 "With no bamboo hat\nDoes the drizzle fall on me?\nWhat care I of that?",
-                use_rect(primary_font_size, 3, true),
+                use_rect(primary_text_appearance.font_size, 3, true),
+                &mut self.text_multiline_state,
             )
-            .with_font_size(primary_font_size)
+            .with_appearance(primary_text_appearance.clone())
             .multiline()
-            .selectable(&mut self.text_multiline_state)
             .draw(&mut self.uhi_context, &self.input_state);
-        }
-
-        {
-            uhi::Text::new("multiline editable:", use_rect(caption_font_size, 1, false))
-                .with_font_size(caption_font_size)
-                .with_palette(caption_text_palette.clone())
-                .singleline()
-                .draw(&mut self.uhi_context);
-
-            uhi::Text::new("TODO", use_rect(primary_font_size, 1, true))
-                .with_font_size(primary_font_size)
-                .with_palette(uhi::TextPalette::default().with_fg(uhi::Rgba8::RED))
-                .singleline()
-                .draw(&mut self.uhi_context);
         }
 
         // TODO: need scroll area
         {
-            uhi::Text::new("atlas:", use_rect(caption_font_size, 1, false))
-                .with_font_size(caption_font_size)
-                .with_palette(caption_text_palette.clone())
-                .singleline()
-                .draw(&mut self.uhi_context);
+            uhi::Text::new_non_interactive(
+                "atlas:",
+                use_rect(caption_text_appearance.font_size, 1, false),
+            )
+            .with_appearance(caption_text_appearance.clone())
+            .singleline()
+            .draw(&mut self.uhi_context);
             rect.min.y += 4.0;
 
             for tp in self.uhi_context.font_service.iter_texture_pages() {

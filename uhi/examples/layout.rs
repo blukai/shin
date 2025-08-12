@@ -223,11 +223,13 @@ fn draw<E: uhi::Externs>(ctx: &mut uhi::Context<E>, area: uhi::Rect) {
         }
     }
 
-    uhi::Text::new(
+    uhi::Text::new_non_interactive(
         "Tableau I, by Piet Mondriaan",
         area.shrink(&Vec2::splat(24.0)),
     )
-    .with_palette(uhi::TextPalette::default().with_fg(uhi::Rgba8::FUCHSIA))
+    .with_appearance(
+        uhi::TextAppearance::from_appearance(&ctx.appearance).with_fg(uhi::Rgba8::FUCHSIA),
+    )
     .singleline()
     .draw(ctx);
 }
@@ -282,6 +284,8 @@ impl AppHandler for App {
         );
 
         draw(&mut self.uhi_context, logical_window_rect);
+
+        self.uhi_context.interaction_state.take_cursor_shape();
 
         self.uhi_renderer
             .render(
