@@ -262,6 +262,34 @@ impl winit::application::ApplicationHandler for App {
                     None
                 }
             }
+            MouseWheel {
+                delta: mouse_scroll_delta,
+                ..
+            } => {
+                use winit::event::MouseScrollDelta;
+                // NOTE: winit reports deltas inverted. thus values are multiplied by -1.
+                let delta = match mouse_scroll_delta {
+                    MouseScrollDelta::LineDelta(x, y) => (x as f64, y as f64),
+                    MouseScrollDelta::PixelDelta(physical_position) => {
+                        use raw_window_handle::HasRawWindowHandle as _;
+                        match window.raw_window_handle() {
+                            Ok(rwh::RawWindowHandle::Wayland(_)) => {
+                                // NOTE: on wayland winit does not do anything with wl_pointer_axis values,
+                                // which is great. we can normanize them the same way we do in wayland
+                                // backend (in wayland pointer frame handling code look for comments
+                                // surrounding axis handling).
+                                const SCALE: f64 = 10.0;
+                                (physical_position.x / SCALE, physical_position.y / SCALE)
+                            }
+                            _ => (physical_position.x, physical_position.y),
+                        }
+                    }
+                };
+                Some(Event::Pointer(PointerEvent::Scroll {
+                    // NOTE: winit reports deltas inverted.
+                    delta: (-delta.0, -delta.1),
+                }))
+            }
             CloseRequested => Some(Event::Window(WindowEvent::CloseRequested)),
             other => {
                 log::debug!("unused window event: {other:?}");

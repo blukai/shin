@@ -1,18 +1,18 @@
 use std::collections::{HashMap, VecDeque};
-use std::ffi::{CStr, c_char, c_int, c_void};
+use std::ffi::{c_char, c_int, c_void, CStr};
 use std::io::{PipeReader, PipeWriter, Read as _};
 use std::mem::{self, MaybeUninit};
 use std::os::fd::FromRawFd as _;
-use std::ptr::{NonNull, null, null_mut};
+use std::ptr::{null, null_mut, NonNull};
 use std::slice;
 use std::time::Duration;
 
-use anyhow::{Context as _, anyhow};
+use anyhow::{anyhow, Context as _};
 use input::{CursorShape, KeyboardEvent, Keycode, PointerButton, PointerEvent, Scancode};
 use raw_window_handle as rwh;
 
 use crate::{
-    ClipboardDataProvider, DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent, xkb,
+    xkb, ClipboardDataProvider, Event, Window, WindowAttrs, WindowEvent, DEFAULT_LOGICAL_SIZE,
 };
 
 // TODO: (xd) consider checking return of wl_proxy_add_listener (xd).
@@ -501,15 +501,18 @@ pub struct WaylandBackend {
 
     // pointer
     wl_pointer: *mut wayland::wl_pointer,
-    // NOTE: currently i care only about movement and button press/release events. but other kinds
-    // of events will most likely require to store different kind of frame data that PointerEvent
-    // would not be capable of describing?
-    pointer_frame_events: VecDeque<PointerEvent>,
     cursor: Option<Cursor>,
     // NOTE: cursor_shape is stored here so that it can be set back to what was requested when
     // pointer re-enders the surface.
     cursor_shape: Option<CursorShape>,
     wp_cursor_shape_device_v1: *mut wayland::wp_cursor_shape_device_v1,
+    // NOTE: only one of `axis_discrete`, `axis_value120` and `axis` values will be used if any is
+    // present.
+    // index 0 is vertical scroll (wayland::WL_POINTER_AXIS_VERTICAL_SCROLL),
+    // 1 - horizontal (WL_POINTER_AXIS_HORIZONTAL_SCROLL).
+    axis: Option<[wayland::wl_fixed; 2]>,
+    axis_discrete: Option<[i32; 2]>,
+    axis_value120: Option<[i32; 2]>,
 
     // keyboard
     wl_keyboard: *mut wayland::wl_keyboard,
@@ -629,6 +632,31 @@ const WL_REGISTRY_LISTENER: wayland::wl_registry_listener = wayland::wl_registry
     global_remove: noop_listener!(),
 };
 
+unsafe extern "C" fn handle_wl_seat_capabilities(
+    data: *mut c_void,
+    _wl_seat: *mut wayland::wl_seat,
+    capabilities: u32,
+) {
+    log::debug!("recv wl_seat_capabilities (capabilities: {capabilities})");
+
+    let _this = unsafe { &mut *(data as *mut WaylandBackend) };
+
+    if capabilities & wayland::WL_SEAT_CAPABILITY_POINTER == wayland::WL_SEAT_CAPABILITY_POINTER {
+        // TODO: init pointer from here
+    }
+
+    if capabilities & wayland::WL_SEAT_CAPABILITY_KEYBOARD == wayland::WL_SEAT_CAPABILITY_KEYBOARD {
+        // TODO: init keyboard from here
+    }
+
+    // NOTE: there's also a touch capability.
+}
+
+const WL_SEAT_LISTENER: wayland::wl_seat_listener = wayland::wl_seat_listener {
+    capabilities: handle_wl_seat_capabilities,
+    name: noop_listener!(),
+};
+
 unsafe extern "C" fn handle_xdg_wm_base_ping(
     data: *mut c_void,
     xdg_wm_base: *mut wayland::xdg_wm_base,
@@ -730,8 +758,10 @@ unsafe extern "C" fn handle_wl_pointer_motion(
         wayland::wl_fixed_to_f64(surface_x),
         wayland::wl_fixed_to_f64(surface_y),
     );
-    this.pointer_frame_events
-        .push_back(PointerEvent::Motion { position });
+    // TODO: multiple motion events per frame can be sent. should they be accumulated? probably
+    // not?
+    this.events
+        .push_back(Event::Pointer(PointerEvent::Motion { position }));
 }
 
 unsafe extern "C" fn handle_wl_pointer_enter(
@@ -759,11 +789,12 @@ unsafe extern "C" fn handle_wl_pointer_enter(
         wayland::wl_fixed_to_f64(surface_y),
     );
     // NOTE: pushing motion event on enter is somewhat weird? idk yet how correct this is, but i
-    // don't think it's worth introducing enter/leave pointer events (for what reason?).
-    // ultimately doing this helps to: compute correct deltas; dispatch press with correct delta
-    // when window spawns right under the cursor.
-    this.pointer_frame_events
-        .push_back(PointerEvent::Motion { position });
+    // don't think it's worth introducing enter/leave pointer events.
+    //
+    // doing this helps to: compute correct deltas; dispatch press with correct delta when window
+    // spawns right under the cursor.
+    this.events
+        .push_back(Event::Pointer(PointerEvent::Motion { position }));
 }
 
 unsafe extern "C" fn handle_wl_pointer_leave(
@@ -795,15 +826,29 @@ unsafe extern "C" fn handle_wl_pointer_button(
 
     match state {
         wayland::WL_POINTER_BUTTON_STATE_PRESSED => {
-            let pointer_event = PointerEvent::Press { button };
-            this.pointer_frame_events.push_back(pointer_event);
+            this.events
+                .push_back(Event::Pointer(PointerEvent::Press { button }));
         }
         wayland::WL_POINTER_BUTTON_STATE_RELEASED => {
-            let pointer_event = PointerEvent::Release { button };
-            this.pointer_frame_events.push_back(pointer_event);
+            this.events
+                .push_back(Event::Pointer(PointerEvent::Release { button }));
         }
         other => log::warn!("unknown pointer button state: {other}"),
     }
+}
+
+unsafe extern "C" fn handle_wl_pointer_axis(
+    data: *mut c_void,
+    _wl_pointer: *mut wayland::wl_pointer,
+    _time: u32,
+    axis: u32,
+    value: wayland::wl_fixed,
+) {
+    let this = unsafe { &mut *(data as *mut WaylandBackend) };
+    let dst = this.axis.get_or_insert([0, 0]);
+    // NOTE: the spec dos not state that only one axis event may occur per frame, thus
+    // accumulating.
+    dst[axis as usize] += value;
 }
 
 unsafe extern "C" fn handle_wl_pointer_frame(
@@ -811,8 +856,65 @@ unsafe extern "C" fn handle_wl_pointer_frame(
     _wl_pointer: *mut wayland::wl_pointer,
 ) {
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
-    this.events
-        .extend(this.pointer_frame_events.drain(..).map(Event::Pointer));
+
+    let axis = this.axis.take();
+    let axis_value120 = this.axis_value120.take();
+    let axis_discrete = this.axis_discrete.take();
+    // NOTE: the order is important. if we have received axis_value120 - ignore others, and so on.
+    let scroll_delta: Option<(f64, f64)> = if let Some([x, y]) = axis_value120 {
+        const DENOM: f64 = 120.0;
+        Some((x as f64 / DENOM, y as f64 / DENOM))
+    } else if let Some([x, y]) = axis_discrete {
+        Some((x as f64, y as f64))
+    } else if let Some([x, y]) = axis {
+        // NOTE: the axis value is specified in logical surface coordinate space. most compositors
+        // use either 10 (gnome, weston) or 15 (wlroots, same as libinput) as the value.
+        //
+        // chrome uses 10 (kAxisValueScale in wayland_pointer.cc)
+        // sdl uses 10 (WAYLAND_WHEEL_AXIS_UNIT in SDL_waylandevents.c).
+        //
+        // TODO: since this is logical coords - do i need to apply fractional scaling here? would
+        // it make sense to do that? noobody seems to be doing that though.
+        const SCALE: f64 = 10.0;
+        Some((
+            wayland::wl_fixed_to_f64(x) / SCALE,
+            wayland::wl_fixed_to_f64(y) / SCALE,
+        ))
+    } else {
+        None
+    };
+    if let Some(delta) = scroll_delta {
+        this.events
+            .push_back(Event::Pointer(PointerEvent::Scroll { delta }));
+    }
+}
+
+// NOTE: wl_pointer_axis_discrete event is deprecated since v8 (and i am seeing wl_seat being v9).
+// but i don't see why not to support it. easy enough.
+unsafe extern "C" fn handle_wl_pointer_axis_discrete(
+    data: *mut c_void,
+    _wl_pointer: *mut wayland::wl_pointer,
+    axis: u32,
+    discrete: i32,
+) {
+    let this = unsafe { &mut *(data as *mut WaylandBackend) };
+    let dst = this.axis_discrete.get_or_insert([0, 0]);
+    // QUOTE: A wl_pointer.frame must not contain more than one axis_discrete event per axis type.
+    assert_eq!(dst[axis as usize], 0);
+    dst[axis as usize] = discrete;
+}
+
+unsafe extern "C" fn handle_wl_pointer_axis_value120(
+    data: *mut c_void,
+    _wl_pointer: *mut wayland::wl_pointer,
+    axis: u32,
+    value120: i32,
+) {
+    let this = unsafe { &mut *(data as *mut WaylandBackend) };
+    let dst = this.axis_value120.get_or_insert([0, 0]);
+    // NOTE: i don't see the spec mentioning that only one axis_value120 event may occur per frame,
+    // thus accumulating.
+    dst[axis as usize] += value120;
 }
 
 const WL_POINTER_LISTENER: wayland::wl_pointer_listener = wayland::wl_pointer_listener {
@@ -820,12 +922,12 @@ const WL_POINTER_LISTENER: wayland::wl_pointer_listener = wayland::wl_pointer_li
     leave: handle_wl_pointer_leave,
     motion: handle_wl_pointer_motion,
     button: handle_wl_pointer_button,
+    axis: handle_wl_pointer_axis,
     frame: handle_wl_pointer_frame,
-    axis: noop_listener!(),
     axis_source: noop_listener!(),
     axis_stop: noop_listener!(),
-    axis_discrete: noop_listener!(),
-    axis_value120: noop_listener!(),
+    axis_discrete: handle_wl_pointer_axis_discrete,
+    axis_value120: handle_wl_pointer_axis_value120,
     axis_relative_direction: noop_listener!(),
 };
 
@@ -1136,10 +1238,12 @@ impl WaylandBackend {
             scale_factor: None,
 
             wl_pointer: null_mut(),
-            pointer_frame_events: VecDeque::new(),
             cursor: None,
             cursor_shape: None,
             wp_cursor_shape_device_v1: null_mut(),
+            axis: None,
+            axis_discrete: None,
+            axis_value120: None,
 
             wl_keyboard: null_mut(),
             xkb_context: None,
@@ -1181,6 +1285,14 @@ impl WaylandBackend {
         assert!(!this.xdg_wm_base.is_null());
 
         log::info!("initialized window globals");
+
+        unsafe {
+            (this.libwayland_client.wl_proxy_add_listener)(
+                this.wl_seat as *mut wayland::wl_proxy,
+                &WL_SEAT_LISTENER as *const wayland::wl_seat_listener as _,
+                this.as_mut() as *mut WaylandBackend as *mut c_void,
+            )
+        };
 
         unsafe {
             (this.libwayland_client.wl_proxy_add_listener)(

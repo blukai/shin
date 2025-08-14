@@ -38,6 +38,12 @@ pub enum PointerEvent {
     Motion { position: (f64, f64) },
     Press { button: PointerButton },
     Release { button: PointerButton },
+    // TODO: should scroll event provide more data? currently i normalize delta in wayland backend,
+    // and i repeat that in winit backend if winit is running under wayland...
+    //
+    // should scroll event provide pixel (pixel delta in probably physical surface space), should
+    // it provide discrete delta (which is in steps)?
+    Scroll { delta: (f64, f64) },
 }
 
 #[repr(u8)]
@@ -435,7 +441,8 @@ where
 #[derive(Debug, Default)]
 pub struct PointerState {
     pub position: (f64, f64),
-    pub delta: (f64, f64),
+    pub motion_delta: (f64, f64),
+    pub scroll_delta: (f64, f64),
     pub buttons: ButtonInput<PointerButton>,
     pub press_origins: NoHashMap<PointerButton, (f64, f64)>,
 }
@@ -447,8 +454,8 @@ impl PointerState {
         match ev {
             Motion { position: next } => {
                 let prev = self.position;
-                self.delta = (next.0 - prev.0, next.1 - prev.1);
                 self.position = next;
+                self.motion_delta = (next.0 - prev.0, next.1 - prev.1);
             }
             Press { button } => {
                 self.buttons.press(button, false);
@@ -458,11 +465,15 @@ impl PointerState {
                 self.buttons.release(button);
                 self.press_origins.remove(&button);
             }
+            Scroll { delta } => {
+                self.scroll_delta = delta;
+            }
         }
     }
 
     #[inline]
     pub fn end_frame(&mut self) {
+        self.scroll_delta = (0.0, 0.0);
         self.buttons.end_frame();
     }
 }
