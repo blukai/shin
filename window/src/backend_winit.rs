@@ -1,19 +1,39 @@
 use std::collections::VecDeque;
 
 use anyhow::{anyhow, Context};
-use input::{CursorShape, KeyboardEvent, Keycode, PointerButton, PointerEvent, Scancode};
+use input::{
+    Button, ButtonState, CursorShape, KeyState, KeyboardEvent, Keycode, PointerEvent, Scancode,
+};
 use raw_window_handle as rwh;
 use winit::platform::pump_events::EventLoopExtPumpEvents;
 
 use crate::{ClipboardDataProvider, Event, Window, WindowAttrs, WindowEvent, DEFAULT_LOGICAL_SIZE};
 
 #[inline]
-fn map_pointer_button(button: winit::event::MouseButton) -> Option<PointerButton> {
+fn map_element_state_to_button_state(element_state: winit::event::ElementState) -> ButtonState {
+    use winit::event::ElementState;
+    match element_state {
+        ElementState::Pressed => ButtonState::Pressed,
+        ElementState::Released => ButtonState::Released,
+    }
+}
+
+#[inline]
+fn map_element_state_to_key_state(element_state: winit::event::ElementState) -> KeyState {
+    use winit::event::ElementState;
+    match element_state {
+        ElementState::Pressed => KeyState::Pressed,
+        ElementState::Released => KeyState::Released,
+    }
+}
+
+#[inline]
+fn try_map_pointer_button(button: winit::event::MouseButton) -> Option<Button> {
     use winit::event::MouseButton;
     match button {
-        MouseButton::Left => Some(PointerButton::Primary),
-        MouseButton::Right => Some(PointerButton::Secondary),
-        MouseButton::Middle => Some(PointerButton::Tertiary),
+        MouseButton::Left => Some(Button::Primary),
+        MouseButton::Right => Some(Button::Secondary),
+        MouseButton::Middle => Some(Button::Tertiary),
         _ => None,
     }
 }
@@ -29,7 +49,7 @@ fn map_cursor_shape(cursor_shape: CursorShape) -> winit::window::Cursor {
 }
 
 #[inline]
-fn map_keyboard_physical_key(physical_key: winit::keyboard::PhysicalKey) -> Option<Scancode> {
+fn try_map_keyboard_physical_key(physical_key: winit::keyboard::PhysicalKey) -> Option<Scancode> {
     use winit::keyboard::{KeyCode, PhysicalKey};
     match physical_key {
         PhysicalKey::Code(keycode) => match keycode {
@@ -226,37 +246,30 @@ impl winit::application::ApplicationHandler for App {
                 // conform to that across the board.
                 let scale_factor = window.scale_factor();
                 let position = (position.x / scale_factor, position.y / scale_factor);
-                Some(Event::Pointer(PointerEvent::Motion { position }))
+                Some(Event::Pointer(PointerEvent::Move { position }))
             }
             MouseInput { button, state, .. } => {
-                if let Some(button) = map_pointer_button(button) {
-                    let pressed = state.is_pressed();
-                    Some(Event::Pointer(if pressed {
-                        PointerEvent::Press { button }
-                    } else {
-                        PointerEvent::Release { button }
-                    }))
+                if let Some(button) = try_map_pointer_button(button) {
+                    let state = map_element_state_to_button_state(state);
+                    Some(Event::Pointer(PointerEvent::Button { state, button }))
                 } else {
                     None
                 }
             }
             KeyboardInput { event, .. } => {
-                if let Some(scancode) = map_keyboard_physical_key(event.physical_key) {
+                if let Some(scancode) = try_map_keyboard_physical_key(event.physical_key) {
+                    let state = map_element_state_to_key_state(event.state);
                     let keycode = match event.logical_key.to_text() {
                         Some(str) if str.chars().count() == 1 => {
                             Keycode::Char(str.chars().next().unwrap())
                         }
                         _ => Keycode::Unhandled,
                     };
-                    let pressed = event.state.is_pressed();
-                    Some(Event::Keyboard(if pressed {
-                        KeyboardEvent::Press {
-                            scancode,
-                            keycode,
-                            repeat: event.repeat,
-                        }
-                    } else {
-                        KeyboardEvent::Release { scancode, keycode }
+                    Some(Event::Keyboard(KeyboardEvent::Key {
+                        state,
+                        scancode,
+                        keycode,
+                        repeat: event.repeat,
                     }))
                 } else {
                     None

@@ -116,7 +116,12 @@ impl<A: AppHandler> Context<A> {
         self.window.pump_events()?;
 
         while let Some(event) = self.window.pop_event() {
-            if !matches!(event, Event::Pointer(input::PointerEvent::Motion { .. })) {
+            if !matches!(
+                event,
+                Event::Pointer(
+                    input::PointerEvent::Move { .. } | input::PointerEvent::Scroll { .. }
+                )
+            ) {
                 log::debug!("event: {event:?}");
             }
 

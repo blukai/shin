@@ -8,7 +8,10 @@ use std::slice;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context as _};
-use input::{CursorShape, KeyboardEvent, Keycode, PointerButton, PointerEvent, Scancode};
+use input::{
+    Button, ButtonState, CursorShape, GesturePhase, KeyState, KeyboardEvent, Keycode, PointerEvent,
+    Scancode,
+};
 use raw_window_handle as rwh;
 
 use crate::{
@@ -36,11 +39,11 @@ macro_rules! noop_listener {
 
 // https://github.com/torvalds/linux/blob/231825b2e1ff6ba799c5eaf396d3ab2354e37c6b/include/uapi/linux/input-event-codes.h#L356
 #[inline]
-fn map_pointer_button(button: u32) -> Option<PointerButton> {
+fn try_map_pointer_button(button: u32) -> Option<Button> {
     match button {
-        0x110 => Some(PointerButton::Primary),
-        0x111 => Some(PointerButton::Secondary),
-        0x112 => Some(PointerButton::Tertiary),
+        0x110 => Some(Button::Primary),
+        0x111 => Some(Button::Secondary),
+        0x112 => Some(Button::Tertiary),
         _ => None,
     }
 }
@@ -234,7 +237,7 @@ impl Cursor {
 
 // https://github.com/torvalds/linux/blob/231825b2e1ff6ba799c5eaf396d3ab2354e37c6b/include/uapi/linux/input-event-codes.h#L76
 #[inline]
-fn map_keyboard_key(key: u32) -> Option<Scancode> {
+fn try_map_keyboard_key(key: u32) -> Option<Scancode> {
     match key {
         0 => Some(Scancode::Reserved),
         1 => Some(Scancode::Esc),
@@ -472,6 +475,7 @@ impl TempCStr {
     }
 }
 
+// NOTE: this does not support multiple surfaces.
 pub struct WaylandBackend {
     libwayland_client: wayland::ClientApi,
     wl_display: NonNull<wayland::wl_display>,
@@ -485,6 +489,7 @@ pub struct WaylandBackend {
     wp_fractional_scale_manager_v1: *mut wayland::wp_fractional_scale_manager_v1,
     wp_viewporter: *mut wayland::wp_viewporter,
     xdg_wm_base: *mut wayland::xdg_wm_base,
+    zwp_pointer_gestures_v1: *mut wayland::zwp_pointer_gestures_v1,
 
     // window
     attrs: WindowAttrs,
@@ -501,11 +506,11 @@ pub struct WaylandBackend {
 
     // pointer
     wl_pointer: *mut wayland::wl_pointer,
-    cursor: Option<Cursor>,
     // NOTE: cursor_shape is stored here so that it can be set back to what was requested when
     // pointer re-enders the surface.
     cursor_shape: Option<CursorShape>,
     wp_cursor_shape_device_v1: *mut wayland::wp_cursor_shape_device_v1,
+    cursor: Option<Cursor>,
     // NOTE: only one of `axis_discrete`, `axis_value120` and `axis` values will be used if any is
     // present.
     // index 0 is vertical scroll (wayland::WL_POINTER_AXIS_VERTICAL_SCROLL),
@@ -513,6 +518,14 @@ pub struct WaylandBackend {
     axis: Option<[wayland::wl_fixed; 2]>,
     axis_discrete: Option<[i32; 2]>,
     axis_value120: Option<[i32; 2]>,
+    zwp_pointer_gesture_swipe_v1: *mut wayland::zwp_pointer_gesture_swipe_v1,
+    swipe_fingers: Option<u8>,
+    zwp_pointer_gesture_pinch_v1: *mut wayland::zwp_pointer_gesture_pinch_v1,
+    // NOTE: pinch_scale is set to Some on begin event and back to None on end event.
+    // wayland (libinput) reports scale relative to the initial finger position. we want to report
+    // delta.
+    pinch_scale: Option<f64>,
+    pinch_fingers: Option<u8>,
 
     // keyboard
     wl_keyboard: *mut wayland::wl_keyboard,
@@ -530,6 +543,7 @@ pub struct WaylandBackend {
     serial_tracker: SerialTracker,
     events: VecDeque<Event>,
 
+    // NOTE: temp_cstr is used for temporary allocations. hand-offs.
     temp_cstr: TempCStr,
 }
 
@@ -618,6 +632,15 @@ unsafe extern "C" fn handle_wl_registry_global(
                     name,
                     &wayland::xdg_wm_base_interface,
                     6.min(version),
+                ) as _;
+            }
+            "zwp_pointer_gestures_v1" => {
+                this.zwp_pointer_gestures_v1 = wayland::wl_registry_bind(
+                    &this.libwayland_client,
+                    wl_registry,
+                    name,
+                    &wayland::zwp_pointer_gestures_v1_interface,
+                    3.min(version),
                 ) as _;
             }
             _ => {
@@ -745,25 +768,6 @@ const WP_FRACTIONAL_SCALE_MANAGER_V1_LISTENER: wayland::wp_fractional_scale_v1_l
         preferred_scale: handle_wp_fractional_scale_v1_preferred_scale,
     };
 
-unsafe extern "C" fn handle_wl_pointer_motion(
-    data: *mut c_void,
-    _wl_pointer: *mut wayland::wl_pointer,
-    _time: u32,
-    surface_x: wayland::wl_fixed,
-    surface_y: wayland::wl_fixed,
-) {
-    let this = unsafe { &mut *(data as *mut WaylandBackend) };
-
-    let position = (
-        wayland::wl_fixed_to_f64(surface_x),
-        wayland::wl_fixed_to_f64(surface_y),
-    );
-    // TODO: multiple motion events per frame can be sent. should they be accumulated? probably
-    // not?
-    this.events
-        .push_back(Event::Pointer(PointerEvent::Motion { position }));
-}
-
 unsafe extern "C" fn handle_wl_pointer_enter(
     data: *mut c_void,
     _wl_pointer: *mut wayland::wl_pointer,
@@ -794,7 +798,7 @@ unsafe extern "C" fn handle_wl_pointer_enter(
     // doing this helps to: compute correct deltas; dispatch press with correct delta when window
     // spawns right under the cursor.
     this.events
-        .push_back(Event::Pointer(PointerEvent::Motion { position }));
+        .push_back(Event::Pointer(PointerEvent::Move { position }));
 }
 
 unsafe extern "C" fn handle_wl_pointer_leave(
@@ -809,6 +813,25 @@ unsafe extern "C" fn handle_wl_pointer_leave(
     this.serial_tracker.reset_serial(SerialType::PointerEnter);
 }
 
+unsafe extern "C" fn handle_wl_pointer_motion(
+    data: *mut c_void,
+    _wl_pointer: *mut wayland::wl_pointer,
+    _time: u32,
+    surface_x: wayland::wl_fixed,
+    surface_y: wayland::wl_fixed,
+) {
+    let this = unsafe { &mut *(data as *mut WaylandBackend) };
+
+    let position = (
+        wayland::wl_fixed_to_f64(surface_x),
+        wayland::wl_fixed_to_f64(surface_y),
+    );
+    // TODO: multiple motion events per frame can be sent. should they be accumulated? probably
+    // not?
+    this.events
+        .push_back(Event::Pointer(PointerEvent::Move { position }));
+}
+
 unsafe extern "C" fn handle_wl_pointer_button(
     data: *mut c_void,
     _wl_pointer: *mut wayland::wl_pointer,
@@ -817,24 +840,22 @@ unsafe extern "C" fn handle_wl_pointer_button(
     button: u32,
     state: u32,
 ) {
-    let Some(button) = map_pointer_button(button) else {
-        log::debug!("unidentified pointer button: {button}");
-        return;
-    };
-
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
 
-    match state {
-        wayland::WL_POINTER_BUTTON_STATE_PRESSED => {
-            this.events
-                .push_back(Event::Pointer(PointerEvent::Press { button }));
+    let Some(button) = try_map_pointer_button(button) else {
+        log::warn!("unidentified pointer button: {button}");
+        return;
+    };
+    let state = match state {
+        wayland::WL_POINTER_BUTTON_STATE_PRESSED => ButtonState::Pressed,
+        wayland::WL_POINTER_BUTTON_STATE_RELEASED => ButtonState::Released,
+        other => {
+            log::warn!("unknown pointer button state: {other}");
+            return;
         }
-        wayland::WL_POINTER_BUTTON_STATE_RELEASED => {
-            this.events
-                .push_back(Event::Pointer(PointerEvent::Release { button }));
-        }
-        other => log::warn!("unknown pointer button state: {other}"),
-    }
+    };
+    this.events
+        .push_back(Event::Pointer(PointerEvent::Button { state, button }));
 }
 
 unsafe extern "C" fn handle_wl_pointer_axis(
@@ -931,6 +952,206 @@ const WL_POINTER_LISTENER: wayland::wl_pointer_listener = wayland::wl_pointer_li
     axis_relative_direction: noop_listener!(),
 };
 
+unsafe extern "C" fn handle_zwp_pointer_gesture_swipe_v1_begin(
+    data: *mut c_void,
+    _zwp_pointer_gesture_swipe_v1: *mut wayland::zwp_pointer_gesture_swipe_v1,
+    _serial: u32,
+    _time: u32,
+    _surface: *mut wayland::wl_surface,
+    fingers: u32,
+) {
+    let this = unsafe { &mut *(data as *mut WaylandBackend) };
+
+    // QUOTE:
+    // > swipe gestures are executed when three or more fingers are moved synchronously in the same
+    // direction.
+    // - https://wayland.freedesktop.org/libinput/doc/latest/gestures.html#swipe-gestures
+    assert!(fingers >= 3);
+    assert!(fingers <= u8::MAX as u32);
+    let fingers = fingers as u8;
+    // NOTE: swipe fingers must be unset on end.
+    assert!(this.swipe_fingers.is_none());
+    this.swipe_fingers = Some(fingers);
+
+    // TODO: consider introducing a `Possible` GesturePhase variant and not recognizing pinch_begin
+    // as Started for pan + zoom + rotate.
+    this.events.push_back(Event::Pointer(PointerEvent::Pan {
+        phase: GesturePhase::Started,
+        translation_delta: (0.0, 0.0),
+        num_touches: fingers,
+    }));
+}
+
+unsafe extern "C" fn handle_zwp_pointer_gesture_swipe_v1_update(
+    data: *mut c_void,
+    _zwp_pointer_gesture_swipe_v1: *mut wayland::zwp_pointer_gesture_swipe_v1,
+    _time: u32,
+    dx: wayland::wl_fixed,
+    dy: wayland::wl_fixed,
+) {
+    let this = unsafe { &mut *(data as *mut WaylandBackend) };
+
+    let fingers = this.swipe_fingers.expect("set fingers on start");
+
+    this.events.push_back(Event::Pointer(PointerEvent::Pan {
+        phase: GesturePhase::Updated,
+        // TODO: do i need to scale dx and dy by fractional scale?
+        translation_delta: (wayland::wl_fixed_to_f64(dx), wayland::wl_fixed_to_f64(dy)),
+        num_touches: fingers,
+    }));
+}
+
+unsafe extern "C" fn handle_zwp_pointer_gesture_swipe_v1_end(
+    data: *mut c_void,
+    _zwp_pointer_gesture_swipe_v1: *mut wayland::zwp_pointer_gesture_swipe_v1,
+    _serial: u32,
+    _time: u32,
+    cancelled: i32,
+) {
+    let this = unsafe { &mut *(data as *mut WaylandBackend) };
+
+    let phase = if cancelled == 1 {
+        GesturePhase::Cancelled
+    } else {
+        GesturePhase::Finished
+    };
+
+    let fingers = this.swipe_fingers.take().expect("set fingers on start");
+
+    this.events.push_back(Event::Pointer(PointerEvent::Pan {
+        phase,
+        translation_delta: (0.0, 0.0),
+        num_touches: fingers,
+    }));
+}
+
+unsafe extern "C" fn handle_zwp_pointer_gesture_pinch_v1_begin(
+    data: *mut c_void,
+    _zwp_pointer_gesture_pinch_v1: *mut wayland::zwp_pointer_gesture_pinch_v1,
+    _serial: u32,
+    _time: u32,
+    _surface: *mut wayland::wl_surface,
+    fingers: u32,
+) {
+    let this = unsafe { &mut *(data as *mut WaylandBackend) };
+
+    let phase = GesturePhase::Started;
+
+    // NOTE: pinch scale must be unset on end.
+    assert!(this.pinch_scale.is_none());
+    this.pinch_scale = Some(0.0);
+
+    // QUOTE:
+    // > pinch gestures are executed when two or more fingers are located on the touchpad
+    // - https://wayland.freedesktop.org/libinput/doc/latest/gestures.html#pinch-gestures
+    assert!(fingers >= 2);
+    assert!(fingers <= u8::MAX as u32);
+    let fingers = fingers as u8;
+    // NOTE: pinch fingers must be unset on end.
+    assert!(this.pinch_fingers.is_none());
+    this.pinch_fingers = Some(fingers);
+
+    // TODO: consider introducing a `Possible` GesturePhase variant and not recognizing pinch_begin
+    // as Started for pan + zoom + rotate.
+    this.events.push_back(Event::Pointer(PointerEvent::Pan {
+        phase,
+        translation_delta: (0.0, 0.0),
+        num_touches: fingers,
+    }));
+    this.events.push_back(Event::Pointer(PointerEvent::Zoom {
+        phase,
+        scale_delta: 0.0,
+    }));
+    this.events.push_back(Event::Pointer(PointerEvent::Rotate {
+        phase,
+        rotation_delta: 0.0,
+    }));
+}
+
+unsafe extern "C" fn handle_zwp_pointer_gesture_pinch_v1_update(
+    data: *mut c_void,
+    _zwp_pointer_gesture_pinch_v1: *mut wayland::zwp_pointer_gesture_pinch_v1,
+    _time: u32,
+    dx: wayland::wl_fixed,
+    dy: wayland::wl_fixed,
+    scale: wayland::wl_fixed,
+    rotation: wayland::wl_fixed,
+) {
+    let this = unsafe { &mut *(data as *mut WaylandBackend) };
+
+    let phase = GesturePhase::Updated;
+
+    let fingers = this.pinch_fingers.expect("set fingers on start");
+
+    // NOTE: scale is relative to the initial finger position. we want to report deltas.
+    let next_scale = wayland::wl_fixed_to_f64(scale);
+    let prev_scale = this
+        .pinch_scale
+        .replace(next_scale)
+        .expect("set scale on start");
+    let scale_delta = next_scale - prev_scale;
+
+    this.events.push_back(Event::Pointer(PointerEvent::Pan {
+        phase,
+        // TODO: do i need to scale dx and dy by fractional scale?
+        translation_delta: (wayland::wl_fixed_to_f64(dx), wayland::wl_fixed_to_f64(dy)),
+        num_touches: fingers,
+    }));
+    this.events
+        .push_back(Event::Pointer(PointerEvent::Zoom { phase, scale_delta }));
+    this.events.push_back(Event::Pointer(PointerEvent::Rotate {
+        phase,
+        rotation_delta: wayland::wl_fixed_to_f64(rotation),
+    }));
+}
+
+unsafe extern "C" fn handle_zwp_pointer_gesture_pinch_v1_end(
+    data: *mut c_void,
+    _zwp_pointer_gesture_pinch_v1: *mut wayland::zwp_pointer_gesture_pinch_v1,
+    _serial: u32,
+    _time: u32,
+    cancelled: i32,
+) {
+    let this = unsafe { &mut *(data as *mut WaylandBackend) };
+
+    let phase = if cancelled == 1 {
+        GesturePhase::Cancelled
+    } else {
+        GesturePhase::Finished
+    };
+
+    let _scale = this.pinch_scale.take().expect("set scale on start");
+    let fingers = this.pinch_fingers.take().expect("set fingers on start");
+
+    this.events.push_back(Event::Pointer(PointerEvent::Pan {
+        phase,
+        translation_delta: (0.0, 0.0),
+        num_touches: fingers,
+    }));
+    this.events.push_back(Event::Pointer(PointerEvent::Zoom {
+        phase,
+        scale_delta: 0.0,
+    }));
+    this.events.push_back(Event::Pointer(PointerEvent::Rotate {
+        phase,
+        rotation_delta: 0.0,
+    }));
+}
+
+const ZWP_POINTER_GESTURE_SWIPE_V1_LISTENER: wayland::zwp_pointer_gesture_swipe_v1_listener =
+    wayland::zwp_pointer_gesture_swipe_v1_listener {
+        begin: handle_zwp_pointer_gesture_swipe_v1_begin,
+        update: handle_zwp_pointer_gesture_swipe_v1_update,
+        end: handle_zwp_pointer_gesture_swipe_v1_end,
+    };
+
+const ZWP_POINTER_GESTURE_PINCH_V1_LISTENER: wayland::zwp_pointer_gesture_pinch_v1_listener =
+    wayland::zwp_pointer_gesture_pinch_v1_listener {
+        begin: handle_zwp_pointer_gesture_pinch_v1_begin,
+        update: handle_zwp_pointer_gesture_pinch_v1_update,
+        end: handle_zwp_pointer_gesture_pinch_v1_end,
+    };
+
 unsafe extern "C" fn handle_wl_keyboard_keymap(
     data: *mut c_void,
     _wl_keyboard: *mut wayland::wl_keyboard,
@@ -996,7 +1217,7 @@ unsafe extern "C" fn handle_wl_keyboard_key(
     key: u32,
     state: u32,
 ) {
-    let Some(scancode) = map_keyboard_key(key) else {
+    let Some(scancode) = try_map_keyboard_key(key) else {
         log::debug!("unidentified keyboard key: {key}");
         return;
     };
@@ -1014,12 +1235,12 @@ unsafe extern "C" fn handle_wl_keyboard_key(
 
     match state {
         wayland::WL_KEYBOARD_KEY_STATE_PRESSED => {
-            let keyboard_event = KeyboardEvent::Press {
+            this.events.push_back(Event::Keyboard(KeyboardEvent::Key {
+                state: KeyState::Pressed,
                 scancode,
                 keycode,
                 repeat: false,
-            };
-            this.events.push_back(Event::Keyboard(keyboard_event));
+            }));
 
             if let Some(KeyRepeatInfo { rate, delay }) = this.key_repeat_info {
                 assert!(!xkb_context.keymap.is_null());
@@ -1033,8 +1254,12 @@ unsafe extern "C" fn handle_wl_keyboard_key(
             }
         }
         wayland::WL_KEYBOARD_KEY_STATE_RELEASED => {
-            let keyboard_event = KeyboardEvent::Release { scancode, keycode };
-            this.events.push_back(Event::Keyboard(keyboard_event));
+            this.events.push_back(Event::Keyboard(KeyboardEvent::Key {
+                state: KeyState::Released,
+                scancode,
+                keycode,
+                repeat: false,
+            }));
 
             this.key_repeat = None;
             if let Err(err) = unsafe { this.key_repeat_timerfd.disarm() } {
@@ -1225,6 +1450,7 @@ impl WaylandBackend {
             wp_fractional_scale_manager_v1: null_mut(),
             wp_viewporter: null_mut(),
             xdg_wm_base: null_mut(),
+            zwp_pointer_gestures_v1: null_mut(),
 
             attrs,
             wl_surface: null_mut(),
@@ -1244,6 +1470,11 @@ impl WaylandBackend {
             axis: None,
             axis_discrete: None,
             axis_value120: None,
+            zwp_pointer_gesture_swipe_v1: null_mut(),
+            zwp_pointer_gesture_pinch_v1: null_mut(),
+            swipe_fingers: None,
+            pinch_scale: None,
+            pinch_fingers: None,
 
             wl_keyboard: null_mut(),
             xkb_context: None,
@@ -1409,7 +1640,6 @@ impl WaylandBackend {
         };
 
         if !this.wp_cursor_shape_manager_v1.is_null() {
-            assert!(!this.wl_pointer.is_null());
             this.wp_cursor_shape_device_v1 = unsafe {
                 wayland::wp_cursor_shape_manager_v1_get_pointer(
                     &this.libwayland_client,
@@ -1429,6 +1659,48 @@ impl WaylandBackend {
             )
             .map(Some)
             .context("could not init cursor")?;
+        }
+
+        if !this.zwp_pointer_gestures_v1.is_null() {
+            this.zwp_pointer_gesture_swipe_v1 = unsafe {
+                wayland::zwp_pointer_gestures_v1_get_swipe_gesture(
+                    &this.libwayland_client,
+                    this.zwp_pointer_gestures_v1,
+                    this.wl_pointer,
+                )
+            };
+            if this.zwp_pointer_gesture_swipe_v1.is_null() {
+                return Err(anyhow!("could not get swipe gesture"));
+            }
+            unsafe {
+                (this.libwayland_client.wl_proxy_add_listener)(
+                    this.zwp_pointer_gesture_swipe_v1 as *mut wayland::wl_proxy,
+                    &ZWP_POINTER_GESTURE_SWIPE_V1_LISTENER
+                        as *const wayland::zwp_pointer_gesture_swipe_v1_listener
+                        as _,
+                    this.as_mut() as *mut WaylandBackend as *mut c_void,
+                )
+            };
+
+            this.zwp_pointer_gesture_pinch_v1 = unsafe {
+                wayland::zwp_pointer_gestures_v1_get_pinch_gesture(
+                    &this.libwayland_client,
+                    this.zwp_pointer_gestures_v1,
+                    this.wl_pointer,
+                )
+            };
+            if this.zwp_pointer_gesture_pinch_v1.is_null() {
+                return Err(anyhow!("could not get pinch gesture"));
+            }
+            unsafe {
+                (this.libwayland_client.wl_proxy_add_listener)(
+                    this.zwp_pointer_gesture_pinch_v1 as *mut wayland::wl_proxy,
+                    &ZWP_POINTER_GESTURE_PINCH_V1_LISTENER
+                        as *const wayland::zwp_pointer_gesture_pinch_v1_listener
+                        as _,
+                    this.as_mut() as *mut WaylandBackend as *mut c_void,
+                )
+            };
         }
 
         // keyboard
@@ -1794,12 +2066,12 @@ impl Window for WaylandBackend {
                     if let Some((scancode, keycode)) = self.key_repeat {
                         let exp: u64 = unsafe { self.key_repeat_timerfd.read() }?;
                         for _ in 0..exp {
-                            let keyboard_event = KeyboardEvent::Press {
+                            self.events.push_back(Event::Keyboard(KeyboardEvent::Key {
+                                state: KeyState::Pressed,
                                 scancode,
                                 keycode,
                                 repeat: true,
-                            };
-                            self.events.push_back(Event::Keyboard(keyboard_event));
+                            }));
                         }
                     }
                 }

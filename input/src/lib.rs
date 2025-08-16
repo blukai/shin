@@ -7,7 +7,7 @@ use nohash::{NoHash, NoHashMap};
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PointerButton {
+pub enum Button {
     /// equivalent to left mouse button
     Primary,
     /// equivalent to right mouse button
@@ -16,37 +16,93 @@ pub enum PointerButton {
     Tertiary,
 }
 
-impl Hash for PointerButton {
+impl Hash for Button {
     fn hash<H: Hasher>(&self, state: &mut H) {
         state.write_u8(*self as u8);
     }
 }
 
-impl NoHash for PointerButton {}
+impl NoHash for Button {}
 
-impl PointerButton {
+impl Button {
     /// NOTE: this is useful for calling InputState's all_just_pressed/all_just_released method for
     /// example.
     pub fn all() -> [Self; 3] {
-        use PointerButton::*;
+        use Button::*;
         [Primary, Secondary, Tertiary]
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ButtonState {
+    Pressed,
+    Released,
+}
+
+// NOTE: refs on how platforms handle gestures:
+// - https://wayland.app/protocols/pointer-gestures-unstable-v1
+// - https://developer.apple.com/documentation/appkit/nsgesturerecognizer
+//   - https://developer.apple.com/documentation/uikit/uigesturerecognizer
+// - https://learn.microsoft.com/en-us/windows/win32/wintouch/windows-touch-gestures-overview
+// - https://developer.android.com/develop/ui/compose/touch-input/pointer-input/multi-touch
+// and libs:
+// - https://doc.qt.io/qt-6/qt.html#GestureType-enum
+//   - https://doc.qt.io/qt-6/qtwidgets-gestures-imagegestures-example.html
+//   - https://doc.qt.io/qt-6/qpinchgesture.html
+
+// NOTE: pan, zoom, rotate - all can be dispatched simulateneously.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GesturePhase {
+    Started,
+    Updated,
+    Finished,
+    Cancelled,
+}
+
+// TODO: combine Press and Release events into Button event with
+// enum KeyState { Pressed, Released }
+//
+// TODO: consider implementing Swipe event. on wayland perhaps you can listen for hold event with 2
+// fingers followed by horizontal scroll?
 #[derive(Debug, Clone)]
 pub enum PointerEvent {
-    Motion { position: (f64, f64) },
-    Press { button: PointerButton },
-    Release { button: PointerButton },
+    Move {
+        position: (f64, f64),
+    },
+    Button {
+        state: ButtonState,
+        button: Button,
+    },
     // TODO: should scroll event provide more data? currently i normalize delta in wayland backend,
     // and i repeat that in winit backend if winit is running under wayland...
     //
     // should scroll event provide pixel (pixel delta in probably physical surface space), should
     // it provide discrete delta (which is in steps)?
-    Scroll { delta: (f64, f64) },
+    Scroll {
+        // TODO: consider being more descriptive with what delta this is (like gesture events).
+        delta: (f64, f64),
+    },
+    // TODO: winit does not support gestures (only on ios?). extract gesture handling from wayland
+    // backend and use it in winit backend if winint backend is using wayland under the hood.
+    Pan {
+        phase: GesturePhase,
+        translation_delta: (f64, f64),
+        /// on wayland might be 2 if pan is triggered pinch, might be 3 if triggered by swipe.
+        num_touches: u8,
+    },
+    Zoom {
+        phase: GesturePhase,
+        /// scale relative to the initial finger position
+        scale_delta: f64,
+    },
+    Rotate {
+        phase: GesturePhase,
+        /// angle in degrees cw relative to the previous event
+        rotation_delta: f64,
+    },
 }
 
-#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CursorShape {
     Default,
@@ -228,11 +284,227 @@ impl Hash for Keycode {
 
 impl NoHash for Keycode {}
 
-// TODO: might want to implement bitwise op traits for Keymods.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct Keymods(u16);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyState {
+    Pressed,
+    Released,
+}
 
-impl Keymods {
+// TODO: combine Press and Release events into Button event with
+// enum ButtonState { Pressed, Released }
+#[derive(Debug, Clone)]
+pub enum KeyboardEvent {
+    Key {
+        state: KeyState,
+        scancode: Scancode,
+        keycode: Keycode,
+        /// true if this is a key repeat
+        repeat: bool,
+    },
+}
+
+// states
+// ----
+
+// TODO: come up with a better name for Button* stuff. name that will combine and describe / UNIFY
+// / pointer buttons and keyboard keys.
+
+// TODO: might want to implement bitwise op traits for StateFlags.
+//
+// NOTE: button may have multiple states at the same time.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct StateFlags(u8);
+
+impl StateFlags {
+    pub const JUST_PRESSED: u8 = 1 << 0;
+    pub const JUST_RELEASED: u8 = 1 << 1;
+    pub const DOWN: u8 = 1 << 2;
+    pub const REPEAT: u8 = 1 << 3;
+}
+
+// NOTE: this was originally inspired by bevy's ButtonInput thing.
+#[derive(Debug)]
+pub struct StateTracker<B>
+where
+    B: Copy + Eq + NoHash,
+{
+    map: NoHashMap<B, StateFlags>,
+}
+
+// @BlindDerive
+impl<B> Default for StateTracker<B>
+where
+    B: Copy + Eq + NoHash,
+{
+    fn default() -> Self {
+        Self {
+            map: NoHashMap::default(),
+        }
+    }
+}
+
+impl<B> StateTracker<B>
+where
+    B: Copy + Eq + NoHash,
+{
+    pub fn end_frame(&mut self) {
+        self.map.values_mut().for_each(|state| {
+            state.0 &= !StateFlags::JUST_PRESSED;
+            state.0 &= !StateFlags::JUST_RELEASED;
+            state.0 &= !StateFlags::REPEAT;
+        });
+    }
+
+    // ----
+
+    pub fn press(&mut self, button: B, repeat: bool) {
+        let state = self.map.entry(button).or_insert(StateFlags(0));
+        state.0 = StateFlags::DOWN
+            | if repeat {
+                StateFlags::REPEAT
+            } else {
+                StateFlags::JUST_PRESSED
+            };
+    }
+
+    pub fn release(&mut self, button: B) {
+        let state = self.map.entry(button).or_insert(StateFlags(0));
+        state.0 = StateFlags::JUST_RELEASED;
+    }
+
+    // just pressed
+
+    pub fn just_pressed(&self, button: B) -> bool {
+        self.map
+            .get(&button)
+            .is_some_and(|state| state.0 & StateFlags::JUST_PRESSED != 0)
+    }
+
+    pub fn any_just_pressed(&self, buttons: impl IntoIterator<Item = B>) -> bool {
+        buttons.into_iter().any(|button| self.just_pressed(button))
+    }
+
+    pub fn all_just_pressed(&self, buttons: impl IntoIterator<Item = B>) -> bool {
+        buttons.into_iter().all(|button| self.just_pressed(button))
+    }
+
+    pub fn iter_just_pressed(&self) -> impl Iterator<Item = B> {
+        self.map.iter().filter_map(|(button, state)| {
+            (state.0 & StateFlags::JUST_PRESSED != 0).then_some(*button)
+        })
+    }
+
+    // just released
+
+    pub fn just_released(&self, button: B) -> bool {
+        self.map
+            .get(&button)
+            .is_some_and(|state| state.0 & StateFlags::JUST_RELEASED != 0)
+    }
+
+    pub fn any_just_released(&self, buttons: impl IntoIterator<Item = B>) -> bool {
+        buttons.into_iter().any(|button| self.just_released(button))
+    }
+
+    pub fn all_just_released(&self, buttons: impl IntoIterator<Item = B>) -> bool {
+        buttons.into_iter().all(|button| self.just_released(button))
+    }
+
+    pub fn iter_just_released(&self) -> impl Iterator<Item = B> {
+        self.map.iter().filter_map(|(button, state)| {
+            (state.0 & StateFlags::JUST_RELEASED != 0).then_some(*button)
+        })
+    }
+
+    // down
+
+    pub fn down(&self, button: B) -> bool {
+        self.map
+            .get(&button)
+            .is_some_and(|state| state.0 & StateFlags::DOWN != 0)
+    }
+
+    pub fn any_down(&self, buttons: impl IntoIterator<Item = B>) -> bool {
+        buttons.into_iter().any(|button| self.down(button))
+    }
+
+    pub fn all_down(&self, buttons: impl IntoIterator<Item = B>) -> bool {
+        buttons.into_iter().all(|button| self.down(button))
+    }
+
+    pub fn iter_down(&self) -> impl Iterator<Item = B> {
+        self.map
+            .iter()
+            .filter_map(|(button, state)| (state.0 & StateFlags::DOWN != 0).then_some(*button))
+    }
+
+    // repeat
+
+    pub fn repeated(&self, button: B) -> bool {
+        self.map
+            .get(&button)
+            .is_some_and(|state| state.0 & StateFlags::REPEAT != 0)
+    }
+
+    pub fn any_repeated(&self, buttons: impl IntoIterator<Item = B>) -> bool {
+        buttons.into_iter().any(|button| self.repeated(button))
+    }
+
+    pub fn all_repeated(&self, buttons: impl IntoIterator<Item = B>) -> bool {
+        buttons.into_iter().all(|button| self.repeated(button))
+    }
+
+    pub fn iter_repeated(&self) -> impl Iterator<Item = B> {
+        self.map
+            .iter()
+            .filter_map(|(button, state)| (state.0 & StateFlags::REPEAT != 0).then_some(*button))
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct PointerState {
+    pub position: (f64, f64),
+    pub buttons: StateTracker<Button>,
+    pub press_origins: NoHashMap<Button, (f64, f64)>,
+}
+
+impl PointerState {
+    #[inline]
+    pub fn handle_event(&mut self, ev: PointerEvent) {
+        use PointerEvent::*;
+        match ev {
+            Move { position: next } => {
+                self.position = next;
+            }
+            Button {
+                state: ButtonState::Pressed,
+                button,
+            } => {
+                self.buttons.press(button, false);
+                self.press_origins.insert(button, self.position);
+            }
+            Button {
+                state: ButtonState::Released,
+                button,
+            } => {
+                self.buttons.release(button);
+                self.press_origins.remove(&button);
+            }
+            _ => {}
+        }
+    }
+
+    #[inline]
+    pub fn end_frame(&mut self) {
+        self.buttons.end_frame();
+    }
+}
+
+// TODO: might want to implement bitwise op traits for ModifierFlags.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ModifierFlags(u16);
+
+impl ModifierFlags {
     pub const CTRL_LEFT: u16 = 1 << 0;
     pub const CTRL_RIGHT: u16 = 1 << 1;
     pub const SHIFT_LEFT: u16 = 1 << 2;
@@ -271,218 +543,11 @@ impl Keymods {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum KeyboardEvent {
-    Press {
-        scancode: Scancode,
-        keycode: Keycode,
-        /// true if this is a key repeat
-        repeat: bool,
-    },
-    Release {
-        scancode: Scancode,
-        keycode: Keycode,
-    },
-}
-
-// states
-// ----
-
-// TODO: might want to implement bitwise op traits for ButtonStates.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct ButtonStates(u8);
-
-impl ButtonStates {
-    pub const JUST_PRESSED: u8 = 1 << 0;
-    pub const JUST_RELEASED: u8 = 1 << 1;
-    pub const DOWN: u8 = 1 << 2;
-    pub const REPEAT: u8 = 1 << 3;
-}
-
-// NOTE: this is inspired by bevy's ButtonInput, but different!
-#[derive(Debug)]
-pub struct ButtonInput<B>
-where
-    B: Copy + Eq + NoHash,
-{
-    states: NoHashMap<B, ButtonStates>,
-}
-
-// @BlindDerive
-impl<B> Default for ButtonInput<B>
-where
-    B: Copy + Eq + NoHash,
-{
-    fn default() -> Self {
-        Self {
-            states: NoHashMap::default(),
-        }
-    }
-}
-
-impl<B> ButtonInput<B>
-where
-    B: Copy + Eq + NoHash,
-{
-    pub fn end_frame(&mut self) {
-        self.states.values_mut().for_each(|state| {
-            state.0 &= !ButtonStates::JUST_PRESSED;
-            state.0 &= !ButtonStates::JUST_RELEASED;
-            state.0 &= !ButtonStates::REPEAT;
-        });
-    }
-
-    // ----
-
-    pub fn press(&mut self, button: B, repeat: bool) {
-        let state = self.states.entry(button).or_insert(ButtonStates(0));
-        state.0 = ButtonStates::DOWN
-            | if repeat {
-                ButtonStates::REPEAT
-            } else {
-                ButtonStates::JUST_PRESSED
-            };
-    }
-
-    pub fn release(&mut self, button: B) {
-        let state = self.states.entry(button).or_insert(ButtonStates(0));
-        state.0 = ButtonStates::JUST_RELEASED;
-    }
-
-    // just pressed
-
-    pub fn just_pressed(&self, button: B) -> bool {
-        self.states
-            .get(&button)
-            .is_some_and(|state| state.0 & ButtonStates::JUST_PRESSED != 0)
-    }
-
-    pub fn any_just_pressed(&self, buttons: impl IntoIterator<Item = B>) -> bool {
-        buttons.into_iter().any(|button| self.just_pressed(button))
-    }
-
-    pub fn all_just_pressed(&self, buttons: impl IntoIterator<Item = B>) -> bool {
-        buttons.into_iter().all(|button| self.just_pressed(button))
-    }
-
-    pub fn iter_just_pressed(&self) -> impl Iterator<Item = B> {
-        self.states.iter().filter_map(|(button, state)| {
-            (state.0 & ButtonStates::JUST_PRESSED != 0).then_some(*button)
-        })
-    }
-
-    // just released
-
-    pub fn just_released(&self, button: B) -> bool {
-        self.states
-            .get(&button)
-            .is_some_and(|state| state.0 & ButtonStates::JUST_RELEASED != 0)
-    }
-
-    pub fn any_just_released(&self, buttons: impl IntoIterator<Item = B>) -> bool {
-        buttons.into_iter().any(|button| self.just_released(button))
-    }
-
-    pub fn all_just_released(&self, buttons: impl IntoIterator<Item = B>) -> bool {
-        buttons.into_iter().all(|button| self.just_released(button))
-    }
-
-    pub fn iter_just_released(&self) -> impl Iterator<Item = B> {
-        self.states.iter().filter_map(|(button, state)| {
-            (state.0 & ButtonStates::JUST_RELEASED != 0).then_some(*button)
-        })
-    }
-
-    // down
-
-    pub fn down(&self, button: B) -> bool {
-        self.states
-            .get(&button)
-            .is_some_and(|state| state.0 & ButtonStates::DOWN != 0)
-    }
-
-    pub fn any_down(&self, buttons: impl IntoIterator<Item = B>) -> bool {
-        buttons.into_iter().any(|button| self.down(button))
-    }
-
-    pub fn all_down(&self, buttons: impl IntoIterator<Item = B>) -> bool {
-        buttons.into_iter().all(|button| self.down(button))
-    }
-
-    pub fn iter_down(&self) -> impl Iterator<Item = B> {
-        self.states
-            .iter()
-            .filter_map(|(button, state)| (state.0 & ButtonStates::DOWN != 0).then_some(*button))
-    }
-
-    // repeat
-
-    pub fn repeated(&self, button: B) -> bool {
-        self.states
-            .get(&button)
-            .is_some_and(|state| state.0 & ButtonStates::REPEAT != 0)
-    }
-
-    pub fn any_repeated(&self, buttons: impl IntoIterator<Item = B>) -> bool {
-        buttons.into_iter().any(|button| self.repeated(button))
-    }
-
-    pub fn all_repeated(&self, buttons: impl IntoIterator<Item = B>) -> bool {
-        buttons.into_iter().all(|button| self.repeated(button))
-    }
-
-    pub fn iter_repeated(&self) -> impl Iterator<Item = B> {
-        self.states
-            .iter()
-            .filter_map(|(button, state)| (state.0 & ButtonStates::REPEAT != 0).then_some(*button))
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct PointerState {
-    pub position: (f64, f64),
-    pub motion_delta: (f64, f64),
-    pub scroll_delta: (f64, f64),
-    pub buttons: ButtonInput<PointerButton>,
-    pub press_origins: NoHashMap<PointerButton, (f64, f64)>,
-}
-
-impl PointerState {
-    #[inline]
-    pub fn handle_event(&mut self, ev: PointerEvent) {
-        use PointerEvent::*;
-        match ev {
-            Motion { position: next } => {
-                let prev = self.position;
-                self.position = next;
-                self.motion_delta = (next.0 - prev.0, next.1 - prev.1);
-            }
-            Press { button } => {
-                self.buttons.press(button, false);
-                self.press_origins.insert(button, self.position);
-            }
-            Release { button } => {
-                self.buttons.release(button);
-                self.press_origins.remove(&button);
-            }
-            Scroll { delta } => {
-                self.scroll_delta = delta;
-            }
-        }
-    }
-
-    #[inline]
-    pub fn end_frame(&mut self) {
-        self.scroll_delta = (0.0, 0.0);
-        self.buttons.end_frame();
-    }
-}
-
 #[derive(Debug, Default)]
 pub struct KeyboardState {
-    pub scancodes: ButtonInput<Scancode>,
-    pub keycodes: ButtonInput<Keycode>,
-    pub keymods: Keymods,
+    pub scancodes: StateTracker<Scancode>,
+    pub keycodes: StateTracker<Keycode>,
+    pub modifiers: ModifierFlags,
 }
 
 impl KeyboardState {
@@ -490,22 +555,28 @@ impl KeyboardState {
     pub fn handle_event(&mut self, ev: KeyboardEvent) {
         use KeyboardEvent::*;
         match ev {
-            Press {
+            Key {
+                state: KeyState::Pressed,
                 scancode,
                 keycode,
                 repeat,
             } => {
                 self.scancodes.press(scancode, repeat);
                 self.keycodes.press(keycode, repeat);
-                if let Some(Keymods(keymods)) = Keymods::try_from_scancode(scancode) {
-                    self.keymods.0 |= keymods;
+                if let Some(ModifierFlags(flags)) = ModifierFlags::try_from_scancode(scancode) {
+                    self.modifiers.0 |= flags;
                 }
             }
-            Release { scancode, keycode } => {
+            Key {
+                state: KeyState::Released,
+                scancode,
+                keycode,
+                ..
+            } => {
                 self.scancodes.release(scancode);
                 self.keycodes.release(keycode);
-                if let Some(Keymods(keymods)) = Keymods::try_from_scancode(scancode) {
-                    self.keymods.0 &= !keymods;
+                if let Some(ModifierFlags(flags)) = ModifierFlags::try_from_scancode(scancode) {
+                    self.modifiers.0 &= !flags;
                 }
             }
         }

@@ -1,7 +1,7 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::time::{Duration, Instant};
 
-use input::{CursorShape, PointerButton};
+use input::{Button, CursorShape};
 use nohash::NoHash;
 
 use crate::{
@@ -90,14 +90,14 @@ impl InteractionState {
         // NOTE: setting thing inactive on release makes things weird with for example text
         // selection.
         if self.active == Some(key)
-            && input.pointer.buttons.just_pressed(PointerButton::Primary)
+            && input.pointer.buttons.just_pressed(Button::Primary)
             && !inside
         {
             self.active = None;
         }
 
         if self.hot_last_frame == Some(key)
-            && input.pointer.buttons.just_pressed(PointerButton::Primary)
+            && input.pointer.buttons.just_pressed(Button::Primary)
             && inside
         {
             self.active = Some(key);

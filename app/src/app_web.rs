@@ -100,10 +100,6 @@ impl<A: AppHandler> Context<A> {
         self.window.pump_events()?;
 
         while let Some(event) = self.window.pop_event() {
-            if !matches!(event, Event::Pointer(input::PointerEvent::Motion { .. })) {
-                log::debug!("event: {event:?}");
-            }
-
             match event {
                 Event::Window(WindowEvent::Configure { logical_size: _ }) => {
                     match self.graphics_context {
