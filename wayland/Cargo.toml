@@ -12,3 +12,13 @@ dynlib.workspace = true
 # workspace
 wayland-scanner.workspace = true
 
+[features]
+cursor-shape-v1 = []
+fractional-scale-v1 = []
+linux-dmabuf-v1 = []
+pointer-gestures-unstable-v1 = []
+tablet-v2 = []
+viewporter = []
+wlr-layer-shell-unstable-v1 = []
+wlr-screencopy-unstable-v1 = []
+xdg-shell = []

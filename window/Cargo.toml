@@ -15,7 +15,18 @@ input.workspace = true
 libc.workspace = true
 # workspace
 dynlib.workspace = true
-wayland.workspace = true
+
+# workspace
+[target.'cfg(not(target_family = "wasm"))'.dependencies.wayland]
+workspace = true
+features = [
+  "cursor-shape-v1",
+  "fractional-scale-v1",
+  "pointer-gestures-unstable-v1",
+  "tablet-v2",
+  "viewporter",
+  "xdg-shell",
+]
 
 [features]
 # TODO: rename to backend_winit
