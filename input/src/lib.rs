@@ -108,6 +108,12 @@ pub enum CursorShape {
     Default,
     Pointer,
     Text,
+    Crosshair,
+    Move,
+    NwResize,
+    NeResize,
+    SeResize,
+    SwResize,
 }
 
 // keyboard
@@ -589,6 +595,7 @@ impl KeyboardState {
     }
 }
 
+/// Event is not for you to really use on your side. it's more of an internal thing for this mod.
 #[derive(Debug, Clone)]
 pub enum Event {
     Pointer(PointerEvent),

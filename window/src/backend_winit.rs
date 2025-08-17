@@ -45,6 +45,12 @@ fn map_cursor_shape(cursor_shape: CursorShape) -> winit::window::Cursor {
         CursorShape::Default => CursorIcon::Default,
         CursorShape::Pointer => CursorIcon::Pointer,
         CursorShape::Text => CursorIcon::Text,
+        CursorShape::Crosshair => CursorIcon::Crosshair,
+        CursorShape::Move => CursorIcon::Move,
+        CursorShape::NwResize => CursorIcon::NwResize,
+        CursorShape::NeResize => CursorIcon::NeResize,
+        CursorShape::SeResize => CursorIcon::SeResize,
+        CursorShape::SwResize => CursorIcon::SwResize,
     })
 }
 

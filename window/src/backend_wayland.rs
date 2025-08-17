@@ -94,7 +94,13 @@ fn map_cursor_shape_to_name(shape: CursorShape) -> &'static CStr {
     match shape {
         CursorShape::Default => c"default",
         CursorShape::Pointer => c"pointer",
-        CursorShape::Text => c"Text",
+        CursorShape::Text => c"text",
+        CursorShape::Crosshair => c"crosshair",
+        CursorShape::Move => c"move",
+        CursorShape::NwResize => c"nw-resize",
+        CursorShape::NeResize => c"ne-resize",
+        CursorShape::SeResize => c"se-resize",
+        CursorShape::SwResize => c"sw-resize",
     }
 }
 
@@ -103,6 +109,12 @@ fn map_cursor_shape_to_enum(shape: CursorShape) -> u32 {
         CursorShape::Default => wayland::WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT,
         CursorShape::Pointer => wayland::WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_POINTER,
         CursorShape::Text => wayland::WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_TEXT,
+        CursorShape::Crosshair => wayland::WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_CROSSHAIR,
+        CursorShape::Move => wayland::WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_MOVE,
+        CursorShape::NwResize => wayland::WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_NW_RESIZE,
+        CursorShape::NeResize => wayland::WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_NE_RESIZE,
+        CursorShape::SeResize => wayland::WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_SE_RESIZE,
+        CursorShape::SwResize => wayland::WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_SW_RESIZE,
     }
 }
 
