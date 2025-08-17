@@ -1,5 +1,6 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::ffi::{c_char, c_int, c_void, CStr};
+use std::hash::{Hash, Hasher};
 use std::io::{PipeReader, PipeWriter, Read as _};
 use std::mem::{self, MaybeUninit};
 use std::os::fd::FromRawFd as _;
@@ -12,6 +13,7 @@ use input::{
     Button, ButtonState, CursorShape, GesturePhase, KeyState, KeyboardEvent, Keycode, PointerEvent,
     Scancode,
 };
+use nohash::{NoHash, NoHashMap};
 use raw_window_handle as rwh;
 
 use crate::{
@@ -382,28 +384,37 @@ fn try_map_keyboard_key(key: u32) -> Option<Scancode> {
 /// - https://github.com/xkbcommon/libxkbcommon/blob/eb0a1457f4ada160d03f6d938fa31f6b049cb403/doc/keymap-format-text-v1.md
 const EVDEV_OFFSET: u32 = 8;
 
-#[derive(PartialEq, Eq, Hash)]
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum SerialType {
     PointerEnter,
     KeyboardEnter,
 }
 
+impl Hash for SerialType {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_u8(*self as u8);
+    }
+}
+
+impl NoHash for SerialType {}
+
 #[derive(Default)]
 struct SerialTracker {
-    serial_map: HashMap<SerialType, u32>,
+    map: NoHashMap<SerialType, u32>,
 }
 
 impl SerialTracker {
     fn update_serial(&mut self, ty: SerialType, serial: u32) {
-        self.serial_map.insert(ty, serial);
+        self.map.insert(ty, serial);
     }
 
     fn reset_serial(&mut self, ty: SerialType) {
-        self.serial_map.remove(&ty);
+        self.map.remove(&ty);
     }
 
     fn get_serial(&self, ty: SerialType) -> Option<u32> {
-        self.serial_map.get(&ty).cloned()
+        self.map.get(&ty).cloned()
     }
 }
 
