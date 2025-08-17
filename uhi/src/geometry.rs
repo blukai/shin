@@ -54,6 +54,34 @@ impl ops::Div<Vec2> for Vec2 {
     }
 }
 
+impl ops::AddAssign<Vec2> for Vec2 {
+    fn add_assign(&mut self, rhs: Vec2) {
+        self.x.add_assign(rhs.x);
+        self.y.add_assign(rhs.y);
+    }
+}
+
+impl ops::SubAssign<Vec2> for Vec2 {
+    fn sub_assign(&mut self, rhs: Vec2) {
+        self.x.sub_assign(rhs.x);
+        self.y.sub_assign(rhs.y);
+    }
+}
+
+impl ops::MulAssign<Vec2> for Vec2 {
+    fn mul_assign(&mut self, rhs: Vec2) {
+        self.x.mul_assign(rhs.x);
+        self.y.mul_assign(rhs.y);
+    }
+}
+
+impl ops::DivAssign<Vec2> for Vec2 {
+    fn div_assign(&mut self, rhs: Vec2) {
+        self.x.div_assign(rhs.x);
+        self.y.div_assign(rhs.y);
+    }
+}
+
 impl ops::Mul<f32> for Vec2 {
     type Output = Self;
 
@@ -252,6 +280,10 @@ impl Rect {
 
     pub fn size(&self) -> Vec2 {
         self.max - self.min
+    }
+
+    pub fn center(&self) -> Vec2 {
+        (self.min + self.max) / 2.0
     }
 
     pub fn contains(&self, point: &Vec2) -> bool {

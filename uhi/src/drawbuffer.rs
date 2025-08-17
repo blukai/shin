@@ -9,8 +9,8 @@ use crate::{Externs, Rect, TextureKind, Vec2};
 // renderer?) to the renderer. accumulate shapes, not verticies.
 
 // NOTE: repr(C) is here to ensure that ordering is correct in into_array transmutation.
-#[repr(C)]
 // NOTE: Copy is derived simply because it's cheap. size of u32.
+#[repr(C)]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Rgba8 {
     pub r: u8,

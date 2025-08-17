@@ -1039,7 +1039,7 @@ unsafe extern "C" fn handle_zwp_pointer_gesture_pinch_v1_begin(
 
     // NOTE: pinch scale must be unset on end.
     assert!(this.pinch_scale.is_none());
-    this.pinch_scale = Some(0.0);
+    this.pinch_scale = Some(1.0);
 
     // QUOTE:
     // > pinch gestures are executed when two or more fingers are located on the touchpad
