@@ -280,7 +280,6 @@ impl winit::application::ApplicationHandler for App {
                 ..
             } => {
                 use winit::event::MouseScrollDelta;
-                // NOTE: winit reports deltas inverted. thus values are multiplied by -1.
                 let delta = match mouse_scroll_delta {
                     MouseScrollDelta::LineDelta(x, y) => (x as f64, y as f64),
                     MouseScrollDelta::PixelDelta(physical_position) => {
@@ -299,7 +298,7 @@ impl winit::application::ApplicationHandler for App {
                     }
                 };
                 Some(Event::Pointer(PointerEvent::Scroll {
-                    // NOTE: winit reports deltas inverted.
+                    // NOTE: winit inverts deltas.
                     delta: (-delta.0, -delta.1),
                 }))
             }

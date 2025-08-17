@@ -112,6 +112,12 @@ impl From<(f32, f32)> for Vec2 {
     }
 }
 
+impl From<&(f32, f32)> for Vec2 {
+    fn from((x, y): &(f32, f32)) -> Self {
+        Self::new(*x, *y)
+    }
+}
+
 impl From<F64Vec2> for Vec2 {
     #[inline]
     fn from(value: F64Vec2) -> Self {
@@ -203,6 +209,12 @@ impl Vec2 {
             y: if self.y > rhs.y { self.y } else { rhs.y },
         }
     }
+
+    #[inline]
+    pub const fn clamp(self, min: Self, max: Self) -> Self {
+        assert!(min.x <= max.x && min.y <= max.y);
+        self.max(min).min(max)
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
@@ -215,6 +227,13 @@ impl From<(f64, f64)> for F64Vec2 {
     #[inline]
     fn from((x, y): (f64, f64)) -> Self {
         Self::new(x, y)
+    }
+}
+
+impl From<&(f64, f64)> for F64Vec2 {
+    #[inline]
+    fn from((x, y): &(f64, f64)) -> Self {
+        Self::new(*x, *y)
     }
 }
 
@@ -235,6 +254,13 @@ impl From<(u32, u32)> for U32Vec2 {
     #[inline]
     fn from((x, y): (u32, u32)) -> Self {
         Self::new(x, y)
+    }
+}
+
+impl From<&(u32, u32)> for U32Vec2 {
+    #[inline]
+    fn from((x, y): &(u32, u32)) -> Self {
+        Self::new(*x, *y)
     }
 }
 

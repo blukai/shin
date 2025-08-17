@@ -243,6 +243,8 @@ pub struct Appearance {
     pub selection_active_bg: Rgba8,
     pub selection_inactive_bg: Rgba8,
     pub cursor_bg: Rgba8,
+
+    pub scroll_delta_factor: Vec2,
 }
 
 impl Appearance {
@@ -255,6 +257,10 @@ impl Appearance {
             selection_active_bg: Rgba8::from_u32(0x304a3dff),
             selection_inactive_bg: Rgba8::from_u32(0x484848ff),
             cursor_bg: Rgba8::from_u32(0x8faf9fff),
+
+            // NOTE: this is the same as in firefox (in about:config look for
+            // mousewheel.default.delta_multiplier_*).
+            scroll_delta_factor: Vec2::splat(100.0),
         }
     }
 }

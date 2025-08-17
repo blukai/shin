@@ -882,12 +882,12 @@ unsafe extern "C" fn handle_wl_pointer_frame(
     let axis_value120 = this.axis_value120.take();
     let axis_discrete = this.axis_discrete.take();
     // NOTE: the order is important. if we have received axis_value120 - ignore others, and so on.
-    let scroll_delta: Option<(f64, f64)> = if let Some([x, y]) = axis_value120 {
+    let scroll_delta: Option<(f64, f64)> = if let Some([y, x]) = axis_value120 {
         const DENOM: f64 = 120.0;
         Some((x as f64 / DENOM, y as f64 / DENOM))
-    } else if let Some([x, y]) = axis_discrete {
+    } else if let Some([y, x]) = axis_discrete {
         Some((x as f64, y as f64))
-    } else if let Some([x, y]) = axis {
+    } else if let Some([y, x]) = axis {
         // NOTE: the axis value is specified in logical surface coordinate space. most compositors
         // use either 10 (gnome, weston) or 15 (wlroots, same as libinput) as the value.
         //

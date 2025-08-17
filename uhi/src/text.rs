@@ -43,6 +43,8 @@ use crate::{
 
 // TODO: undo/redo
 
+// TODO: multiline text param that would allow to specify minimum amount of rows.
+
 // ----
 // testing utils
 
@@ -77,6 +79,8 @@ pub struct TextAppearance {
     pub selection_active_bg: Rgba8,
     pub selection_inactive_bg: Rgba8,
     pub cursor_bg: Rgba8,
+
+    pub scroll_delta_factor: Vec2,
 }
 
 impl TextAppearance {
@@ -89,6 +93,8 @@ impl TextAppearance {
             selection_active_bg: appearance.selection_active_bg,
             selection_inactive_bg: appearance.selection_inactive_bg,
             cursor_bg: appearance.cursor_bg,
+
+            scroll_delta_factor: appearance.scroll_delta_factor,
         }
     }
 
@@ -115,7 +121,7 @@ impl TextAppearance {
 /// - start may be less than or greater than end (non-normalized).
 /// - start is where the initial click was.
 /// - end is where the cursor currently is.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct TextSelection {
     start: usize,
     end: usize,
@@ -385,6 +391,42 @@ fn count_rows<E: Externs>(
         line_count += 1;
     }
     line_count
+}
+
+fn compute_singleline_interaction_rect<E: Externs>(
+    str: &str,
+    container_rect: Rect,
+    mut font_instance: FontInstanceRefMut,
+    texture_service: &mut TextureService<E>,
+) -> Rect {
+    let height = font_instance.height();
+    let width = if str.is_empty() {
+        // NOTE: the problem is that if the string is empty and you are supposed to be able to
+        // activate the input and start typing - with width 0 you cant.
+        // this solution is not perfect, but it'll allow at least give you a tiny activation
+        // area instead of none.
+        //
+        // TODO: how can activation (/interaction) rect of empty editable string be non-zero
+        // for empty strings?
+        font_instance.typical_advance_width()
+    } else {
+        font_instance.compute_text_width(str, texture_service)
+    };
+    let size = Vec2::new(width, height);
+    Rect::new(container_rect.min, container_rect.min + size)
+}
+
+fn compute_multiline_interaction_rect<E: Externs>(
+    str: &str,
+    container_rect: Rect,
+    font_instance: FontInstanceRefMut,
+    texture_service: &mut TextureService<E>,
+) -> Rect {
+    let font_height = font_instance.height();
+    let row_count = count_rows(str, container_rect, font_instance, texture_service);
+    let height = row_count as f32 * font_height;
+    let size = Vec2::new(container_rect.width(), height);
+    Rect::new(container_rect.min, container_rect.min + size)
 }
 
 // returns byte offset(not char index)
@@ -689,8 +731,8 @@ fn draw_multiline_text<E: Externs>(
     let [selection_stage, glyph_stage] = staging_scopes.deref_mut();
 
     let mut byte_offset: usize = 0;
-    let mut xy_offset = container_rect.top_left();
-    xy_offset.y -= -scroll.offset.y;
+    let mut xy_offset = container_rect.min;
+    xy_offset.y -= scroll.offset.y;
     let mut selection_min_xy: Option<Vec2> = None;
     for ch in str.chars() {
         let glyph = font_instance.get_or_rasterize_glyph(ch, texture_service);
@@ -938,29 +980,6 @@ impl<'a> TextNonInteractiveSingle<'a> {
 }
 
 impl<'a> TextSelectableSingle<'a> {
-    // TODO: get rid of maybe_set_hot_or_active
-    fn maybe_set_hot_or_active<E: Externs>(
-        &mut self,
-        mut font_instance: FontInstanceRefMut,
-        texture_service: &mut TextureService<E>,
-        interaction_state: &mut InteractionState,
-        input: &input::State,
-    ) {
-        let height = font_instance.height();
-        let width = font_instance.compute_text_width(self.str, texture_service);
-        let size = Vec2::new(width, height);
-        let interaction_rect = Rect::new(self.container_rect.min, self.container_rect.min + size);
-
-        interaction_state.maybe_set_hot_or_active(
-            self.key,
-            interaction_rect,
-            CursorShape::Text,
-            input,
-        );
-        self.hot.replace(interaction_state.is_hot(self.key));
-        self.active.replace(interaction_state.is_active(self.key));
-    }
-
     fn update<E: Externs>(
         &mut self,
         mut font_instance: FontInstanceRefMut,
@@ -969,13 +988,22 @@ impl<'a> TextSelectableSingle<'a> {
         clipboard_state: &mut ClipboardState,
         input: &input::State,
     ) {
+        let interaction_rect = compute_singleline_interaction_rect(
+            self.str,
+            self.container_rect,
+            font_instance.reborrow_mut(),
+            texture_service,
+        );
+
         if self.hot.is_none() && self.active.is_none() {
-            self.maybe_set_hot_or_active(
-                font_instance.reborrow_mut(),
-                texture_service,
-                interaction_state,
+            interaction_state.maybe_set_hot_or_active(
+                self.key,
+                interaction_rect,
+                CursorShape::Text,
                 input,
             );
+            self.hot.replace(interaction_state.is_hot(self.key));
+            self.active.replace(interaction_state.is_active(self.key));
         }
         if !self.is_active() {
             return;
@@ -1069,7 +1097,6 @@ impl<'a> TextSelectableSingle<'a> {
         let mut font_instance = ctx
             .font_service
             .get_font_instance(appearance.font_handle, appearance.font_size);
-        let mut draw_buffer = ctx.draw_buffer.clip_scope(self.container_rect);
 
         self.update(
             font_instance.reborrow_mut(),
@@ -1079,6 +1106,7 @@ impl<'a> TextSelectableSingle<'a> {
             input,
         );
 
+        let mut draw_buffer = ctx.draw_buffer.clip_scope(self.container_rect);
         draw_singleline_text(
             self.str,
             self.container_rect,
@@ -1096,59 +1124,37 @@ impl<'a> TextSelectableSingle<'a> {
 }
 
 impl<'a> TextEditableSingle<'a> {
-    // TODO: get rid of maybe_set_hot_or_active
-    fn maybe_set_hot_or_active<E: Externs>(
-        &mut self,
-        mut font_instance: FontInstanceRefMut,
-        texture_service: &mut TextureService<E>,
-        interaction_state: &mut InteractionState,
-        input: &input::State,
-    ) {
-        let height = font_instance.height();
-        let width = if self.str.is_empty() {
-            // NOTE: the problem is that if the string is empty and you are supposed to be able to
-            // activate the input and start typing - with width 0 you cant.
-            // this solution is not perfect, but it'll allow at least give you a tiny activation
-            // area instead of none.
-            //
-            // TODO: how can activation (/interaction) rect of empty editable string be non-zero
-            // for empty strings?
-            font_instance.typical_advance_width()
-        } else {
-            font_instance.compute_text_width(self.str, texture_service)
-        };
-        let size = Vec2::new(width, height);
-        let interaction_rect = Rect::new(self.container_rect.min, self.container_rect.min + size);
-
-        interaction_state.maybe_set_hot_or_active(
-            self.key,
-            interaction_rect,
-            CursorShape::Text,
-            input,
-        );
-        self.hot.replace(interaction_state.is_hot(self.key));
-        self.active.replace(interaction_state.is_active(self.key));
-    }
-
     fn update<E: Externs>(
         &mut self,
+        appearance: &TextAppearance,
         mut font_instance: FontInstanceRefMut,
         texture_service: &mut TextureService<E>,
         interaction_state: &mut InteractionState,
         clipboard_state: &mut ClipboardState,
         input: &input::State,
     ) {
+        let interaction_rect = compute_singleline_interaction_rect(
+            self.str,
+            self.container_rect,
+            font_instance.reborrow_mut(),
+            texture_service,
+        );
+
         if self.hot.is_none() && self.active.is_none() {
-            self.maybe_set_hot_or_active(
-                font_instance.reborrow_mut(),
-                texture_service,
-                interaction_state,
+            interaction_state.maybe_set_hot_or_active(
+                self.key,
+                interaction_rect,
+                CursorShape::Text,
                 input,
             );
+            self.hot.replace(interaction_state.is_hot(self.key));
+            self.active.replace(interaction_state.is_active(self.key));
         }
         if !self.is_active() {
             return;
         }
+
+        let prev_selection = self.state.selection;
 
         let KeyboardState { ref modifiers, .. } = input.keyboard;
         for event in input.events.iter() {
@@ -1269,6 +1275,22 @@ impl<'a> TextEditableSingle<'a> {
                     }
                 }
 
+                Event::Pointer(PointerEvent::Scroll { delta }) => {
+                    let delta = Vec2::new(delta.0 as f32, 0.0);
+                    let next_offset =
+                        self.state.scroll.offset + delta * appearance.scroll_delta_factor;
+
+                    let container_width = self.container_rect.width();
+                    let cursor_width = font_instance.typical_advance_width();
+
+                    self.state.scroll.offset = next_offset.clamp(
+                        Vec2::ZERO,
+                        (interaction_rect.size()
+                            - Vec2::ZERO.with_x(container_width - cursor_width))
+                        .max(Vec2::ZERO),
+                    );
+                }
+
                 _ => {}
             }
         }
@@ -1278,15 +1300,17 @@ impl<'a> TextEditableSingle<'a> {
             self.state.selection.paste(self.str, pasta.as_str());
         }
 
-        // NOTE: cursor must be updated in reaction to possible interactions (above ^).
-        self.state.scroll.offset = scroll_into_singleline_cursor(
-            self.str,
-            self.state.selection,
-            self.container_rect,
-            self.state.scroll,
-            font_instance,
-            texture_service,
-        );
+        if self.state.selection != prev_selection {
+            // NOTE: cursor must be updated in reaction to possible interactions (above ^).
+            self.state.scroll.offset = scroll_into_singleline_cursor(
+                self.str,
+                self.state.selection,
+                self.container_rect,
+                self.state.scroll,
+                font_instance,
+                texture_service,
+            );
+        }
     }
 
     pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>, input: &input::State) {
@@ -1294,9 +1318,9 @@ impl<'a> TextEditableSingle<'a> {
         let mut font_instance = ctx
             .font_service
             .get_font_instance(appearance.font_handle, appearance.font_size);
-        let mut draw_buffer = ctx.draw_buffer.clip_scope(self.container_rect);
 
         self.update(
+            &appearance,
             font_instance.reborrow_mut(),
             &mut ctx.texture_service,
             &mut ctx.interaction_state,
@@ -1304,6 +1328,7 @@ impl<'a> TextEditableSingle<'a> {
             input,
         );
 
+        let mut draw_buffer = ctx.draw_buffer.clip_scope(self.container_rect);
         draw_singleline_text(
             self.str,
             self.container_rect,
@@ -1348,60 +1373,37 @@ impl<'a> TextNonInteractiveMulti<'a> {
 }
 
 impl<'a> TextSelectableMulti<'a> {
-    // TODO: get rid of maybe_set_hot_or_active
-    fn maybe_set_hot_or_active<E: Externs>(
-        &mut self,
-        font_instance: FontInstanceRefMut,
-        texture_service: &mut TextureService<E>,
-        interaction_state: &mut InteractionState,
-        input: &input::State,
-    ) {
-        // TODO: do i need to compute multiline text height here really? wouldn't it make make
-        // sense for the "text area" to reserve the entirety of available space?
-        // maybe not!
-        // but also maybe there needs to be a param that would allow to specify minimum amount of
-        // rows?
-
-        let font_height = font_instance.height();
-        let row_count = count_rows(
-            self.str,
-            self.container_rect,
-            font_instance,
-            texture_service,
-        );
-        let height = row_count as f32 * font_height;
-        let size = Vec2::new(self.container_rect.width(), height);
-
-        let interaction_rect = Rect::new(self.container_rect.min, self.container_rect.min + size);
-        interaction_state.maybe_set_hot_or_active(
-            self.key,
-            interaction_rect,
-            CursorShape::Text,
-            input,
-        );
-        self.hot.replace(interaction_state.is_hot(self.key));
-        self.active.replace(interaction_state.is_active(self.key));
-    }
-
     fn update<E: Externs>(
         &mut self,
+        appearance: &TextAppearance,
         mut font_instance: FontInstanceRefMut,
         texture_service: &mut TextureService<E>,
         interaction_state: &mut InteractionState,
         clipboard_state: &mut ClipboardState,
         input: &input::State,
     ) {
+        let interaction_rect = compute_multiline_interaction_rect(
+            self.str,
+            self.container_rect,
+            font_instance.reborrow_mut(),
+            texture_service,
+        );
+
         if self.hot.is_none() && self.active.is_none() {
-            self.maybe_set_hot_or_active(
-                font_instance.reborrow_mut(),
-                texture_service,
-                interaction_state,
+            interaction_state.maybe_set_hot_or_active(
+                self.key,
+                interaction_rect,
+                CursorShape::Text,
                 input,
             );
+            self.hot.replace(interaction_state.is_hot(self.key));
+            self.active.replace(interaction_state.is_active(self.key));
         }
         if !self.is_active() {
             return;
         }
+
+        let prev_selection = self.state.selection;
 
         let KeyboardState { ref modifiers, .. } = input.keyboard;
         for event in input.events.iter() {
@@ -1481,19 +1483,31 @@ impl<'a> TextSelectableMulti<'a> {
                     }
                 }
 
+                Event::Pointer(PointerEvent::Scroll { delta }) => {
+                    let delta = Vec2::from(F64Vec2::from(delta));
+                    let next_offset =
+                        self.state.scroll.offset + delta * appearance.scroll_delta_factor;
+                    self.state.scroll.offset = next_offset.clamp(
+                        Vec2::ZERO,
+                        (interaction_rect.size() - self.container_rect.size()).max(Vec2::ZERO),
+                    );
+                }
+
                 _ => {}
             }
         }
 
-        // NOTE: cursor must be updated in reaction to possible interactions (above ^).
-        self.state.scroll.offset = scroll_into_multiline_cursor(
-            self.str,
-            self.state.selection,
-            self.container_rect,
-            self.state.scroll,
-            font_instance,
-            texture_service,
-        );
+        if self.state.selection != prev_selection {
+            // NOTE: cursor must be updated in reaction to possible interactions (above ^).
+            self.state.scroll.offset = scroll_into_multiline_cursor(
+                self.str,
+                self.state.selection,
+                self.container_rect,
+                self.state.scroll,
+                font_instance,
+                texture_service,
+            );
+        }
     }
 
     pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>, input: &input::State) {
@@ -1501,9 +1515,9 @@ impl<'a> TextSelectableMulti<'a> {
         let mut font_instance = ctx
             .font_service
             .get_font_instance(appearance.font_handle, appearance.font_size);
-        let mut draw_buffer = ctx.draw_buffer.clip_scope(self.container_rect);
 
         self.update(
+            &appearance,
             font_instance.reborrow_mut(),
             &mut ctx.texture_service,
             &mut ctx.interaction_state,
@@ -1511,6 +1525,7 @@ impl<'a> TextSelectableMulti<'a> {
             input,
         );
 
+        let mut draw_buffer = ctx.draw_buffer.clip_scope(self.container_rect);
         draw_multiline_text(
             self.str,
             self.container_rect,
