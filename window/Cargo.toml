@@ -14,7 +14,7 @@ input.workspace = true
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 libc.workspace = true
 # workspace
-dynlib.workspace = true
+xkbcommon.workspace = true
 
 # workspace
 [target.'cfg(not(target_family = "wasm"))'.dependencies.wayland]

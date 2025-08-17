@@ -79,7 +79,7 @@ pub enum xkb_state_component {
     XKB_STATE_LEDS = (1 << 8),
 }
 
-pub struct Lib {
+pub struct Api {
     pub xkb_context_new: unsafe extern "C" fn(flags: xkb_context_flags) -> *mut xkb_context,
     pub xkb_context_unref: unsafe extern "C" fn(context: *mut xkb_context),
 
@@ -119,8 +119,8 @@ pub struct Lib {
     _dynlib: DynLib,
 }
 
-impl Lib {
-    pub fn load() -> anyhow::Result<Self> {
+impl Api {
+    pub fn load() -> Result<Self, dynlib::Error> {
         let dynlib = DynLib::load(c"libxkbcommon.so")
             .or_else(|_| DynLib::load(c"libxkbcommon.so.0"))
             .or_else(|_| DynLib::load(c"libxkbcommon.so.0.0.0"))?;

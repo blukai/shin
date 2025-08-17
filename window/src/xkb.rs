@@ -3,21 +3,22 @@ use std::ptr::null_mut;
 
 use anyhow::anyhow;
 
-use crate::libxkbcommon::*;
+use xkbcommon::*;
 
 pub struct Context {
     pub context: *mut xkb_context,
     pub keymap: *mut xkb_keymap,
     pub state: *mut xkb_state,
 
-    pub lib: Lib,
+    pub libxkbcommon: Api,
 }
 
 impl Context {
     pub unsafe fn from_fd(fd: c_int, size: u32) -> anyhow::Result<Self> {
-        let lib = Lib::load()?;
+        let libxkbcommon = Api::load()?;
 
-        let context = unsafe { (lib.xkb_context_new)(xkb_context_flags::XKB_CONTEXT_NO_FLAGS) };
+        let context =
+            unsafe { (libxkbcommon.xkb_context_new)(xkb_context_flags::XKB_CONTEXT_NO_FLAGS) };
         if context.is_null() {
             return Err(anyhow!("could not create xkb context"));
         }
@@ -41,7 +42,7 @@ impl Context {
         }
 
         let keymap = unsafe {
-            (lib.xkb_keymap_new_from_string)(
+            (libxkbcommon.xkb_keymap_new_from_string)(
                 context,
                 keymap_addr as *const c_char,
                 xkb_keymap_format::XKB_KEYMAP_FORMAT_TEXT_V1,
@@ -53,7 +54,7 @@ impl Context {
             return Err(anyhow!("could not create keymap from string"));
         }
 
-        let state = unsafe { (lib.xkb_state_new)(keymap) };
+        let state = unsafe { (libxkbcommon.xkb_state_new)(keymap) };
         if state.is_null() {
             unsafe { libc::munmap(keymap_addr, size as libc::size_t) };
             return Err(anyhow!("could not create state"));
@@ -65,7 +66,7 @@ impl Context {
             keymap,
             state,
 
-            lib,
+            libxkbcommon,
         })
     }
 }
@@ -73,9 +74,9 @@ impl Context {
 impl Drop for Context {
     fn drop(&mut self) {
         unsafe {
-            (self.lib.xkb_state_unref)(self.state);
-            (self.lib.xkb_keymap_unref)(self.keymap);
-            (self.lib.xkb_context_unref)(self.context);
+            (self.libxkbcommon.xkb_state_unref)(self.state);
+            (self.libxkbcommon.xkb_keymap_unref)(self.keymap);
+            (self.libxkbcommon.xkb_context_unref)(self.context);
         }
     }
 }

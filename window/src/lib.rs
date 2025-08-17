@@ -1,10 +1,7 @@
 use std::env;
 
-use anyhow::{Context as _, anyhow};
+use anyhow::{anyhow, Context as _};
 use raw_window_handle as rwh;
-
-#[cfg(unix)]
-pub mod libxkbcommon;
 
 #[cfg(unix)]
 pub mod xkb;

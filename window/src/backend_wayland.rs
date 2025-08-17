@@ -1229,8 +1229,9 @@ unsafe extern "C" fn handle_wl_keyboard_key(
         .expect("xkb contex has not been created");
 
     let key = key + EVDEV_OFFSET;
-    let sym = unsafe { (xkb_context.lib.xkb_state_key_get_one_sym)(xkb_context.state, key) };
-    let utf32 = unsafe { (xkb_context.lib.xkb_keysym_to_utf32)(sym) };
+    let sym =
+        unsafe { (xkb_context.libxkbcommon.xkb_state_key_get_one_sym)(xkb_context.state, key) };
+    let utf32 = unsafe { (xkb_context.libxkbcommon.xkb_keysym_to_utf32)(sym) };
     let keycode = char::from_u32(utf32).map_or_else(|| Keycode::Unhandled, Keycode::Char);
 
     match state {
@@ -1244,7 +1245,9 @@ unsafe extern "C" fn handle_wl_keyboard_key(
 
             if let Some(KeyRepeatInfo { rate, delay }) = this.key_repeat_info {
                 assert!(!xkb_context.keymap.is_null());
-                if unsafe { (xkb_context.lib.xkb_keymap_key_repeats)(xkb_context.keymap, key) } == 1
+                if unsafe {
+                    (xkb_context.libxkbcommon.xkb_keymap_key_repeats)(xkb_context.keymap, key)
+                } == 1
                 {
                     this.key_repeat = Some((scancode, keycode));
                     if let Err(err) = unsafe { this.key_repeat_timerfd.arm(rate, delay) } {
@@ -1288,7 +1291,7 @@ unsafe extern "C" fn handle_wl_keyboard_modifiers(
         .as_ref()
         .expect("xkb contex has not been created");
     unsafe {
-        (xkb_context.lib.xkb_state_update_mask)(
+        (xkb_context.libxkbcommon.xkb_state_update_mask)(
             xkb_context.state,
             mods_depressed,
             mods_latched,
