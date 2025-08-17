@@ -67,6 +67,12 @@ pub enum GesturePhase {
 // fingers followed by horizontal scroll?
 #[derive(Debug, Clone)]
 pub enum PointerEvent {
+    Enter {
+        // NOTE: winit (v 0.30.12) does not provide enter position. but it seems like future
+        // versions will.
+        position: Option<(f64, f64)>,
+    },
+    Leave,
     Move {
         position: (f64, f64),
     },
@@ -479,8 +485,13 @@ impl PointerState {
     pub fn handle_event(&mut self, ev: PointerEvent) {
         use PointerEvent::*;
         match ev {
-            Move { position: next } => {
-                self.position = next;
+            // NOTE: (on Enter) when window spawns right under the cursor doing this helps to
+            // compute correct deltas and dispatch press with correct delta.
+            Enter {
+                position: Some(position),
+            }
+            | Move { position } => {
+                self.position = position;
             }
             Button {
                 state: ButtonState::Pressed,

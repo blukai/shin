@@ -247,6 +247,8 @@ impl winit::application::ApplicationHandler for App {
                     scale_factor,
                 }))
             }
+            CursorEntered { .. } => Some(Event::Pointer(PointerEvent::Enter { position: None })),
+            CursorLeft { .. } => Some(Event::Pointer(PointerEvent::Leave)),
             CursorMoved { position, .. } => {
                 // NOTE: sdl, wayland provide positions in logical pixels. i kind of want to
                 // conform to that across the board.

@@ -815,13 +815,9 @@ unsafe extern "C" fn handle_wl_pointer_enter(
         wayland::wl_fixed_to_f64(surface_x),
         wayland::wl_fixed_to_f64(surface_y),
     );
-    // NOTE: pushing motion event on enter is somewhat weird? idk yet how correct this is, but i
-    // don't think it's worth introducing enter/leave pointer events.
-    //
-    // doing this helps to: compute correct deltas; dispatch press with correct delta when window
-    // spawns right under the cursor.
-    this.events
-        .push_back(Event::Pointer(PointerEvent::Move { position }));
+    this.events.push_back(Event::Pointer(PointerEvent::Enter {
+        position: Some(position),
+    }));
 }
 
 unsafe extern "C" fn handle_wl_pointer_leave(
@@ -834,6 +830,7 @@ unsafe extern "C" fn handle_wl_pointer_leave(
 
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
     this.serial_tracker.reset_serial(SerialType::PointerEnter);
+    this.events.push_back(Event::Pointer(PointerEvent::Leave));
 }
 
 unsafe extern "C" fn handle_wl_pointer_motion(
