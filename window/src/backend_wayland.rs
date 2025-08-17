@@ -11,7 +11,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context as _};
 use input::{
     Button, ButtonState, CursorShape, GesturePhase, KeyState, KeyboardEvent, Keycode, PointerEvent,
-    Scancode,
+    RawKey, Scancode,
 };
 use nohash::{NoHash, NoHashMap};
 use raw_window_handle as rwh;
@@ -251,130 +251,130 @@ impl Cursor {
 
 // https://github.com/torvalds/linux/blob/231825b2e1ff6ba799c5eaf396d3ab2354e37c6b/include/uapi/linux/input-event-codes.h#L76
 #[inline]
-fn try_map_keyboard_key(key: u32) -> Option<Scancode> {
+fn map_keyboard_key(key: u32) -> Scancode {
     match key {
-        0 => Some(Scancode::Reserved),
-        1 => Some(Scancode::Esc),
-        2 => Some(Scancode::Num1),
-        3 => Some(Scancode::Num2),
-        4 => Some(Scancode::Num3),
-        5 => Some(Scancode::Num4),
-        6 => Some(Scancode::Num5),
-        7 => Some(Scancode::Num6),
-        8 => Some(Scancode::Num7),
-        9 => Some(Scancode::Num8),
-        10 => Some(Scancode::Num9),
-        11 => Some(Scancode::Num0),
-        12 => Some(Scancode::Minus),
-        13 => Some(Scancode::Equal),
-        14 => Some(Scancode::Backspace),
-        15 => Some(Scancode::Tab),
-        16 => Some(Scancode::Q),
-        17 => Some(Scancode::W),
-        18 => Some(Scancode::E),
-        19 => Some(Scancode::R),
-        20 => Some(Scancode::T),
-        21 => Some(Scancode::Y),
-        22 => Some(Scancode::U),
-        23 => Some(Scancode::I),
-        24 => Some(Scancode::O),
-        25 => Some(Scancode::P),
-        26 => Some(Scancode::BraceLeft),
-        27 => Some(Scancode::BraceRight),
-        28 => Some(Scancode::Enter),
-        29 => Some(Scancode::CtrlLeft),
-        30 => Some(Scancode::A),
-        31 => Some(Scancode::S),
-        32 => Some(Scancode::D),
-        33 => Some(Scancode::F),
-        34 => Some(Scancode::G),
-        35 => Some(Scancode::H),
-        36 => Some(Scancode::J),
-        37 => Some(Scancode::K),
-        38 => Some(Scancode::L),
-        39 => Some(Scancode::Semicolon),
-        40 => Some(Scancode::Apostrophe),
-        41 => Some(Scancode::Grave),
-        42 => Some(Scancode::ShiftLeft),
-        43 => Some(Scancode::Backslash),
-        44 => Some(Scancode::Z),
-        45 => Some(Scancode::X),
-        46 => Some(Scancode::C),
-        47 => Some(Scancode::V),
-        48 => Some(Scancode::B),
-        49 => Some(Scancode::N),
-        50 => Some(Scancode::M),
-        51 => Some(Scancode::Comma),
-        52 => Some(Scancode::Dot),
-        53 => Some(Scancode::Slash),
-        54 => Some(Scancode::ShiftRight),
-        // 55 => Some(Scancode::KPAsterisk),
-        56 => Some(Scancode::AltLeft),
-        57 => Some(Scancode::Space),
-        58 => Some(Scancode::CapsLock),
-        // 59 => Some(Scancode::F1),
-        // 60 => Some(Scancode::F2),
-        // 61 => Some(Scancode::F3),
-        // 62 => Some(Scancode::F4),
-        // 63 => Some(Scancode::F5),
-        // 64 => Some(Scancode::F6),
-        // 65 => Some(Scancode::F7),
-        // 66 => Some(Scancode::F8),
-        // 67 => Some(Scancode::F9),
-        // 68 => Some(Scancode::F10),
-        69 => Some(Scancode::NumLock),
-        70 => Some(Scancode::ScrollLock),
-        // 71 => Some(Scancode::KP7),
-        // 72 => Some(Scancode::KP8),
-        // 73 => Some(Scancode::KP9),
-        // 74 => Some(Scancode::KPMinus),
-        // 75 => Some(Scancode::KP4),
-        // 76 => Some(Scancode::KP5),
-        // 77 => Some(Scancode::KP6),
-        // 78 => Some(Scancode::KPPlus),
-        // 79 => Some(Scancode::KP1),
-        // 80 => Some(Scancode::KP2),
-        // 81 => Some(Scancode::KP3),
-        // 82 => Some(Scancode::KP0),
-        // 83 => Some(Scancode::KPDOT),
-        // 84 => Some(Scancode::_),
-        // 85 => Some(Scancode::ZENKAKUHANKAKU),
-        // 86 => Some(Scancode::102ND),
-        // 87 => Some(Scancode::F11),
-        // 88 => Some(Scancode::F12),
-        // 89 => Some(Scancode::RO),
-        // 90 => Some(Scancode::KATAKANA),
-        // 91 => Some(Scancode::HIRAGANA),
-        // 92 => Some(Scancode::HENKAN),
-        // 93 => Some(Scancode::KATAKANAHIRAGANA),
-        // 94 => Some(Scancode::MUHENKAN),
-        // 95 => Some(Scancode::KPJPCOMMA),
-        // 96 => Some(Scancode::KPEnter),
-        97 => Some(Scancode::CtrlRight),
-        // 98 => Some(Scancode::KPSlash),
-        // 99 => Some(Scancode::SYSRQ),
-        100 => Some(Scancode::AltRight),
-        // 101 => Some(Scancode::LINEFEED),
-        102 => Some(Scancode::Home),
-        103 => Some(Scancode::ArrowUp),
-        104 => Some(Scancode::PageUp),
-        105 => Some(Scancode::ArrowLeft),
-        106 => Some(Scancode::ArrowRight),
-        107 => Some(Scancode::End),
-        108 => Some(Scancode::ArrowDown),
-        109 => Some(Scancode::PageDown),
-        110 => Some(Scancode::Insert),
-        111 => Some(Scancode::Delete),
-        // 112 => Some(Scancode::MACRO),
-        // 113 => Some(Scancode::MUTE),
-        // 114 => Some(Scancode::VOLUMEDOWN),
-        // 115 => Some(Scancode::VOLUMEUP),
-        // 116 => Some(Scancode::POWER),
-        // 117 => Some(Scancode::KPEqual),
-        // 118 => Some(Scancode::KPPLUSMINUS),
-        // 119 => Some(Scancode::PAUSE),
-        // 120 => Some(Scancode::SCALE),
-        _ => None,
+        0 => Scancode::Reserved,
+        1 => Scancode::Esc,
+        2 => Scancode::Num1,
+        3 => Scancode::Num2,
+        4 => Scancode::Num3,
+        5 => Scancode::Num4,
+        6 => Scancode::Num5,
+        7 => Scancode::Num6,
+        8 => Scancode::Num7,
+        9 => Scancode::Num8,
+        10 => Scancode::Num9,
+        11 => Scancode::Num0,
+        12 => Scancode::Minus,
+        13 => Scancode::Equal,
+        14 => Scancode::Backspace,
+        15 => Scancode::Tab,
+        16 => Scancode::Q,
+        17 => Scancode::W,
+        18 => Scancode::E,
+        19 => Scancode::R,
+        20 => Scancode::T,
+        21 => Scancode::Y,
+        22 => Scancode::U,
+        23 => Scancode::I,
+        24 => Scancode::O,
+        25 => Scancode::P,
+        26 => Scancode::BraceLeft,
+        27 => Scancode::BraceRight,
+        28 => Scancode::Enter,
+        29 => Scancode::CtrlLeft,
+        30 => Scancode::A,
+        31 => Scancode::S,
+        32 => Scancode::D,
+        33 => Scancode::F,
+        34 => Scancode::G,
+        35 => Scancode::H,
+        36 => Scancode::J,
+        37 => Scancode::K,
+        38 => Scancode::L,
+        39 => Scancode::Semicolon,
+        40 => Scancode::Apostrophe,
+        41 => Scancode::Grave,
+        42 => Scancode::ShiftLeft,
+        43 => Scancode::Backslash,
+        44 => Scancode::Z,
+        45 => Scancode::X,
+        46 => Scancode::C,
+        47 => Scancode::V,
+        48 => Scancode::B,
+        49 => Scancode::N,
+        50 => Scancode::M,
+        51 => Scancode::Comma,
+        52 => Scancode::Dot,
+        53 => Scancode::Slash,
+        54 => Scancode::ShiftRight,
+        // 55 => Scancode::KPAsterisk,
+        56 => Scancode::AltLeft,
+        57 => Scancode::Space,
+        58 => Scancode::CapsLock,
+        // 59 => Scancode::F1,
+        // 60 => Scancode::F2,
+        // 61 => Scancode::F3,
+        // 62 => Scancode::F4,
+        // 63 => Scancode::F5,
+        // 64 => Scancode::F6,
+        // 65 => Scancode::F7,
+        // 66 => Scancode::F8,
+        // 67 => Scancode::F9,
+        // 68 => Scancode::F10,
+        69 => Scancode::NumLock,
+        70 => Scancode::ScrollLock,
+        // 71 => Scancode::KP7,
+        // 72 => Scancode::KP8,
+        // 73 => Scancode::KP9,
+        // 74 => Scancode::KPMinus,
+        // 75 => Scancode::KP4,
+        // 76 => Scancode::KP5,
+        // 77 => Scancode::KP6,
+        // 78 => Scancode::KPPlus,
+        // 79 => Scancode::KP1,
+        // 80 => Scancode::KP2,
+        // 81 => Scancode::KP3,
+        // 82 => Scancode::KP0,
+        // 83 => Scancode::KPDOT,
+        // 84 => Scancode::_,
+        // 85 => Scancode::ZENKAKUHANKAKU,
+        // 86 => Scancode::102ND,
+        // 87 => Scancode::F11,
+        // 88 => Scancode::F12,
+        // 89 => Scancode::RO,
+        // 90 => Scancode::KATAKANA,
+        // 91 => Scancode::HIRAGANA,
+        // 92 => Scancode::HENKAN,
+        // 93 => Scancode::KATAKANAHIRAGANA,
+        // 94 => Scancode::MUHENKAN,
+        // 95 => Scancode::KPJPCOMMA,
+        // 96 => Scancode::KPEnter,
+        97 => Scancode::CtrlRight,
+        // 98 => Scancode::KPSlash,
+        // 99 => Scancode::SYSRQ,
+        100 => Scancode::AltRight,
+        // 101 => Scancode::LINEFEED,
+        102 => Scancode::Home,
+        103 => Scancode::ArrowUp,
+        104 => Scancode::PageUp,
+        105 => Scancode::ArrowLeft,
+        106 => Scancode::ArrowRight,
+        107 => Scancode::End,
+        108 => Scancode::ArrowDown,
+        109 => Scancode::PageDown,
+        110 => Scancode::Insert,
+        111 => Scancode::Delete,
+        // 112 => Scancode::MACRO,
+        // 113 => Scancode::MUTE,
+        // 114 => Scancode::VOLUMEDOWN,
+        // 115 => Scancode::VOLUMEUP,
+        // 116 => Scancode::POWER,
+        // 117 => Scancode::KPEqual,
+        // 118 => Scancode::KPPLUSMINUS,
+        // 119 => Scancode::PAUSE,
+        // 120 => Scancode::SCALE,
+        other => Scancode::Unidentified(RawKey::Unix(other)),
     }
 }
 
@@ -1237,22 +1237,22 @@ unsafe extern "C" fn handle_wl_keyboard_key(
     key: u32,
     state: u32,
 ) {
-    let Some(scancode) = try_map_keyboard_key(key) else {
-        log::debug!("unidentified keyboard key: {key}");
-        return;
-    };
-
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
+
     let xkb_context = this
         .xkb_context
         .as_ref()
         .expect("xkb contex has not been created");
 
-    let key = key + EVDEV_OFFSET;
-    let sym =
-        unsafe { (xkb_context.libxkbcommon.xkb_state_key_get_one_sym)(xkb_context.state, key) };
-    let utf32 = unsafe { (xkb_context.libxkbcommon.xkb_keysym_to_utf32)(sym) };
-    let keycode = char::from_u32(utf32).map_or_else(|| Keycode::Unhandled, Keycode::Char);
+    let scancode = map_keyboard_key(key);
+
+    // NOTE: convert to xkb. for more info see comment above EVDEV_OFFSET.
+    let xkb_key = key + EVDEV_OFFSET;
+    let xkb_sym =
+        unsafe { (xkb_context.libxkbcommon.xkb_state_key_get_one_sym)(xkb_context.state, xkb_key) };
+    let utf32 = unsafe { (xkb_context.libxkbcommon.xkb_keysym_to_utf32)(xkb_sym) };
+    let keycode = char::from_u32(utf32)
+        .map_or_else(|| Keycode::Unidentified(RawKey::Unix(key)), Keycode::Char);
 
     match state {
         wayland::WL_KEYBOARD_KEY_STATE_PRESSED => {
@@ -1266,7 +1266,7 @@ unsafe extern "C" fn handle_wl_keyboard_key(
             if let Some(KeyRepeatInfo { rate, delay }) = this.key_repeat_info {
                 assert!(!xkb_context.keymap.is_null());
                 if unsafe {
-                    (xkb_context.libxkbcommon.xkb_keymap_key_repeats)(xkb_context.keymap, key)
+                    (xkb_context.libxkbcommon.xkb_keymap_key_repeats)(xkb_context.keymap, xkb_key)
                 } == 1
                 {
                     this.key_repeat = Some((scancode, keycode));
@@ -1292,7 +1292,9 @@ unsafe extern "C" fn handle_wl_keyboard_key(
         wayland::WL_KEYBOARD_KEY_STATE_REPEATED => {
             // NOTE: key repetition is handled with repeat info timer ^.
         }
-        other => log::warn!("unknown keyboard key state: {other}"),
+        other => {
+            log::warn!("unknown keyboard key state: {other}");
+        }
     }
 }
 
