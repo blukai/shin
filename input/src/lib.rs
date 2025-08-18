@@ -528,6 +528,8 @@ where
 #[derive(Debug, Default)]
 pub struct PointerState {
     pub position: (f64, f64),
+    // TODO: how to handle this on the very first frame? do i care?
+    pub position_delta: (f64, f64),
     pub buttons: StateTracker<Button>,
     pub press_origins: NoHashMap<Button, (f64, f64)>,
 }
@@ -540,10 +542,12 @@ impl PointerState {
             // NOTE: (on Enter) when window spawns right under the cursor doing this helps to
             // compute correct deltas and dispatch press with correct delta.
             Enter {
-                position: Some(position),
+                position: Some(next),
             }
-            | Move { position } => {
-                self.position = position;
+            | Move { position: next } => {
+                self.position_delta.0 = next.0 - self.position.0;
+                self.position_delta.1 = next.1 - self.position.1;
+                self.position = next;
             }
             Button {
                 state: ButtonState::Pressed,
