@@ -803,6 +803,7 @@ unsafe extern "C" fn handle_wl_pointer_enter(
 
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
 
+    // NOTE: it is important to update serial tracker before handling cursor shape!
     this.serial_tracker
         .update_serial(SerialType::PointerEnter, serial);
 
@@ -1221,9 +1222,7 @@ unsafe extern "C" fn handle_wl_keyboard_leave(
     log::debug!("recv wl_keyboard_leave");
 
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
-
     this.serial_tracker.reset_serial(SerialType::KeyboardEnter);
-
     // QUOTE: The data_offer is valid until a new data_offer or NULL is received or until the
     // client loses keyboard focus.
     this.wl_data_offer = null_mut();
@@ -1298,33 +1297,6 @@ unsafe extern "C" fn handle_wl_keyboard_key(
     }
 }
 
-unsafe extern "C" fn handle_wl_keyboard_modifiers(
-    data: *mut c_void,
-    _wl_keyboard: *mut wayland::wl_keyboard,
-    _serial: u32,
-    mods_depressed: u32,
-    mods_latched: u32,
-    mods_locked: u32,
-    group: u32,
-) {
-    let this = unsafe { &mut *(data as *mut WaylandBackend) };
-    let xkb_context = this
-        .xkb_context
-        .as_ref()
-        .expect("xkb contex has not been created");
-    unsafe {
-        (xkb_context.libxkbcommon.xkb_state_update_mask)(
-            xkb_context.state,
-            mods_depressed,
-            mods_latched,
-            mods_locked,
-            0,
-            0,
-            group,
-        )
-    };
-}
-
 unsafe extern "C" fn handle_wl_keyboard_repeat_info(
     data: *mut c_void,
     _wl_keyboard: *mut wayland::wl_keyboard,
@@ -1353,7 +1325,7 @@ const WL_KEYBOARD_LISTENER: wayland::wl_keyboard_listener = wayland::wl_keyboard
     enter: handle_wl_keyboard_enter,
     leave: handle_wl_keyboard_leave,
     key: handle_wl_keyboard_key,
-    modifiers: handle_wl_keyboard_modifiers,
+    modifiers: noop_listener!(),
     repeat_info: handle_wl_keyboard_repeat_info,
 };
 
