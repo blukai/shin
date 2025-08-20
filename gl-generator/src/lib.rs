@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::io;
 use std::str::FromStr;
 
-use anyhow::{bail, Context as _};
+use anyhow::{Context as _, bail};
 use xml_iterator::{Element, ElementIterator, StartTag};
 
 #[derive(Debug)]

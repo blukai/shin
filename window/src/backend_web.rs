@@ -5,7 +5,7 @@ use anyhow::anyhow;
 use input::CursorShape;
 use raw_window_handle as rwh;
 
-use crate::{ClipboardDataProvider, Event, Window, WindowAttrs, WindowEvent, DEFAULT_LOGICAL_SIZE};
+use crate::{ClipboardDataProvider, DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent};
 
 pub mod js_sys {
     use std::ffi::{c_char, c_void};

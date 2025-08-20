@@ -185,7 +185,7 @@ impl<E: Externs> TextureService<E> {
     }
 
     // TODO: consider renaming next_pending_update to pop_update.
-    pub fn next_pending_update(&mut self) -> Option<TexturePendingUpdate<E>> {
+    pub fn next_pending_update(&mut self) -> Option<TexturePendingUpdate<'_, E>> {
         let Some(key) = self.pending_updates.iter().next().map(|(k, _)| k.clone()) else {
             return None;
         };

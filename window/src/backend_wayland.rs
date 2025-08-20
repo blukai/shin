@@ -1,14 +1,14 @@
 use std::collections::VecDeque;
-use std::ffi::{c_char, c_int, c_void, CStr};
+use std::ffi::{CStr, c_char, c_int, c_void};
 use std::hash::{Hash, Hasher};
 use std::io::{PipeReader, PipeWriter, Read as _};
 use std::mem::{self, MaybeUninit};
 use std::os::fd::FromRawFd as _;
-use std::ptr::{null, null_mut, NonNull};
+use std::ptr::{NonNull, null, null_mut};
 use std::slice;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context as _};
+use anyhow::{Context as _, anyhow};
 use input::{
     Button, ButtonState, CursorShape, GesturePhase, KeyState, KeyboardEvent, Keycode, PointerEvent,
     RawKey, Scancode,
@@ -17,7 +17,7 @@ use nohash::{NoHash, NoHashMap};
 use raw_window_handle as rwh;
 
 use crate::{
-    xkb, ClipboardDataProvider, Event, Window, WindowAttrs, WindowEvent, DEFAULT_LOGICAL_SIZE,
+    ClipboardDataProvider, DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent, xkb,
 };
 
 // TODO: (xd) consider checking return of wl_proxy_add_listener (xd).
@@ -683,8 +683,6 @@ unsafe extern "C" fn handle_wl_seat_capabilities(
     _wl_seat: *mut wayland::wl_seat,
     capabilities: u32,
 ) {
-    log::debug!("recv wl_seat_capabilities (capabilities: {capabilities})");
-
     let _this = unsafe { &mut *(data as *mut WaylandBackend) };
 
     if capabilities & wayland::WL_SEAT_CAPABILITY_POINTER == wayland::WL_SEAT_CAPABILITY_POINTER {
@@ -721,8 +719,6 @@ unsafe extern "C" fn handle_xdg_surface_configure(
     xdg_surface: *mut wayland::xdg_surface,
     serial: u32,
 ) {
-    log::debug!("recv xdg_surface_configure");
-
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
     unsafe { wayland::xdg_surface_ack_configure(&this.libwayland_client, xdg_surface, serial) };
     this.acked_first_xdg_surface_ack_configure = true;
@@ -739,8 +735,6 @@ unsafe extern "C" fn handle_xdg_toplevel_configure(
     height: i32,
     _states: *mut wayland::wl_array,
 ) {
-    log::debug!("recv xdg_toplevel_configure");
-
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
 
     // NOTE: if the width or height arguments are zero, it means the client should decide its own
@@ -758,8 +752,6 @@ unsafe extern "C" fn handle_xdg_toplevel_close(
     data: *mut c_void,
     _xdg_toplevel: *mut wayland::xdg_toplevel,
 ) {
-    log::debug!("recv xdg_toplevel_close");
-
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
     this.events
         .push_back(Event::Window(WindowEvent::CloseRequested));
@@ -777,8 +769,6 @@ unsafe extern "C" fn handle_wp_fractional_scale_v1_preferred_scale(
     _wp_fractional_scale_v1: *mut wayland::wp_fractional_scale_v1,
     scale: u32,
 ) {
-    log::debug!("recv wp_fractional_scale_v1_preferred_scale");
-
     // > The sent scale is the numerator of a fraction with a denominator of 120.
     let scale_factor = scale as f64 / 120.0;
 
@@ -799,8 +789,6 @@ unsafe extern "C" fn handle_wl_pointer_enter(
     surface_x: wayland::wl_fixed,
     surface_y: wayland::wl_fixed,
 ) {
-    log::debug!("recv wl_pointer_enter");
-
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
 
     // NOTE: it is important to update serial tracker before handling cursor shape!
@@ -827,8 +815,6 @@ unsafe extern "C" fn handle_wl_pointer_leave(
     _serial: u32,
     _surface: *mut wayland::wl_surface,
 ) {
-    log::debug!("recv wl_pointer_leave");
-
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
     this.serial_tracker.reset_serial(SerialType::PointerEnter);
     this.events.push_back(Event::Pointer(PointerEvent::Leave));
@@ -1180,8 +1166,6 @@ unsafe extern "C" fn handle_wl_keyboard_keymap(
     fd: i32,
     size: u32,
 ) {
-    log::debug!("recv wl_keyboard_keymap");
-
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
 
     match format {
@@ -1206,8 +1190,6 @@ unsafe extern "C" fn handle_wl_keyboard_enter(
     _surface: *mut wayland::wl_surface,
     _keys: *mut wayland::wl_array,
 ) {
-    log::debug!("recv wl_keyboard_enter");
-
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
     this.serial_tracker
         .update_serial(SerialType::KeyboardEnter, serial);
@@ -1219,8 +1201,6 @@ unsafe extern "C" fn handle_wl_keyboard_leave(
     _serial: u32,
     _surface: *mut wayland::wl_surface,
 ) {
-    log::debug!("recv wl_keyboard_leave");
-
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
     this.serial_tracker.reset_serial(SerialType::KeyboardEnter);
     // QUOTE: The data_offer is valid until a new data_offer or NULL is received or until the
@@ -1334,8 +1314,6 @@ unsafe extern "C" fn handle_wl_data_device_selection(
     _wl_data_device: *mut wayland::wl_data_device,
     id: *mut wayland::wl_data_offer,
 ) {
-    log::debug!("recv wl_data_device selection");
-
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
     // QUOTE: The data_offer is valid until a new data_offer or NULL is received or until the
     // client loses keyboard focus.
@@ -1358,8 +1336,6 @@ unsafe extern "C" fn handle_wl_data_source_send(
     mime_type: *const c_char,
     fd: i32,
 ) {
-    log::debug!("recv wl_data_source send");
-
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
 
     // NOTE: PipeWriter becomes responsibile for closing fd. i am constructing it early here to not
@@ -1397,8 +1373,6 @@ unsafe extern "C" fn handle_wl_data_source_cancelled(
     data: *mut c_void,
     wl_data_source: *mut wayland::wl_data_source,
 ) {
-    log::debug!("recv wl_data_source cancelled");
-
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
     unsafe { wayland::wl_data_source_destroy(&this.libwayland_client, wl_data_source) };
     // NOTE: should always take. if existing data source != given -> compositor did a fucky wacky?

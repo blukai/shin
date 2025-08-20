@@ -1,6 +1,6 @@
 use std::env;
 
-use anyhow::{anyhow, Context as _};
+use anyhow::{Context as _, anyhow};
 use raw_window_handle as rwh;
 
 #[cfg(unix)]

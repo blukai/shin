@@ -1,7 +1,7 @@
-use std::ffi::{c_void, CStr};
+use std::ffi::{CStr, c_void};
 
-use super::types::*;
 use super::Apier;
+use super::types::*;
 
 unsafe extern "C" {
     fn gl_clear_color(extern_ref: u32, red: f32, green: f32, blue: f32, alpha: f32);

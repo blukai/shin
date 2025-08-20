@@ -1,5 +1,4 @@
 use std::hash::Hash;
-use std::mem;
 
 use ab_glyph::{Font as _, FontArc, PxScale, ScaleFont as _};
 use nohash::NoHashMap;
@@ -179,7 +178,7 @@ pub struct FontHandle {
 // NOTE: to many fidgeting is needed to hash floats. this is easier.
 #[inline(always)]
 fn make_font_instance_key(font_handle: FontHandle, pt_size: f32) -> u64 {
-    (font_handle.idx as u64) << 32 | (unsafe { mem::transmute::<_, u32>(pt_size) } as u64)
+    (font_handle.idx as u64) << 32 | (pt_size.to_bits() as u64)
 }
 
 #[derive(Debug)]
@@ -254,7 +253,7 @@ impl<'a> FontInstanceRefMut<'a> {
         &mut self,
         ch: char,
         texture_service: &mut TextureService<E>,
-    ) -> GlyphRef {
+    ) -> GlyphRef<'_> {
         let glyph = self
             .font_instance
             .glyphs
@@ -289,7 +288,7 @@ impl<'a> FontInstanceRefMut<'a> {
 
     /// the most obvious use case for this is to check something / do some assertions in tests
     /// maybe.
-    pub fn iter_glyphs(&self) -> impl Iterator<Item = GlyphRef> {
+    pub fn iter_glyphs(&self) -> impl Iterator<Item = GlyphRef<'_>> {
         self.font_instance.glyphs.values().map(|glyph| GlyphRef {
             glyph,
             tex_page: &self.tex_pages[glyph.tex_page_idx],
@@ -357,7 +356,7 @@ impl FontService {
         &mut self,
         font_handle: FontHandle,
         pt_size: f32,
-    ) -> FontInstanceRefMut {
+    ) -> FontInstanceRefMut<'_> {
         assert!(pt_size > 0.0);
 
         let font = &self.fonts[font_handle.idx as usize];

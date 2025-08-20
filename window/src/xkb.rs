@@ -2,7 +2,6 @@ use std::ffi::{c_char, c_int};
 use std::ptr::null_mut;
 
 use anyhow::anyhow;
-
 use xkbcommon::*;
 
 pub struct Context {

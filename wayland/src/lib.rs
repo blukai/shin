@@ -1,7 +1,7 @@
-mod client;
-mod cursor;
-mod egl;
+mod libwayland_client;
+mod libwayland_cursor;
+mod libwayland_egl;
 
-pub use client::*;
-pub use cursor::*;
-pub use egl::*;
+pub use libwayland_client::*;
+pub use libwayland_cursor::*;
+pub use libwayland_egl::*;

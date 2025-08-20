@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use input::{
     Button, ButtonState, CursorShape, KeyState, KeyboardEvent, Keycode, PointerEvent, RawKey,
     Scancode,
@@ -8,7 +8,7 @@ use input::{
 use raw_window_handle as rwh;
 use winit::platform::pump_events::EventLoopExtPumpEvents;
 
-use crate::{ClipboardDataProvider, Event, Window, WindowAttrs, WindowEvent, DEFAULT_LOGICAL_SIZE};
+use crate::{ClipboardDataProvider, DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent};
 
 #[inline]
 fn map_element_state_to_button_state(element_state: winit::event::ElementState) -> ButtonState {
@@ -291,8 +291,8 @@ impl winit::application::ApplicationHandler for App {
                 let delta = match mouse_scroll_delta {
                     MouseScrollDelta::LineDelta(x, y) => (x as f64, y as f64),
                     MouseScrollDelta::PixelDelta(physical_position) => {
-                        use raw_window_handle::HasRawWindowHandle as _;
-                        match window.raw_window_handle() {
+                        use raw_window_handle::HasWindowHandle as _;
+                        match window.window_handle().map(|wh| wh.as_raw()) {
                             Ok(rwh::RawWindowHandle::Wayland(_)) => {
                                 // NOTE: on wayland winit does not do anything with wl_pointer_axis values,
                                 // which is great. we can normanize them the same way we do in wayland
@@ -388,7 +388,7 @@ impl Window for WinitBackend {
         Ok(())
     }
 
-    fn read_clipboard(&mut self, mime_type: &str, buf: &mut Vec<u8>) -> anyhow::Result<usize> {
+    fn read_clipboard(&mut self, _mime_type: &str, _buf: &mut Vec<u8>) -> anyhow::Result<usize> {
         log::warn!("winit backend does not support clipboard");
         // TODO: support wayland clipboard (but first separate it out from wayland backend).
         Ok(0)
@@ -396,7 +396,7 @@ impl Window for WinitBackend {
 
     fn provide_clipboard_data(
         &mut self,
-        data_provider: Box<dyn ClipboardDataProvider>,
+        _data_provider: Box<dyn ClipboardDataProvider>,
     ) -> anyhow::Result<()> {
         log::warn!("winit backend does not support clipboard");
         // TODO: support wayland clipboard (but first separate it out from wayland backend).

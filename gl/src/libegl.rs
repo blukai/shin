@@ -1,4 +1,4 @@
-use std::{ffi::CStr, ops::Deref, ptr::null_mut};
+use std::ops::Deref;
 
 use dynlib::DynLib;
 

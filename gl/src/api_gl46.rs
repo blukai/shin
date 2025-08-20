@@ -1,11 +1,11 @@
-use std::ffi::{c_char, c_void, CStr};
+use std::ffi::{CStr, c_char, c_void};
 use std::num::NonZero;
 
-use anyhow::{anyhow, Context as _};
+use anyhow::{Context as _, anyhow};
 
+use super::Apier;
 use super::enums::*;
 use super::types::*;
-use super::Apier;
 
 #[allow(non_snake_case)]
 #[allow(dead_code)]

@@ -58,6 +58,7 @@ pub fn wl_fixed_to_f64(f: wl_fixed) -> f64 {
 struct SyncWrapper<T>(T);
 unsafe impl<T> Sync for SyncWrapper<T> {}
 
+// TODO: consider naming this LibwaylandClient.
 pub struct ClientApi {
     pub wl_display_cancel_read: unsafe extern "C" fn(display: *mut wl_display),
     pub wl_display_connect: unsafe extern "C" fn(name: *const c_char) -> *mut wl_display,

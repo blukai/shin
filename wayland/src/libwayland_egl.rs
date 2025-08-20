@@ -11,6 +11,7 @@ pub struct wl_egl_window {
     _marker: marker::PhantomData<(*mut u8, marker::PhantomPinned)>,
 }
 
+// TODO: consider naming this LibwaylandEgl.
 pub struct EglApi {
     pub wl_egl_window_create: unsafe extern "C" fn(
         surface: *mut c_void,

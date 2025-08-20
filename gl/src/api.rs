@@ -1,5 +1,6 @@
-use std::ffi::{c_void, CStr};
+use std::ffi::{CStr, c_void};
 
+#[allow(non_snake_case)]
 pub(crate) mod types {
     include!(concat!(env!("OUT_DIR"), "/gl_types_generated.rs"));
 }
