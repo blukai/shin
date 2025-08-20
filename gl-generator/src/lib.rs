@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::io;
 use std::str::FromStr;
 
-use anyhow::{Context as _, bail};
+use anyhow::{bail, Context as _};
 use xml_iterator::{Element, ElementIterator, StartTag};
 
 #[derive(Debug)]
@@ -530,7 +530,9 @@ pub fn filter_registry<'a>(
     Ok(registry)
 }
 
-const GL_TYPES: &str = "pub type GLbitfield = std::ffi::c_uint;
+const GL_TYPES: &str = "// https://registry.khronos.org/OpenGL/api/GL/glcorearb.h
+
+pub type GLbitfield = std::ffi::c_uint;
 pub type GLboolean = std::ffi::c_uchar;
 pub type GLbyte = std::ffi::c_char;
 pub type GLchar = std::ffi::c_char;
@@ -560,7 +562,11 @@ pub type GLDEBUGPROC = Option<extern \"C\" fn(
 )>;
 ";
 
-const EGL_TYPES: &str = "pub type khronos_int32_t = i32;
+const EGL_TYPES: &str = "// https://registry.khronos.org/EGL/api/KHR/khrplatform.h
+
+pub type khronos_int32_t = i32;
+pub type khronos_uint64_t = u64;
+
 pub type khronos_utime_nanoseconds_t = u64;
 
 // https://registry.khronos.org/EGL/api/EGL/eglplatform.h
@@ -594,6 +600,12 @@ pub type EGLSync = *mut std::ffi::c_void;
 pub type EGLAttrib = isize;
 pub type EGLTime = khronos_utime_nanoseconds_t;
 pub type EGLImage = *mut std::ffi::c_void;
+
+// https://registry.khronos.org/EGL/api/EGL/eglext.h
+
+pub type EGLImageKHR = *mut std::ffi::c_void;
+
+pub type EGLuint64KHR = khronos_uint64_t;
 ";
 
 pub fn emit_types<W: io::Write>(w: &mut W, api: &Api) -> anyhow::Result<()> {
@@ -626,7 +638,7 @@ fn normalize_egl_enum_type<'a>(
 ) -> anyhow::Result<&'a str> {
     match r#type {
         Some("u") => Ok("EGLuint"),
-        Some("ull") => Ok("u64"),
+        Some("ull") => Ok("EGLuint64KHR"),
         Some("bitmask") => Ok("EGLint"),
         None if value.starts_with("-") => Ok("EGLint"),
         None if normalized_name == "TRUE" || normalized_name == "FALSE" => Ok("EGLBoolean"),
@@ -635,7 +647,7 @@ fn normalize_egl_enum_type<'a>(
             Ok(&value[9..comma_position])
         }
         None => Ok("EGLenum"),
-        other => bail!("unknown gl enum type {other:?}"),
+        other => bail!("unknown egl enum type {other:?}"),
     }
 }
 
@@ -689,6 +701,7 @@ fn emit_command_type_parts<W: io::Write>(
                 "void **" => write!(w, "*mut *mut std::ffi::c_void")?,
                 "const void *const*" => write!(w, "*const *const std::ffi::c_void")?,
                 "const char *" => write!(w, "*const std::ffi::c_char")?,
+                "int *" => write!(w, "*mut std::ffi::c_int")?,
                 other => unimplemented!("{other:?}"),
             },
             Defined(defined) => {
@@ -809,8 +822,16 @@ impl Api {{
 
         // body
 
-        // type
         write!(w, "{{\n")?;
+
+        // log
+        write!(
+            w,
+            "        #[cfg(all(debug_assertions, feature = \"debug\"))]\n"
+        )?;
+        write!(w, "        log::debug!(\"calling {name}\");\n")?;
+
+        // type
         write!(w, "        type Dst = extern \"C\" fn(")?;
         cmd.params
             .iter()
@@ -830,6 +851,7 @@ impl Api {{
             command_type_parts_buf.clear();
         }
         write!(w, ";\n")?;
+
         // call
         write!(
             w,

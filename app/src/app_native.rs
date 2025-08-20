@@ -69,6 +69,7 @@ impl GraphicsContext {
         let egl_surface =
             gl::context_egl::Surface::new(&egl_context, window_handle, width, height)?;
 
+        // TODO: shouldn't need surface here.
         egl_context.make_current(egl_surface.as_ptr())?;
 
         // TODO: figure out an okay way to include vsync toggle.

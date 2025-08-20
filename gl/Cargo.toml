@@ -17,3 +17,9 @@ wayland.workspace = true
 anyhow.workspace = true
 # workspace
 gl-generator.workspace = true
+
+[features]
+# NOTE: `debug` will log all function calls (when debug_assertions is on).
+debug = []
+EGL_KHR_image = []
+EGL_MESA_image_dma_buf_export = []

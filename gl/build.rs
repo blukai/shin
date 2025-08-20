@@ -3,9 +3,11 @@ use std::io::BufWriter;
 use std::path::PathBuf;
 use std::{env, fs};
 
-use gl_generator;
-
-fn generate_gl(api: gl_generator::Api, version: gl_generator::Version) -> anyhow::Result<()> {
+fn generate_gl(
+    api: gl_generator::Api,
+    version: gl_generator::Version,
+    extensions: &[&str],
+) -> anyhow::Result<()> {
     println!("cargo:rerun-if-changed=../gl-generator");
     println!("cargo:rerun-if-changed=../gl-specs");
 
@@ -17,7 +19,7 @@ fn generate_gl(api: gl_generator::Api, version: gl_generator::Version) -> anyhow
         gl_generator::parse_registry(spec.as_str())?,
         &api,
         &version,
-        &[],
+        extensions,
     )?;
 
     let mut types_out = BufWriter::new(File::create(
@@ -44,8 +46,17 @@ fn generate_gl(api: gl_generator::Api, version: gl_generator::Version) -> anyhow
 fn main() -> anyhow::Result<()> {
     println!("cargo:rerun-if-changed=build.rs");
 
-    generate_gl(gl_generator::Api::Gl, gl_generator::Version(4, 6))?;
-    generate_gl(gl_generator::Api::Egl, gl_generator::Version(1, 5))?;
+    generate_gl(gl_generator::Api::Gl, gl_generator::Version(4, 6), &[])?;
+    generate_gl(
+        gl_generator::Api::Egl,
+        gl_generator::Version(1, 5),
+        &[
+            #[cfg(feature = "EGL_KHR_image")]
+            "EGL_KHR_image",
+            #[cfg(feature = "EGL_MESA_image_dma_buf_export")]
+            "EGL_MESA_image_dma_buf_export",
+        ],
+    )?;
 
     Ok(())
 }

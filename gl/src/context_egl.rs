@@ -1,16 +1,14 @@
-use std::ffi::{CStr, c_char, c_int, c_void};
+use std::ffi::{c_char, c_int, c_void};
 use std::ptr::{null, null_mut};
 
-use anyhow::{Context as _, anyhow};
-use dynlib::DynLib;
+use anyhow::{anyhow, Context as _};
 use raw_window_handle as rwh;
 
-#[path = "libegl.rs"]
-pub mod libegl;
+use crate::libegl::*;
 
-pub fn egl_get_error(egl_lib: &libegl::Api) -> anyhow::Error {
-    match unsafe { egl_lib.GetError() } as libegl::EGLenum {
-        libegl::SUCCESS => unreachable!(),
+pub fn egl_get_error(egl_lib: &EglApi) -> anyhow::Error {
+    match unsafe { egl_lib.GetError() } as EGLenum {
+        SUCCESS => unreachable!(),
         code => anyhow!(format!("egl error 0x{:x}", code)),
     }
 }
@@ -22,25 +20,21 @@ pub struct Config {
 }
 
 pub struct Context {
-    config: libegl::EGLConfig,
-    context: libegl::EGLContext,
-    display: libegl::EGLDisplay,
+    config: EGLConfig,
+    context: EGLContext,
+    display: EGLDisplay,
 
-    lib: libegl::Api,
-    _dynlib: DynLib,
+    libegl: EglApi,
 }
 
 impl Context {
     pub fn new(display_handle: rwh::DisplayHandle, config: Config) -> anyhow::Result<Self> {
-        unsafe {
-            let dynlib = DynLib::load(c"libEGL.so").or_else(|_| DynLib::load(c"libEGL.so.1"))?;
-            let lib = libegl::Api::load_with(|name| {
-                dynlib.lookup(CStr::from_ptr(name)).unwrap_or(null_mut())
-            });
+        let libegl = EglApi::load()?;
 
+        unsafe {
             // TODO: make api configurable
-            if lib.BindAPI(libegl::OPENGL_API) == libegl::FALSE {
-                return Err(egl_get_error(&lib)).context("could not bind api");
+            if libegl.BindAPI(OPENGL_API) == FALSE {
+                return Err(egl_get_error(&libegl)).context("could not bind api");
             }
 
             let display_handle_ptr = match display_handle.as_raw() {
@@ -51,57 +45,58 @@ impl Context {
                     )));
                 }
             };
-            let display = lib.GetDisplay(display_handle_ptr);
-            if display == libegl::NO_DISPLAY {
-                return Err(egl_get_error(&lib)).context("could not get display");
+            let display = libegl.GetDisplay(display_handle_ptr);
+            if display == NO_DISPLAY {
+                return Err(egl_get_error(&libegl)).context("could not get display");
             }
 
             let (mut major, mut minor) = (0, 0);
-            if lib.Initialize(display, &mut major, &mut minor) == libegl::FALSE {
-                return Err(egl_get_error(&lib)).context("could not initialize");
+            if libegl.Initialize(display, &mut major, &mut minor) == FALSE {
+                return Err(egl_get_error(&libegl)).context("could not initialize");
             }
             log::info!("initialized egl version {major}.{minor}");
 
             // 64 seems enough?
-            let mut config_attrs = [libegl::NONE as libegl::EGLint; 64];
+            let mut config_attrs = [NONE as EGLint; 64];
             let mut num_config_attrs = 0;
-            let mut push_config_attr = |attr: libegl::EGLenum, value: libegl::EGLint| {
-                config_attrs[num_config_attrs] = attr as libegl::EGLint;
+            let mut push_config_attr = |attr: EGLenum, value: EGLint| {
+                config_attrs[num_config_attrs] = attr as EGLint;
                 num_config_attrs += 1;
                 config_attrs[num_config_attrs] = value;
                 num_config_attrs += 1;
             };
-            push_config_attr(libegl::RED_SIZE, 8);
-            push_config_attr(libegl::GREEN_SIZE, 8);
-            push_config_attr(libegl::BLUE_SIZE, 8);
+            push_config_attr(RED_SIZE, 8);
+            push_config_attr(GREEN_SIZE, 8);
+            push_config_attr(BLUE_SIZE, 8);
             // NOTE: it is important to set EGL_ALPHA_SIZE, it enables transparency
-            push_config_attr(libegl::ALPHA_SIZE, 8);
-            push_config_attr(libegl::CONFORMANT, libegl::OPENGL_ES3_BIT);
-            push_config_attr(libegl::RENDERABLE_TYPE, libegl::OPENGL_ES3_BIT);
+            push_config_attr(ALPHA_SIZE, 8);
+            push_config_attr(CONFORMANT, OPENGL_ES3_BIT);
+            push_config_attr(RENDERABLE_TYPE, OPENGL_ES3_BIT);
             // NOTE: EGL_SAMPLE_BUFFERS + EGL_SAMPLES enable some kind of don't care anti aliasing
-            push_config_attr(libegl::SAMPLE_BUFFERS, 1);
-            push_config_attr(libegl::SAMPLES, 4);
+            push_config_attr(SAMPLE_BUFFERS, 1);
+            push_config_attr(SAMPLES, 4);
             if let Some(min_swap_interval) = config.min_swap_interval {
-                push_config_attr(libegl::MIN_SWAP_INTERVAL, min_swap_interval as _);
+                push_config_attr(MIN_SWAP_INTERVAL, min_swap_interval as _);
             }
             if let Some(max_swap_interval) = config.max_swap_interval {
-                push_config_attr(libegl::MAX_SWAP_INTERVAL, max_swap_interval as _);
+                push_config_attr(MAX_SWAP_INTERVAL, max_swap_interval as _);
             }
 
             let mut num_configs = 0;
-            if lib.GetConfigs(display, null_mut(), 0, &mut num_configs) == libegl::FALSE {
-                return Err(egl_get_error(&lib)).context("could not get num of available configs");
+            if libegl.GetConfigs(display, null_mut(), 0, &mut num_configs) == FALSE {
+                return Err(egl_get_error(&libegl))
+                    .context("could not get num of available configs");
             }
             let mut configs = vec![std::mem::zeroed(); num_configs as usize];
-            if lib.ChooseConfig(
+            if libegl.ChooseConfig(
                 display,
                 config_attrs.as_ptr() as _,
                 configs.as_mut_ptr(),
                 num_configs,
                 &mut num_configs,
-            ) == libegl::FALSE
+            ) == FALSE
             {
-                return Err(egl_get_error(&lib)).context("could not choose config");
+                return Err(egl_get_error(&libegl)).context("could not choose config");
             }
             configs.set_len(num_configs as usize);
             if configs.is_empty() {
@@ -109,15 +104,11 @@ impl Context {
             }
             let config = *configs.first().unwrap();
 
-            let context_attrs = &[libegl::CONTEXT_MAJOR_VERSION, 3, libegl::NONE];
-            let context = lib.CreateContext(
-                display,
-                config,
-                libegl::NO_CONTEXT,
-                context_attrs.as_ptr() as _,
-            );
-            if context == libegl::NO_CONTEXT {
-                return Err(egl_get_error(&lib)).context("could not create context");
+            let context_attrs = &[CONTEXT_MAJOR_VERSION, 3, NONE];
+            let context =
+                libegl.CreateContext(display, config, NO_CONTEXT, context_attrs.as_ptr() as _);
+            if context == NO_CONTEXT {
+                return Err(egl_get_error(&libegl)).context("could not create context");
             }
 
             Ok(Context {
@@ -125,27 +116,27 @@ impl Context {
                 config,
                 context,
 
-                lib,
-                _dynlib: dynlib,
+                libegl,
             })
         }
     }
 
+    // TODO: get rid of this.
     pub fn get_proc_address(
         &self,
         procname: *const c_char,
-    ) -> libegl::__eglMustCastToProperFunctionPointerType {
-        unsafe { self.lib.GetProcAddress(procname) }
+    ) -> __eglMustCastToProperFunctionPointerType {
+        unsafe { self.libegl.GetProcAddress(procname) }
     }
 
-    pub fn make_current(&self, surface: libegl::EGLSurface) -> anyhow::Result<()> {
+    pub fn make_current(&self, surface: EGLSurface) -> anyhow::Result<()> {
         unsafe {
             if self
-                .lib
+                .libegl
                 .MakeCurrent(self.display, surface, surface, self.context)
-                == libegl::FALSE
+                == FALSE
             {
-                Err(egl_get_error(&self.lib)).context("could not make current")
+                Err(egl_get_error(&self.libegl)).context("could not make current")
             } else {
                 Ok(())
             }
@@ -153,23 +144,23 @@ impl Context {
     }
 
     pub fn make_current_surfaceless(&self) -> anyhow::Result<()> {
-        self.make_current(libegl::NO_SURFACE)
+        self.make_current(NO_SURFACE)
     }
 
-    pub fn set_swap_interval(&self, interval: libegl::EGLint) -> anyhow::Result<()> {
+    pub fn set_swap_interval(&self, interval: EGLint) -> anyhow::Result<()> {
         unsafe {
-            if self.lib.SwapInterval(self.display, interval) == libegl::FALSE {
-                Err(egl_get_error(&self.lib)).context("could not set swap interval")
+            if self.libegl.SwapInterval(self.display, interval) == FALSE {
+                Err(egl_get_error(&self.libegl)).context("could not set swap interval")
             } else {
                 Ok(())
             }
         }
     }
 
-    pub fn swap_buffers(&self, surface: libegl::EGLSurface) -> anyhow::Result<()> {
+    pub fn swap_buffers(&self, surface: EGLSurface) -> anyhow::Result<()> {
         unsafe {
-            if self.lib.SwapBuffers(self.display, surface) == libegl::FALSE {
-                Err(egl_get_error(&self.lib)).context("could not swap buffers")
+            if self.libegl.SwapBuffers(self.display, surface) == FALSE {
+                Err(egl_get_error(&self.libegl)).context("could not swap buffers")
             } else {
                 Ok(())
             }
@@ -232,7 +223,7 @@ impl Wsi {
 
 pub struct Surface {
     wsi: Wsi,
-    surface: libegl::EGLSurface,
+    surface: EGLSurface,
 }
 
 impl Surface {
@@ -247,10 +238,10 @@ impl Surface {
 
         let wsi = Wsi::new(window_handle, width, height)?;
         let surface = unsafe {
-            context.lib.CreateWindowSurface(
+            context.libegl.CreateWindowSurface(
                 context.display,
                 context.config,
-                wsi.as_ptr() as libegl::EGLNativeWindowType,
+                wsi.as_ptr() as EGLNativeWindowType,
                 null(),
             )
         };
