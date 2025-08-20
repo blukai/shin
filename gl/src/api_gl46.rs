@@ -1,11 +1,11 @@
-use std::ffi::{CStr, c_char, c_void};
+use std::ffi::{c_char, c_void, CStr};
 use std::num::NonZero;
 
-use anyhow::{Context as _, anyhow};
+use anyhow::{anyhow, Context as _};
 
-use super::Apier;
 use super::enums::*;
 use super::types::*;
+use super::Apier;
 
 #[allow(non_snake_case)]
 #[allow(dead_code)]
@@ -278,6 +278,23 @@ impl Apier for Api {
     #[inline]
     unsafe fn pixel_storei(&self, pname: GLenum, param: GLint) {
         unsafe { self.api.PixelStorei(pname, param) };
+    }
+
+    #[inline]
+    unsafe fn read_pixels(
+        &self,
+        x: GLint,
+        y: GLint,
+        width: GLsizei,
+        height: GLsizei,
+        format: GLenum,
+        r#type: GLenum,
+        pixels: *mut c_void,
+    ) {
+        unsafe {
+            self.api
+                .ReadPixels(x, y, width, height, format, r#type, pixels)
+        };
     }
 
     #[inline]

@@ -1,4 +1,4 @@
-use std::ffi::{CStr, c_void};
+use std::ffi::{c_void, CStr};
 
 pub(crate) mod types {
     include!(concat!(env!("OUT_DIR"), "/gl_types_generated.rs"));
@@ -84,6 +84,16 @@ pub trait Apier {
     unsafe fn get_uniform_location(&self, program: Self::Program, name: &CStr) -> Option<GLint>;
     unsafe fn link_program(&self, program: Self::Program);
     unsafe fn pixel_storei(&self, pname: GLenum, param: GLint);
+    unsafe fn read_pixels(
+        &self,
+        x: GLint,
+        y: GLint,
+        width: GLsizei,
+        height: GLsizei,
+        format: GLenum,
+        r#type: GLenum,
+        pixels: *mut c_void,
+    );
     unsafe fn scissor(&self, x: GLint, y: GLint, width: GLsizei, height: GLsizei);
     unsafe fn shader_source(&self, shader: Self::Shader, source: &str);
     unsafe fn tex_image_2d(
