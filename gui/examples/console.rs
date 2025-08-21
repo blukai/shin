@@ -3,10 +3,10 @@ use app::AppHandler;
 use gl::api::Apier as _;
 use window::{Event, WindowAttrs, WindowEvent};
 
-struct UhiExterns;
+struct GuiExterns;
 
-impl uhi::Externs for UhiExterns {
-    type TextureHandle = <uhi::GlRenderer as uhi::Renderer>::TextureHandle;
+impl gui::Externs for GuiExterns {
+    type TextureHandle = <gui::GlRenderer as gui::Renderer>::TextureHandle;
 }
 
 // TODO: can this be turned into something reusable and possibly generic(think of animating
@@ -80,11 +80,11 @@ struct Console {
     open_animation: Animation,
 
     command_editor: String,
-    command_editor_state: uhi::TextState,
+    command_editor_state: gui::TextState,
     command_editor_active: bool,
 
     history: String,
-    history_state: uhi::TextState,
+    history_state: gui::TextState,
 }
 
 impl Console {
@@ -96,11 +96,11 @@ impl Console {
             open_animation: Animation::default(),
 
             command_editor: "".to_string(),
-            command_editor_state: uhi::TextState::default(),
+            command_editor_state: gui::TextState::default(),
             command_editor_active: false,
 
             history: "".to_string(),
-            history_state: uhi::TextState::default(),
+            history_state: gui::TextState::default(),
         }
     }
 
@@ -108,32 +108,32 @@ impl Console {
         self.open_animation.get_value() > -Self::HEIGHT
     }
 
-    fn update_history<E: uhi::Externs>(
+    fn update_history<E: gui::Externs>(
         &mut self,
-        rect: uhi::Rect,
-        ctx: &mut uhi::Context<E>,
+        rect: gui::Rect,
+        ctx: &mut gui::Context<E>,
         input: &input::State,
     ) {
         assert!(self.is_open());
 
-        uhi::Text::new_selectable(
+        gui::Text::new_selectable(
             self.history.as_str(),
-            rect.shrink(&uhi::Vec2::splat(16.0)),
+            rect.shrink(&gui::Vec2::splat(16.0)),
             &mut self.history_state,
         )
         .multiline()
         .draw(ctx, input);
     }
 
-    fn update_command_editor<E: uhi::Externs>(
+    fn update_command_editor<E: gui::Externs>(
         &mut self,
-        rect: uhi::Rect,
-        ctx: &mut uhi::Context<E>,
+        rect: gui::Rect,
+        ctx: &mut gui::Context<E>,
         input: &input::State,
     ) {
         assert!(self.is_open());
 
-        let key = uhi::Key::from_caller_location();
+        let key = gui::Key::from_caller_location();
 
         ctx.interaction_state
             .maybe_set_hot_or_active(key, rect, input::CursorShape::Text, input);
@@ -146,7 +146,7 @@ impl Console {
             // interaction state thingie.
             let any_button_pressed = input.pointer.buttons.any_just_pressed(input::Button::all());
             let rect_contains_pointer =
-                rect.contains(&uhi::Vec2::from(uhi::F64Vec2::from(input.pointer.position)));
+                rect.contains(&gui::Vec2::from(gui::F64Vec2::from(input.pointer.position)));
             if any_button_pressed && !rect_contains_pointer {
                 self.command_editor_active = false;
             }
@@ -175,17 +175,17 @@ impl Console {
         // ----
 
         // background
-        ctx.draw_buffer.push_rect(uhi::RectShape::new(
+        ctx.draw_buffer.push_rect(gui::RectShape::new(
             rect,
-            uhi::Fill::new_with_color(uhi::Rgba8::from_u32(0xffffff0c)),
-            uhi::Stroke {
+            gui::Fill::new_with_color(gui::Rgba8::from_u32(0xffffff0c)),
+            gui::Stroke {
                 width: 1.0,
                 color: if active {
-                    uhi::Rgba8::from_u32(0x4393e7ff)
+                    gui::Rgba8::from_u32(0x4393e7ff)
                 } else {
-                    uhi::Rgba8::from_u32(0xcccccc33)
+                    gui::Rgba8::from_u32(0xcccccc33)
                 },
-                alignment: uhi::StrokeAlignment::Inside,
+                alignment: gui::StrokeAlignment::Inside,
             },
         ));
 
@@ -195,9 +195,9 @@ impl Console {
             .height();
         let py = (rect.height() - font_height) / 2.0;
 
-        uhi::Text::new_editable(
+        gui::Text::new_editable(
             &mut self.command_editor,
-            rect.shrink(&uhi::Vec2::new(16.0, py)),
+            rect.shrink(&gui::Vec2::new(16.0, py)),
             &mut self.command_editor_state,
         )
         .with_key(key)
@@ -206,10 +206,10 @@ impl Console {
         .draw(ctx, input);
     }
 
-    fn update<E: uhi::Externs>(
+    fn update<E: gui::Externs>(
         &mut self,
-        rect: uhi::Rect,
-        ctx: &mut uhi::Context<E>,
+        rect: gui::Rect,
+        ctx: &mut gui::Context<E>,
         input: &input::State,
     ) {
         let input::KeyboardState { ref scancodes, .. } = input.keyboard;
@@ -229,18 +229,18 @@ impl Console {
         }
 
         let container_rect = {
-            let min = rect.min + uhi::Vec2::new(0.0, self.open_animation.get_value());
-            uhi::Rect::new(min, min + uhi::Vec2::new(rect.max.x, Self::HEIGHT))
+            let min = rect.min + gui::Vec2::new(0.0, self.open_animation.get_value());
+            gui::Rect::new(min, min + gui::Vec2::new(rect.max.x, Self::HEIGHT))
         };
-        ctx.draw_buffer.push_rect(uhi::RectShape::new_with_fill(
+        ctx.draw_buffer.push_rect(gui::RectShape::new_with_fill(
             container_rect,
-            uhi::Fill::new_with_color(uhi::Rgba8::from_u32(0x1f1f1fff)),
+            gui::Fill::new_with_color(gui::Rgba8::from_u32(0x1f1f1fff)),
         ));
 
-        let [history_container_rect, _gap, command_editor_container_rect] = uhi::vstack([
-            uhi::Constraint::Fill(1.0),
-            uhi::Constraint::Length(8.0),
-            uhi::Constraint::Length(34.0),
+        let [history_container_rect, _gap, command_editor_container_rect] = gui::vstack([
+            gui::Constraint::Fill(1.0),
+            gui::Constraint::Length(8.0),
+            gui::Constraint::Length(34.0),
         ])
         .split(container_rect);
 
@@ -250,8 +250,8 @@ impl Console {
 }
 
 struct App {
-    uhi_context: uhi::Context<UhiExterns>,
-    uhi_renderer: uhi::GlRenderer,
+    gui_context: gui::Context<GuiExterns>,
+    gui_renderer: gui::GlRenderer,
 
     input_state: input::State,
 
@@ -261,8 +261,8 @@ struct App {
 impl AppHandler for App {
     fn create(ctx: app::AppContext) -> Self {
         Self {
-            uhi_context: uhi::Context::default(),
-            uhi_renderer: uhi::GlRenderer::new(ctx.gl_api).expect("uhi gl renderer fucky wucky"),
+            gui_context: gui::Context::default(),
+            gui_renderer: gui::GlRenderer::new(ctx.gl_api).expect("gui gl renderer fucky wucky"),
 
             input_state: input::State::default(),
 
@@ -273,9 +273,9 @@ impl AppHandler for App {
     fn handle_event(&mut self, _ctx: app::AppContext, event: Event) {
         match event {
             Event::Window(WindowEvent::ScaleFactorChanged { scale_factor }) => {
-                self.uhi_context
+                self.gui_context
                     .font_service
-                    .set_scale_factor(scale_factor as f32, &mut self.uhi_context.texture_service);
+                    .set_scale_factor(scale_factor as f32, &mut self.gui_context.texture_service);
             }
             Event::Pointer(ev) => {
                 self.input_state.handle_event(input::Event::Pointer(ev));
@@ -288,7 +288,7 @@ impl AppHandler for App {
     }
 
     fn update(&mut self, ctx: app::AppContext) {
-        self.uhi_context.begin_frame();
+        self.gui_context.begin_frame();
 
         // ----
 
@@ -297,62 +297,62 @@ impl AppHandler for App {
 
         let physical_window_size = ctx.window.size();
         let scale_factor = ctx.window.scale_factor();
-        let logical_window_rect = uhi::Rect::new(
-            uhi::Vec2::ZERO,
-            uhi::Vec2::from(uhi::U32Vec2::from(physical_window_size)) / scale_factor as f32,
+        let logical_window_rect = gui::Rect::new(
+            gui::Vec2::ZERO,
+            gui::Vec2::from(gui::U32Vec2::from(physical_window_size)) / scale_factor as f32,
         );
 
-        uhi::Text::new_non_interactive(
+        gui::Text::new_non_interactive(
             "press ` to open console",
-            logical_window_rect.shrink(&uhi::Vec2::new(16.0, 16.0 * 1.0)),
+            logical_window_rect.shrink(&gui::Vec2::new(16.0, 16.0 * 1.0)),
         )
         .singleline()
-        .draw(&mut self.uhi_context);
+        .draw(&mut self.gui_context);
 
         self.console.update(
             logical_window_rect,
-            &mut self.uhi_context,
+            &mut self.gui_context,
             &self.input_state,
         );
 
-        if let Some(cursor_shape) = self.uhi_context.interaction_state.take_cursor_shape() {
+        if let Some(cursor_shape) = self.gui_context.interaction_state.take_cursor_shape() {
             ctx.window
                 .set_cursor_shape(cursor_shape)
                 // TODO: proper error handling
                 .expect("could not set cursor shape");
         }
 
-        if self.uhi_context.clipboard_state.is_awaiting_read() {
-            // TODO: figure out maybe how to incorporate reusable clipboard-read buffer into uhi
+        if self.gui_context.clipboard_state.is_awaiting_read() {
+            // TODO: figure out maybe how to incorporate reusable clipboard-read buffer into gui
             // context or something?
             let mut buf = vec![];
             let payload = ctx
                 .window
                 .read_clipboard(window::MIME_TYPE_TEXT, &mut buf)
                 .and_then(|_| String::from_utf8(buf).context("invalid text"));
-            self.uhi_context.clipboard_state.fulfill_read(payload);
+            self.gui_context.clipboard_state.fulfill_read(payload);
         }
 
-        if let Some(text) = self.uhi_context.clipboard_state.take_write() {
+        if let Some(text) = self.gui_context.clipboard_state.take_write() {
             ctx.window
                 .provide_clipboard_data(Box::new(window::ClipboardTextProvider::new(text)))
                 // TODO: proper error handling
                 .expect("could not provive clipboard data");
         }
 
-        self.uhi_renderer
+        self.gui_renderer
             .render(
-                &mut self.uhi_context,
+                &mut self.gui_context,
                 ctx.gl_api,
                 physical_window_size,
                 scale_factor as f32,
             )
             // TODO: proper error handling
-            .expect("uhi renderer fucky wucky");
+            .expect("gui renderer fucky wucky");
 
         // ----
 
-        self.uhi_context.end_frame();
+        self.gui_context.end_frame();
         self.input_state.end_frame();
     }
 }

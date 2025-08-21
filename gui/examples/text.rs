@@ -3,49 +3,49 @@ use app::AppHandler;
 use gl::api::Apier as _;
 use window::{Event, WindowAttrs, WindowEvent};
 
-struct UhiExterns;
+struct GuiExterns;
 
-impl uhi::Externs for UhiExterns {
-    type TextureHandle = <uhi::GlRenderer as uhi::Renderer>::TextureHandle;
+impl gui::Externs for GuiExterns {
+    type TextureHandle = <gui::GlRenderer as gui::Renderer>::TextureHandle;
 }
 
 struct App {
-    uhi_context: uhi::Context<UhiExterns>,
-    uhi_renderer: uhi::GlRenderer,
+    gui_context: gui::Context<GuiExterns>,
+    gui_renderer: gui::GlRenderer,
 
     input_state: input::State,
 
-    text_singleline_state: uhi::TextState,
+    text_singleline_state: gui::TextState,
 
     text_singleline_editable: String,
-    text_singleline_editable_state: uhi::TextState,
+    text_singleline_editable_state: gui::TextState,
 
-    text_multiline_state: uhi::TextState,
+    text_multiline_state: gui::TextState,
 }
 
 impl AppHandler for App {
     fn create(ctx: app::AppContext) -> Self {
         Self {
-            uhi_context: uhi::Context::default(),
-            uhi_renderer: uhi::GlRenderer::new(ctx.gl_api).expect("uhi gl renderer fucky wucky"),
+            gui_context: gui::Context::default(),
+            gui_renderer: gui::GlRenderer::new(ctx.gl_api).expect("gui gl renderer fucky wucky"),
 
             input_state: input::State::default(),
 
-            text_singleline_state: uhi::TextState::default(),
+            text_singleline_state: gui::TextState::default(),
 
             text_singleline_editable: "hello, sailor".to_string(),
-            text_singleline_editable_state: uhi::TextState::default(),
+            text_singleline_editable_state: gui::TextState::default(),
 
-            text_multiline_state: uhi::TextState::default(),
+            text_multiline_state: gui::TextState::default(),
         }
     }
 
     fn handle_event(&mut self, _ctx: app::AppContext, event: Event) {
         match event {
             Event::Window(WindowEvent::ScaleFactorChanged { scale_factor }) => {
-                self.uhi_context
+                self.gui_context
                     .font_service
-                    .set_scale_factor(scale_factor as f32, &mut self.uhi_context.texture_service);
+                    .set_scale_factor(scale_factor as f32, &mut self.gui_context.texture_service);
             }
             Event::Pointer(ev) => {
                 self.input_state.handle_event(input::Event::Pointer(ev));
@@ -58,7 +58,7 @@ impl AppHandler for App {
     }
 
     fn update(&mut self, ctx: app::AppContext) {
-        self.uhi_context.begin_frame();
+        self.gui_context.begin_frame();
 
         // ----
 
@@ -67,30 +67,30 @@ impl AppHandler for App {
 
         let physical_window_size = ctx.window.size();
         let scale_factor = ctx.window.scale_factor();
-        let logical_window_rect = uhi::Rect::new(
-            uhi::Vec2::ZERO,
-            uhi::Vec2::from(uhi::U32Vec2::from(physical_window_size)) / scale_factor as f32,
+        let logical_window_rect = gui::Rect::new(
+            gui::Vec2::ZERO,
+            gui::Vec2::from(gui::U32Vec2::from(physical_window_size)) / scale_factor as f32,
         );
 
         let primary_text_appearance =
-            uhi::TextAppearance::from_appearance(&self.uhi_context.appearance);
+            gui::TextAppearance::from_appearance(&self.gui_context.appearance);
         let caption_text_appearance =
-            uhi::TextAppearance::from_appearance(&self.uhi_context.appearance)
+            gui::TextAppearance::from_appearance(&self.gui_context.appearance)
                 .with_font_size(primary_text_appearance.font_size * 0.8)
-                .with_fg(uhi::Rgba8::GRAY);
+                .with_fg(gui::Rgba8::GRAY);
 
         // TODO: automatic layout or something
         let font_height_factor = self
-            .uhi_context
+            .gui_context
             .font_service
             .get_font_instance(
-                self.uhi_context.appearance.font_handle,
-                self.uhi_context.appearance.font_size,
+                self.gui_context.appearance.font_handle,
+                self.gui_context.appearance.font_size,
             )
             .height()
-            / self.uhi_context.appearance.font_size;
-        let mut rect = logical_window_rect.shrink(&uhi::Vec2::splat(16.0));
-        let mut use_rect = |font_size: f32, times: usize, add_gap: bool| -> uhi::Rect {
+            / self.gui_context.appearance.font_size;
+        let mut rect = logical_window_rect.shrink(&gui::Vec2::splat(16.0));
+        let mut use_rect = |font_size: f32, times: usize, add_gap: bool| -> gui::Rect {
             let prev = rect;
             let font_height = font_size * font_height_factor;
             rect.min.y += font_height * times as f32;
@@ -101,147 +101,147 @@ impl AppHandler for App {
         };
 
         {
-            uhi::Text::new_non_interactive(
+            gui::Text::new_non_interactive(
                 "singleline non-selectable and non-editable:",
                 use_rect(caption_text_appearance.font_size, 1, false),
             )
             .with_appearance(caption_text_appearance.clone())
             .singleline()
-            .draw(&mut self.uhi_context);
+            .draw(&mut self.gui_context);
 
             let (x, y) = self.input_state.pointer.position;
-            uhi::Text::new_non_interactive(
+            gui::Text::new_non_interactive(
                 format!("x: {}, y: {}", x.round(), y.round()).as_str(),
                 use_rect(primary_text_appearance.font_size, 1, true),
             )
             .with_appearance(primary_text_appearance.clone())
             .singleline()
-            .draw(&mut self.uhi_context);
+            .draw(&mut self.gui_context);
         }
 
         {
-            uhi::Text::new_non_interactive(
+            gui::Text::new_non_interactive(
                 "singleline selectable:",
                 use_rect(caption_text_appearance.font_size, 1, false),
             )
             .with_appearance(caption_text_appearance.clone())
             .singleline()
-            .draw(&mut self.uhi_context);
+            .draw(&mut self.gui_context);
 
-            uhi::Text::new_selectable(
+            gui::Text::new_selectable(
                 "なかなか興味深いですね",
                 use_rect(primary_text_appearance.font_size, 1, true),
                 &mut self.text_singleline_state,
             )
             .with_appearance(primary_text_appearance.clone())
             .singleline()
-            .draw(&mut self.uhi_context, &self.input_state);
+            .draw(&mut self.gui_context, &self.input_state);
         }
 
         {
-            uhi::Text::new_non_interactive(
+            gui::Text::new_non_interactive(
                 "singleline editable:",
                 use_rect(caption_text_appearance.font_size, 1, false),
             )
             .with_appearance(caption_text_appearance.clone())
             .singleline()
-            .draw(&mut self.uhi_context);
+            .draw(&mut self.gui_context);
 
-            uhi::Text::new_editable(
+            gui::Text::new_editable(
                 &mut self.text_singleline_editable,
                 use_rect(primary_text_appearance.font_size, 1, true),
                 &mut self.text_singleline_editable_state,
             )
             .with_appearance(primary_text_appearance.clone())
             .singleline()
-            .draw(&mut self.uhi_context, &self.input_state);
+            .draw(&mut self.gui_context, &self.input_state);
         }
 
         {
-            uhi::Text::new_non_interactive(
+            gui::Text::new_non_interactive(
                 "multiline selectable:",
                 use_rect(caption_text_appearance.font_size, 1, false),
             )
             .with_appearance(caption_text_appearance.clone())
             .singleline()
-            .draw(&mut self.uhi_context);
+            .draw(&mut self.gui_context);
 
-            uhi::Text::new_selectable(
+            gui::Text::new_selectable(
                 "With no bamboo hat\nDoes the drizzle fall on me?\nWhat care I of that?",
                 use_rect(primary_text_appearance.font_size, 3, true),
                 &mut self.text_multiline_state,
             )
             .with_appearance(primary_text_appearance.clone())
             .multiline()
-            .draw(&mut self.uhi_context, &self.input_state);
+            .draw(&mut self.gui_context, &self.input_state);
         }
 
         // TODO: need scroll area
         {
-            uhi::Text::new_non_interactive(
+            gui::Text::new_non_interactive(
                 "atlas:",
                 use_rect(caption_text_appearance.font_size, 1, false),
             )
             .with_appearance(caption_text_appearance.clone())
             .singleline()
-            .draw(&mut self.uhi_context);
+            .draw(&mut self.gui_context);
             rect.min.y += 4.0;
 
-            for tp in self.uhi_context.font_service.iter_texture_pages() {
-                let size = uhi::Vec2::from(uhi::U32Vec2::from(tp.size())) / scale_factor as f32;
-                self.uhi_context
+            for tp in self.gui_context.font_service.iter_texture_pages() {
+                let size = gui::Vec2::from(gui::U32Vec2::from(tp.size())) / scale_factor as f32;
+                self.gui_context
                     .draw_buffer
-                    .push_rect(uhi::RectShape::new_with_fill(
-                        uhi::Rect::new(rect.min, rect.min + size),
-                        uhi::Fill::new(
-                            uhi::Rgba8::WHITE,
-                            uhi::FillTexture {
-                                kind: uhi::TextureKind::Internal(tp.handle()),
-                                coords: uhi::Rect::from_center_size(uhi::Vec2::splat(0.5), 1.0),
+                    .push_rect(gui::RectShape::new_with_fill(
+                        gui::Rect::new(rect.min, rect.min + size),
+                        gui::Fill::new(
+                            gui::Rgba8::WHITE,
+                            gui::FillTexture {
+                                kind: gui::TextureKind::Internal(tp.handle()),
+                                coords: gui::Rect::from_center_size(gui::Vec2::splat(0.5), 1.0),
                             },
                         ),
                     ));
             }
         }
 
-        if let Some(cursor_shape) = self.uhi_context.interaction_state.take_cursor_shape() {
+        if let Some(cursor_shape) = self.gui_context.interaction_state.take_cursor_shape() {
             ctx.window
                 .set_cursor_shape(cursor_shape)
                 // TODO: proper error handling
                 .expect("could not set cursor shape");
         }
 
-        if self.uhi_context.clipboard_state.is_awaiting_read() {
-            // TODO: figure out maybe how to incorporate reusable clipboard-read buffer into uhi
+        if self.gui_context.clipboard_state.is_awaiting_read() {
+            // TODO: figure out maybe how to incorporate reusable clipboard-read buffer into gui
             // context or something?
             let mut buf = vec![];
             let payload = ctx
                 .window
                 .read_clipboard(window::MIME_TYPE_TEXT, &mut buf)
                 .and_then(|_| String::from_utf8(buf).context("invalid text"));
-            self.uhi_context.clipboard_state.fulfill_read(payload);
+            self.gui_context.clipboard_state.fulfill_read(payload);
         }
 
-        if let Some(text) = self.uhi_context.clipboard_state.take_write() {
+        if let Some(text) = self.gui_context.clipboard_state.take_write() {
             ctx.window
                 .provide_clipboard_data(Box::new(window::ClipboardTextProvider::new(text)))
                 // TODO: proper error handling
                 .expect("could not provive clipboard data");
         }
 
-        self.uhi_renderer
+        self.gui_renderer
             .render(
-                &mut self.uhi_context,
+                &mut self.gui_context,
                 ctx.gl_api,
                 physical_window_size,
                 scale_factor as f32,
             )
             // TODO: proper error handling
-            .expect("uhi renderer fucky wucky");
+            .expect("gui renderer fucky wucky");
 
         // ----
 
-        self.uhi_context.end_frame();
+        self.gui_context.end_frame();
         self.input_state.end_frame();
     }
 }

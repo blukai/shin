@@ -2,14 +2,14 @@ use app::AppHandler;
 use gl::api::Apier as _;
 use window::{Event, WindowAttrs, WindowEvent};
 
-struct UhiExterns;
+struct GuiExterns;
 
-impl uhi::Externs for UhiExterns {
-    type TextureHandle = <uhi::GlRenderer as uhi::Renderer>::TextureHandle;
+impl gui::Externs for GuiExterns {
+    type TextureHandle = <gui::GlRenderer as gui::Renderer>::TextureHandle;
 }
 
-fn draw<E: uhi::Externs>(ctx: &mut uhi::Context<E>, area: uhi::Rect) {
-    use uhi::*;
+fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, area: gui::Rect) {
+    use gui::*;
 
     // Tableau I, by Piet Mondriaan
     // https://en.wikipedia.org/wiki/File:Tableau_I,_by_Piet_Mondriaan.jpg
@@ -20,7 +20,7 @@ fn draw<E: uhi::Externs>(ctx: &mut uhi::Context<E>, area: uhi::Rect) {
     const SIZE: Vec2 = Vec2::new(1130.0, 1200.0);
 
     const TOP_HEIGHT: f32 = 640.0;
-    const GAP: Constraint = uhi::Constraint::Length(20.0);
+    const GAP: Constraint = gui::Constraint::Length(20.0);
     const BOTTOM_HEIGHT: f32 = 540.0;
 
     let [top, gap, bottom] = vstack([
@@ -223,20 +223,20 @@ fn draw<E: uhi::Externs>(ctx: &mut uhi::Context<E>, area: uhi::Rect) {
         }
     }
 
-    uhi::Text::new_non_interactive(
+    gui::Text::new_non_interactive(
         "Tableau I, by Piet Mondriaan",
         area.shrink(&Vec2::splat(24.0)),
     )
     .with_appearance(
-        uhi::TextAppearance::from_appearance(&ctx.appearance).with_fg(uhi::Rgba8::FUCHSIA),
+        gui::TextAppearance::from_appearance(&ctx.appearance).with_fg(gui::Rgba8::FUCHSIA),
     )
     .singleline()
     .draw(ctx);
 }
 
 struct App {
-    uhi_context: uhi::Context<UhiExterns>,
-    uhi_renderer: uhi::GlRenderer,
+    gui_context: gui::Context<GuiExterns>,
+    gui_renderer: gui::GlRenderer,
 
     input_state: input::State,
 }
@@ -244,8 +244,8 @@ struct App {
 impl AppHandler for App {
     fn create(ctx: app::AppContext) -> Self {
         Self {
-            uhi_context: uhi::Context::default(),
-            uhi_renderer: uhi::GlRenderer::new(ctx.gl_api).expect("uhi gl renderer fucky wucky"),
+            gui_context: gui::Context::default(),
+            gui_renderer: gui::GlRenderer::new(ctx.gl_api).expect("gui gl renderer fucky wucky"),
 
             input_state: input::State::default(),
         }
@@ -254,9 +254,9 @@ impl AppHandler for App {
     fn handle_event(&mut self, _ctx: app::AppContext, event: Event) {
         match event {
             Event::Window(WindowEvent::ScaleFactorChanged { scale_factor }) => {
-                self.uhi_context
+                self.gui_context
                     .font_service
-                    .set_scale_factor(scale_factor as f32, &mut self.uhi_context.texture_service);
+                    .set_scale_factor(scale_factor as f32, &mut self.gui_context.texture_service);
             }
             Event::Pointer(ev) => {
                 self.input_state.pointer.handle_event(ev);
@@ -269,7 +269,7 @@ impl AppHandler for App {
     }
 
     fn update(&mut self, ctx: app::AppContext) {
-        self.uhi_context.begin_frame();
+        self.gui_context.begin_frame();
 
         // ----
 
@@ -278,27 +278,27 @@ impl AppHandler for App {
 
         let physical_window_size = ctx.window.size();
         let scale_factor = ctx.window.scale_factor();
-        let logical_window_rect = uhi::Rect::new(
-            uhi::Vec2::ZERO,
-            uhi::Vec2::from(uhi::U32Vec2::from(physical_window_size)) / scale_factor as f32,
+        let logical_window_rect = gui::Rect::new(
+            gui::Vec2::ZERO,
+            gui::Vec2::from(gui::U32Vec2::from(physical_window_size)) / scale_factor as f32,
         );
 
-        draw(&mut self.uhi_context, logical_window_rect);
+        draw(&mut self.gui_context, logical_window_rect);
 
-        self.uhi_context.interaction_state.take_cursor_shape();
+        self.gui_context.interaction_state.take_cursor_shape();
 
-        self.uhi_renderer
+        self.gui_renderer
             .render(
-                &mut self.uhi_context,
+                &mut self.gui_context,
                 ctx.gl_api,
                 physical_window_size,
                 scale_factor as f32,
             )
-            .expect("uhi renderer fucky wucky");
+            .expect("gui renderer fucky wucky");
 
         // ----
 
-        self.uhi_context.end_frame();
+        self.gui_context.end_frame();
         self.input_state.end_frame();
     }
 }

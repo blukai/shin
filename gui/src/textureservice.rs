@@ -75,7 +75,7 @@ struct Materialization<E: Externs> {
 //
 // NOTE: this may seem like an shitty stupid extra unnecessary layer of abstraction because in shin
 // were dealing only with opengl/webgl which allows to do stuff in immediate-mode. but i want to be
-// able to use uhi in other projects that use other graphics apis.
+// able to use gui in other projects that use other graphics apis.
 pub struct TextureService<E: Externs> {
     handle_id_acc: u32,
 
