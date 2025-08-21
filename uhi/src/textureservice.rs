@@ -68,6 +68,8 @@ struct Materialization<E: Externs> {
     desc: TextureDesc,
 }
 
+// TODO: impl NoHash for TextureHandle and store stuff in NoHashMap instead of HashMap.
+//
 // allows to defer texture creation and uploads; provides handles that allow to map to committed (/
 // materialized) textures.
 //

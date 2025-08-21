@@ -7,3 +7,11 @@ see:
 - https://smallcultfollowing.com/babysteps/blog/2022/04/12/implied-bounds-and-perfect-derive/.
 - https://rgbcu.be/blog/derive-broken
 
+@BorrowDoesNotContinue
+----
+the borrow checker does not understand that the borrow does not continue into
+the next loop iteration.
+see:
+- https://users.rust-lang.org/t/borrow-check-trouble-due-to-return-from-for-loop/58278
+- https://github.com/rust-lang/rust/issues/54663
+- https://ntietz.com/blog/my-reference-was-dropped-why-is-the-compiler-complaining-about-multiple-borrows/

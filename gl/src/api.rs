@@ -27,6 +27,11 @@ pub use api_webgl2::*;
 pub use enums::*;
 pub use types::*;
 
+// NOTE: why not just use glow? i do not like that glow depends on web-sys+wasm-bindgen. i am kind
+// of all about wheel re-invention here.
+//
+// TODO: make sure that all methods match libgl's methods 1:1 with the exception of things that can
+// be rustified (like strings and stuff).
 pub trait Apier {
     type Buffer;
     type Program;
@@ -78,8 +83,12 @@ pub trait Apier {
     unsafe fn get_attrib_location(&self, program: Self::Program, name: &CStr) -> Option<GLint>;
     unsafe fn get_error(&self) -> Option<GLenum>;
     unsafe fn get_program_info_log(&self, program: Self::Program) -> String;
+    // TODO: same issue as with get_shader_parameter.
     unsafe fn get_program_parameter(&self, program: Self::Program, pname: GLenum) -> GLint;
+    // TODO: don't force allocations, maybe you want to re-use existing allocations.
     unsafe fn get_shader_info_log(&self, shader: Self::Shader) -> String;
+    // TODO: why the fuck would you want to rename getshaderiv to get_shader_parameter? be
+    // consistent!
     unsafe fn get_shader_parameter(&self, shader: Self::Shader, pname: GLenum) -> GLint;
     unsafe fn get_string(&self, name: GLenum) -> anyhow::Result<String>;
     unsafe fn get_uniform_location(&self, program: Self::Program, name: &CStr) -> Option<GLint>;

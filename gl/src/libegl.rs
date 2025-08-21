@@ -31,6 +31,8 @@ impl EglApi {
     pub fn load() -> Result<Self, dynlib::Error> {
         let dynlib = DynLib::load(c"libEGL.so").or_else(|_| DynLib::load(c"libEGL.so.1"))?;
 
+        // NOTE: it seems like some funcs (the ones that get enabled by extensions (for example
+        // EGL_KHR_image)) cannot be loaded with dlsym, but only with eglGetProcAddress.
         let get_proc_address =
             dynlib.lookup::<unsafe extern "C" fn(
                 *const std::ffi::c_char,
