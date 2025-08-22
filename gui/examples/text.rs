@@ -89,7 +89,7 @@ impl AppHandler for App {
             )
             .height()
             / self.gui_context.appearance.font_size;
-        let mut rect = logical_window_rect.shrink(&gui::Vec2::splat(16.0));
+        let mut rect = logical_window_rect.inflate(-gui::Vec2::splat(16.0));
         let mut use_rect = |font_size: f32, times: usize, add_gap: bool| -> gui::Rect {
             let prev = rect;
             let font_height = font_size * font_height_factor;
@@ -197,7 +197,10 @@ impl AppHandler for App {
                             gui::Rgba8::WHITE,
                             gui::FillTexture {
                                 kind: gui::TextureKind::Internal(tp.handle()),
-                                coords: gui::Rect::from_center_size(gui::Vec2::splat(0.5), 1.0),
+                                coords: gui::Rect::from_center_half_size(
+                                    gui::Vec2::splat(0.5),
+                                    1.0,
+                                ),
                             },
                         ),
                     ));

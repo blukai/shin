@@ -82,7 +82,7 @@ impl InteractionState {
     ) -> bool {
         let mut ret = false;
 
-        let inside = rect.contains(&Vec2::from(F64Vec2::from(input.pointer.position)));
+        let inside = rect.contains(Vec2::from(F64Vec2::from(input.pointer.position)));
 
         // TODO: setting thing inactive on press (not on release) seem too feel more natural, but i
         // am not completely sure yet.

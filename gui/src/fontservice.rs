@@ -326,6 +326,8 @@ pub struct FontService {
 }
 
 impl FontService {
+    // TODO: this is broken. we may have to render things on multiple screens, scale factor may
+    // vary between screens.
     pub fn set_scale_factor<E: Externs>(
         &mut self,
         scale_factor: f32,

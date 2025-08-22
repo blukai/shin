@@ -118,7 +118,7 @@ impl Console {
 
         gui::Text::new_selectable(
             self.history.as_str(),
-            rect.shrink(&gui::Vec2::splat(16.0)),
+            rect.inflate(-gui::Vec2::splat(16.0)),
             &mut self.history_state,
         )
         .multiline()
@@ -146,7 +146,7 @@ impl Console {
             // interaction state thingie.
             let any_button_pressed = input.pointer.buttons.any_just_pressed(input::Button::all());
             let rect_contains_pointer =
-                rect.contains(&gui::Vec2::from(gui::F64Vec2::from(input.pointer.position)));
+                rect.contains(gui::Vec2::from(gui::F64Vec2::from(input.pointer.position)));
             if any_button_pressed && !rect_contains_pointer {
                 self.command_editor_active = false;
             }
@@ -197,7 +197,7 @@ impl Console {
 
         gui::Text::new_editable(
             &mut self.command_editor,
-            rect.shrink(&gui::Vec2::new(16.0, py)),
+            rect.inflate(-gui::Vec2::new(16.0, py)),
             &mut self.command_editor_state,
         )
         .with_key(key)
@@ -304,7 +304,7 @@ impl AppHandler for App {
 
         gui::Text::new_non_interactive(
             "press ` to open console",
-            logical_window_rect.shrink(&gui::Vec2::new(16.0, 16.0 * 1.0)),
+            logical_window_rect.inflate(-gui::Vec2::new(16.0, 16.0 * 1.0)),
         )
         .singleline()
         .draw(&mut self.gui_context);

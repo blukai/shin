@@ -93,14 +93,14 @@ scale:       {:.4}
                 self.rotation, self.translation.x, self.translation.y, self.scale,
             )
             .trim(),
-            gui::Rect::new(gui::Vec2::ZERO, logical_window_size).shrink(&gui::Vec2::splat(16.0)),
+            gui::Rect::new(gui::Vec2::ZERO, logical_window_size).inflate(-gui::Vec2::splat(16.0)),
         )
         .multiline()
         .draw(&mut self.gui_context);
 
         let center = logical_window_size / 2.0;
         let size = 100.0 * self.scale;
-        let rect = gui::Rect::from_center_size(center, size).translate_by(&self.translation);
+        let rect = gui::Rect::from_center_half_size(center, size).translate(self.translation);
         self.gui_context
             .draw_buffer
             .push_rect(gui::RectShape::new_with_fill(

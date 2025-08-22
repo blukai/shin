@@ -11,10 +11,7 @@ impl ops::Add<Vec2> for Vec2 {
 
     #[inline]
     fn add(self, rhs: Self) -> Self {
-        Self {
-            x: self.x.add(rhs.x),
-            y: self.y.add(rhs.y),
-        }
+        Self::new(self.x.add(rhs.x), self.y.add(rhs.y))
     }
 }
 
@@ -22,11 +19,8 @@ impl ops::Sub<Vec2> for Vec2 {
     type Output = Self;
 
     #[inline]
-    fn sub(self, rhs: Self) -> Self::Output {
-        Self {
-            x: self.x.sub(rhs.x),
-            y: self.y.sub(rhs.y),
-        }
+    fn sub(self, rhs: Self) -> Self {
+        Self::new(self.x.sub(rhs.x), self.y.sub(rhs.y))
     }
 }
 
@@ -35,10 +29,7 @@ impl ops::Mul<Vec2> for Vec2 {
 
     #[inline]
     fn mul(self, rhs: Self) -> Self {
-        Self {
-            x: self.x.mul(rhs.x),
-            y: self.y.mul(rhs.y),
-        }
+        Self::new(self.x.mul(rhs.x), self.y.mul(rhs.y))
     }
 }
 
@@ -47,10 +38,7 @@ impl ops::Div<Vec2> for Vec2 {
 
     #[inline]
     fn div(self, rhs: Self) -> Self {
-        Self {
-            x: self.x.div(rhs.x),
-            y: self.y.div(rhs.y),
-        }
+        Self::new(self.x.div(rhs.x), self.y.div(rhs.y))
     }
 }
 
@@ -87,10 +75,7 @@ impl ops::Mul<f32> for Vec2 {
 
     #[inline]
     fn mul(self, rhs: f32) -> Self {
-        Self {
-            x: self.x.mul(rhs),
-            y: self.y.mul(rhs),
-        }
+        Self::new(self.x.mul(rhs), self.y.mul(rhs))
     }
 }
 
@@ -99,10 +84,16 @@ impl ops::Div<f32> for Vec2 {
 
     #[inline]
     fn div(self, rhs: f32) -> Self {
-        Self {
-            x: self.x.div(rhs),
-            y: self.y.div(rhs),
-        }
+        Self::new(self.x.div(rhs), self.y.div(rhs))
+    }
+}
+
+impl ops::Neg for Vec2 {
+    type Output = Self;
+
+    #[inline]
+    fn neg(self) -> Self {
+        Self::new(self.x.neg(), self.y.neg())
     }
 }
 
@@ -142,7 +133,7 @@ impl Vec2 {
 
     #[inline]
     pub const fn splat(v: f32) -> Self {
-        Self { x: v, y: v }
+        Self::new(v, v)
     }
 
     // ----
@@ -169,7 +160,7 @@ impl Vec2 {
     /// computes the length (magnitude) of the vector.
     #[inline]
     pub fn length(self) -> f32 {
-        f32::sqrt(self.dot(self))
+        self.dot(self).sqrt()
     }
 
     /// returns `self` normalized to length 1 if possible, else returns zero.
@@ -188,26 +179,17 @@ impl Vec2 {
 
     #[inline]
     pub const fn perp(self) -> Self {
-        Self {
-            x: -self.y,
-            y: self.x,
-        }
+        Self::new(-self.y, self.x)
     }
 
     #[inline]
     pub const fn min(self, rhs: Self) -> Self {
-        Self {
-            x: if self.x < rhs.x { self.x } else { rhs.x },
-            y: if self.y < rhs.y { self.y } else { rhs.y },
-        }
+        Self::new(self.x.min(rhs.x), self.y.min(rhs.y))
     }
 
     #[inline]
     pub const fn max(self, rhs: Self) -> Self {
-        Self {
-            x: if self.x > rhs.x { self.x } else { rhs.x },
-            y: if self.y > rhs.y { self.y } else { rhs.y },
-        }
+        Self::new(self.x.max(rhs.x), self.y.max(rhs.y))
     }
 
     #[inline]
@@ -216,6 +198,8 @@ impl Vec2 {
         self.max(min).min(max)
     }
 }
+
+// ----
 
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct F64Vec2 {
@@ -286,12 +270,9 @@ impl Rect {
     }
 
     #[inline]
-    pub fn from_center_size(center: Vec2, size: f32) -> Self {
+    pub fn from_center_half_size(center: Vec2, size: f32) -> Self {
         let radius = Vec2::splat(size / 2.0);
-        Self {
-            min: center - radius,
-            max: center + radius,
-        }
+        Self::new(center - radius, center + radius)
     }
 
     // ----
@@ -312,22 +293,36 @@ impl Rect {
         (self.min + self.max) / 2.0
     }
 
-    pub fn contains(&self, point: &Vec2) -> bool {
+    pub fn contains(&self, point: Vec2) -> bool {
         let x = point.x >= self.min.x && point.x <= self.max.x;
         let y = point.y >= self.min.y && point.y <= self.max.y;
         x && y
     }
 
-    pub fn translate_by(self, delta: &Vec2) -> Self {
-        Self::new(self.min + *delta, self.max + *delta)
+    pub fn translate(self, delta: Vec2) -> Self {
+        Self::new(self.min + delta, self.max + delta)
     }
 
-    pub fn shrink(self, amount: &Vec2) -> Self {
-        Self::new(self.min + *amount, self.max - *amount)
+    pub fn inflate(self, amount: Vec2) -> Self {
+        Self::new(self.min - amount, self.max + amount)
     }
 
-    pub fn expand(self, amount: &Vec2) -> Self {
-        Self::new(self.min - *amount, self.max + *amount)
+    pub fn scale(self, amount: f32) -> Self {
+        Self::new(self.min * amount, self.max * amount)
+    }
+
+    // NOTE: do no think of this as vector normalize or anything alike, unrealted.
+    //
+    // TODO: think of a better name for this function that basically flips `min` and `max` if
+    // needed, so that `min <= max`.
+    pub fn normalize(self) -> Self {
+        Self::new(self.min.min(self.max), self.min.max(self.max))
+    }
+
+    pub fn clamp(self, other: Self) -> Self {
+        assert_eq!(self, self.normalize());
+        assert_eq!(other, other.normalize());
+        Self::new(self.min.max(other.min), self.max.min(other.max))
     }
 
     // ----

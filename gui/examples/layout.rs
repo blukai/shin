@@ -225,7 +225,7 @@ fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, area: gui::Rect) {
 
     gui::Text::new_non_interactive(
         "Tableau I, by Piet Mondriaan",
-        area.shrink(&Vec2::splat(24.0)),
+        area.inflate(-Vec2::splat(24.0)),
     )
     .with_appearance(
         gui::TextAppearance::from_appearance(&ctx.appearance).with_fg(gui::Rgba8::FUCHSIA),

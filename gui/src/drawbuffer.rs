@@ -482,8 +482,8 @@ impl<E: Externs> DrawBuffer<E> {
     fn push_rect_stroked(&mut self, coords: Rect, stroke: Stroke) {
         let half_width = stroke.width * 0.5;
         let coords = match stroke.alignment {
-            StrokeAlignment::Inside => coords.shrink(&Vec2::splat(half_width)),
-            StrokeAlignment::Outside => coords.expand(&Vec2::splat(half_width)),
+            StrokeAlignment::Inside => coords.inflate(-Vec2::splat(half_width)),
+            StrokeAlignment::Outside => coords.inflate(Vec2::splat(half_width)),
             StrokeAlignment::Center => coords,
         };
         let top_left = coords.top_left();

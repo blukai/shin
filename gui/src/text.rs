@@ -45,6 +45,9 @@ use crate::{
 
 // TODO: multiline text param that would allow to specify minimum amount of rows.
 
+// TODO: vertical and horizontal multiline text alignment.
+// might want to finally make some kind of glyph buffer (within the Context) for this?
+
 // ----
 // testing utils
 
@@ -693,7 +696,7 @@ fn draw_singleline_text<E: Externs>(
         glyph_stage.push_rect(RectShape::new_with_fill(
             glyph
                 .bounding_rect()
-                .translate_by(&Vec2::new(x_offset, container_rect.min.y + font_ascent)),
+                .translate(Vec2::new(x_offset, container_rect.min.y + font_ascent)),
             Fill::new(
                 appearance.fg,
                 FillTexture {
@@ -785,7 +788,7 @@ fn draw_multiline_text<E: Externs>(
         glyph_stage.push_rect(RectShape::new_with_fill(
             glyph
                 .bounding_rect()
-                .translate_by(&Vec2::new(xy_offset.x, xy_offset.y + font_ascent)),
+                .translate(Vec2::new(xy_offset.x, xy_offset.y + font_ascent)),
             Fill::new(
                 appearance.fg,
                 FillTexture {
@@ -1065,7 +1068,7 @@ impl<'a> TextSelectableSingle<'a> {
                         .press_origins
                         .get(&Button::Primary)
                         .is_some_and(|p| {
-                            self.container_rect.contains(&Vec2::from(F64Vec2::from(*p)))
+                            self.container_rect.contains(Vec2::from(F64Vec2::from(*p)))
                         }) =>
                 {
                     let byte_offset = locate_singleline_coord(
@@ -1253,7 +1256,7 @@ impl<'a> TextEditableSingle<'a> {
                         .press_origins
                         .get(&Button::Primary)
                         .is_some_and(|p| {
-                            self.container_rect.contains(&Vec2::from(F64Vec2::from(*p)))
+                            self.container_rect.contains(Vec2::from(F64Vec2::from(*p)))
                         }) =>
                 {
                     let byte_offset = locate_singleline_coord(
@@ -1461,7 +1464,7 @@ impl<'a> TextSelectableMulti<'a> {
                         .press_origins
                         .get(&Button::Primary)
                         .is_some_and(|p| {
-                            self.container_rect.contains(&Vec2::from(F64Vec2::from(*p)))
+                            self.container_rect.contains(Vec2::from(F64Vec2::from(*p)))
                         }) =>
                 {
                     let byte_offset = locate_multiline_coord(
