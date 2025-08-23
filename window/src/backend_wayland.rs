@@ -1277,6 +1277,35 @@ unsafe extern "C" fn handle_wl_keyboard_key(
     }
 }
 
+// NOTE: input state handles mods so why is this needed? xkb needs to be aware of for example when
+// shift is held down; that enables it to yield corrently cased key codes.
+unsafe extern "C" fn handle_wl_keyboard_modifiers(
+    data: *mut c_void,
+    _wl_keyboard: *mut wayland::wl_keyboard,
+    _serial: u32,
+    mods_depressed: u32,
+    mods_latched: u32,
+    mods_locked: u32,
+    group: u32,
+) {
+    let this = unsafe { &mut *(data as *mut WaylandBackend) };
+    let xkb_context = this
+        .xkb_context
+        .as_ref()
+        .expect("xkb contex has not been created");
+    unsafe {
+        (xkb_context.libxkbcommon.xkb_state_update_mask)(
+            xkb_context.state,
+            mods_depressed,
+            mods_latched,
+            mods_locked,
+            0,
+            0,
+            group,
+        )
+    };
+}
+
 unsafe extern "C" fn handle_wl_keyboard_repeat_info(
     data: *mut c_void,
     _wl_keyboard: *mut wayland::wl_keyboard,
@@ -1305,7 +1334,7 @@ const WL_KEYBOARD_LISTENER: wayland::wl_keyboard_listener = wayland::wl_keyboard
     enter: handle_wl_keyboard_enter,
     leave: handle_wl_keyboard_leave,
     key: handle_wl_keyboard_key,
-    modifiers: noop_listener!(),
+    modifiers: handle_wl_keyboard_modifiers,
     repeat_info: handle_wl_keyboard_repeat_info,
 };
 
