@@ -265,7 +265,16 @@ impl Appearance {
     }
 }
 
+// TODO: consider introducing viewports or something like that.
+// scale factor, refresh rate, etc. may vary per monitor thus each viewport probably will need to
+// own its timings, and possibly interaction state?
+
+// TODO: would be cool to support some kind of render targets or something for viewports to make it
+// possible to render multiple ones onto a single surface?
+
 pub struct Context<E: Externs> {
+    pub scale_factor: f32,
+
     previous_frame_start: Instant,
     current_frame_start: Instant,
     delta_time: Duration,
@@ -293,6 +302,8 @@ impl<E: Externs> Context<E> {
         let default_font_handle = font_service.register_font_slice(default_font_data)?;
 
         Ok(Self {
+            scale_factor: 1.0,
+
             previous_frame_start: Instant::now(),
             current_frame_start: Instant::now(),
             delta_time: Duration::ZERO,
@@ -308,7 +319,9 @@ impl<E: Externs> Context<E> {
         })
     }
 
-    pub fn begin_frame(&mut self) {
+    pub fn begin_frame(&mut self, scale_factor: f32) {
+        self.scale_factor = scale_factor;
+
         self.current_frame_start = Instant::now();
         self.delta_time = self.current_frame_start - self.previous_frame_start;
         self.previous_frame_start = self.current_frame_start;
@@ -319,10 +332,12 @@ impl<E: Externs> Context<E> {
 
     pub fn end_frame(&mut self) {
         self.draw_buffer.clear();
+
         self.interaction_state.end_frame();
         self.clipboard_state.end_frame();
     }
 
+    // TODO: consider removing dt method and instead storing dt as secs f32 and making it public.
     pub fn dt(&self) -> f32 {
         self.delta_time.as_secs_f32()
     }

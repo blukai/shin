@@ -1,6 +1,6 @@
 use app::AppHandler;
 use gl::api::Apier as _;
-use window::{Event, WindowAttrs, WindowEvent};
+use window::{Event, WindowAttrs};
 
 struct GuiExterns;
 
@@ -48,12 +48,6 @@ impl AppHandler for App {
         }
 
         match event {
-            Event::Window(WindowEvent::ScaleFactorChanged { scale_factor }) => {
-                self.gui_context
-                    .font_service
-                    .set_scale_factor(scale_factor as f32, &mut self.gui_context.texture_service);
-            }
-
             Event::Pointer(input::PointerEvent::Pan {
                 translation_delta, ..
             }) => {
@@ -71,7 +65,9 @@ impl AppHandler for App {
     }
 
     fn update(&mut self, ctx: app::AppContext) {
-        self.gui_context.begin_frame();
+        let scale_factor = ctx.window.scale_factor();
+
+        self.gui_context.begin_frame(scale_factor as f32);
 
         // ----
 
@@ -79,7 +75,6 @@ impl AppHandler for App {
         unsafe { ctx.gl_api.clear(gl::api::COLOR_BUFFER_BIT) };
 
         let physical_window_size = ctx.window.size();
-        let scale_factor = ctx.window.scale_factor();
         let logical_window_size =
             gui::Vec2::from(gui::U32Vec2::from(physical_window_size)) / scale_factor as f32;
 

@@ -1,7 +1,7 @@
 use anyhow::Context as _;
 use app::AppHandler;
 use gl::api::Apier as _;
-use window::{Event, WindowAttrs, WindowEvent};
+use window::{Event, WindowAttrs};
 
 struct GuiExterns;
 
@@ -42,11 +42,6 @@ impl AppHandler for App {
 
     fn handle_event(&mut self, _ctx: app::AppContext, event: Event) {
         match event {
-            Event::Window(WindowEvent::ScaleFactorChanged { scale_factor }) => {
-                self.gui_context
-                    .font_service
-                    .set_scale_factor(scale_factor as f32, &mut self.gui_context.texture_service);
-            }
             Event::Pointer(ev) => {
                 self.input_state.handle_event(input::Event::Pointer(ev));
             }
@@ -58,7 +53,9 @@ impl AppHandler for App {
     }
 
     fn update(&mut self, ctx: app::AppContext) {
-        self.gui_context.begin_frame();
+        let scale_factor = ctx.window.scale_factor();
+
+        self.gui_context.begin_frame(scale_factor as f32);
 
         // ----
 
@@ -66,7 +63,6 @@ impl AppHandler for App {
         unsafe { ctx.gl_api.clear(gl::api::COLOR_BUFFER_BIT) };
 
         let physical_window_size = ctx.window.size();
-        let scale_factor = ctx.window.scale_factor();
         let logical_window_rect = gui::Rect::new(
             gui::Vec2::ZERO,
             gui::Vec2::from(gui::U32Vec2::from(physical_window_size)) / scale_factor as f32,
@@ -86,6 +82,7 @@ impl AppHandler for App {
             .get_font_instance(
                 self.gui_context.appearance.font_handle,
                 self.gui_context.appearance.font_size,
+                self.gui_context.scale_factor,
             )
             .height()
             / self.gui_context.appearance.font_size;
@@ -188,7 +185,7 @@ impl AppHandler for App {
             rect.min.y += 4.0;
 
             for tp in self.gui_context.font_service.iter_texture_pages() {
-                let size = gui::Vec2::from(gui::U32Vec2::from(tp.size())) / scale_factor as f32;
+                let size = gui::Vec2::from(gui::U32Vec2::from(tp.size()));
                 self.gui_context
                     .draw_buffer
                     .push_rect(gui::RectShape::new_with_fill(

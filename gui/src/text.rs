@@ -346,9 +346,11 @@ fn test_layout_row() {
     const CHARS_PER_ROW: usize = 16;
 
     let mut ctx = Context::<UnitExterns>::default();
-    let mut font_instance = ctx
-        .font_service
-        .get_font_instance(ctx.appearance.font_handle, ctx.appearance.font_size);
+    let mut font_instance = ctx.font_service.get_font_instance(
+        ctx.appearance.font_handle,
+        ctx.appearance.font_size,
+        ctx.scale_factor,
+    );
 
     let haiku = "With no bamboo hat\nDoes the drizzle fall on me?\nWhat care I of that?";
     tests::assert_all_glyphs_have_equal_advance_width(
@@ -961,9 +963,11 @@ impl<Str, State, Interact> Text<Str, State, TextLineNone, Interact> {
 impl<'a> TextNonInteractiveSingle<'a> {
     pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>) {
         let appearance = self.resolved_appearance(ctx);
-        let font_instance = ctx
-            .font_service
-            .get_font_instance(appearance.font_handle, appearance.font_size);
+        let font_instance = ctx.font_service.get_font_instance(
+            appearance.font_handle,
+            appearance.font_size,
+            ctx.scale_factor,
+        );
         let mut draw_buffer = ctx.draw_buffer.clip_scope(self.container_rect);
 
         draw_singleline_text(
@@ -1097,9 +1101,11 @@ impl<'a> TextSelectableSingle<'a> {
 
     pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>, input: &input::State) {
         let appearance = self.resolved_appearance(ctx);
-        let mut font_instance = ctx
-            .font_service
-            .get_font_instance(appearance.font_handle, appearance.font_size);
+        let mut font_instance = ctx.font_service.get_font_instance(
+            appearance.font_handle,
+            appearance.font_size,
+            ctx.scale_factor,
+        );
 
         self.update(
             font_instance.reborrow_mut(),
@@ -1318,9 +1324,11 @@ impl<'a> TextEditableSingle<'a> {
 
     pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>, input: &input::State) {
         let appearance = self.resolved_appearance(ctx);
-        let mut font_instance = ctx
-            .font_service
-            .get_font_instance(appearance.font_handle, appearance.font_size);
+        let mut font_instance = ctx.font_service.get_font_instance(
+            appearance.font_handle,
+            appearance.font_size,
+            ctx.scale_factor,
+        );
 
         self.update(
             &appearance,
@@ -1354,9 +1362,11 @@ impl<'a> TextEditableSingle<'a> {
 impl<'a> TextNonInteractiveMulti<'a> {
     pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>) {
         let appearance = self.resolved_appearance(ctx);
-        let font_instance = ctx
-            .font_service
-            .get_font_instance(appearance.font_handle, appearance.font_size);
+        let font_instance = ctx.font_service.get_font_instance(
+            appearance.font_handle,
+            appearance.font_size,
+            ctx.scale_factor,
+        );
         let mut draw_buffer = ctx.draw_buffer.clip_scope(self.container_rect);
 
         draw_multiline_text(
@@ -1515,9 +1525,11 @@ impl<'a> TextSelectableMulti<'a> {
 
     pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>, input: &input::State) {
         let appearance = self.resolved_appearance(ctx);
-        let mut font_instance = ctx
-            .font_service
-            .get_font_instance(appearance.font_handle, appearance.font_size);
+        let mut font_instance = ctx.font_service.get_font_instance(
+            appearance.font_handle,
+            appearance.font_size,
+            ctx.scale_factor,
+        );
 
         self.update(
             &appearance,

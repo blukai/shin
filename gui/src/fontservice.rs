@@ -8,6 +8,8 @@ use crate::{
     TextureService, Vec2,
 };
 
+// TODO: do not depend on texture service. instead generate output.
+
 const TEXTURE_WIDTH: u32 = 256;
 const TEXTURE_HEIGHT: u32 = 256;
 const TEXTURE_GAP: u32 = 1;
@@ -177,8 +179,8 @@ pub struct FontHandle {
 
 // NOTE: to many fidgeting is needed to hash floats. this is easier.
 #[inline(always)]
-fn make_font_instance_key(font_handle: FontHandle, pt_size: f32) -> u64 {
-    (font_handle.idx as u64) << 32 | (pt_size.to_bits() as u64)
+fn make_font_instance_key(font_handle: FontHandle, pt_size: f32, scale_factor: f32) -> u64 {
+    (font_handle.idx as u64) << 32 | ((pt_size * scale_factor).to_bits() as u64)
 }
 
 #[derive(Debug)]
@@ -315,9 +317,14 @@ impl<'a> FontInstanceRefMut<'a> {
     }
 }
 
+// TODO: evict unused font instances (probably by iterating through font instances?).
+//
+// TODO: how to track what is used and what is not? how to determine what is old and what not?
+//
+// TODO: TexturePacker must support removal.
+
 #[derive(Default)]
 pub struct FontService {
-    scale_factor: Option<f32>,
     // NOTE: i don't need an Arc, but whatever. FontArc makes it convenient because it wraps both
     // FontRef and FontVec.
     fonts: Vec<FontArc>,
@@ -326,22 +333,6 @@ pub struct FontService {
 }
 
 impl FontService {
-    // TODO: this is broken. we may have to render things on multiple screens, scale factor may
-    // vary between screens.
-    pub fn set_scale_factor<E: Externs>(
-        &mut self,
-        scale_factor: f32,
-        texture_service: &mut TextureService<E>,
-    ) {
-        self.scale_factor = Some(scale_factor);
-
-        for tex_page in self.tex_pages.drain(..) {
-            texture_service.enque_destroy(tex_page.tex_handle);
-        }
-
-        self.font_instances.clear();
-    }
-
     pub fn register_font_slice(&mut self, font_data: &'static [u8]) -> anyhow::Result<FontHandle> {
         let idx = self.fonts.len();
         self.fonts.push(FontArc::try_from_slice(font_data)?);
@@ -358,16 +349,15 @@ impl FontService {
         &mut self,
         font_handle: FontHandle,
         pt_size: f32,
+        scale_factor: f32,
     ) -> FontInstanceRefMut<'_> {
         assert!(pt_size > 0.0);
 
         let font = &self.fonts[font_handle.idx as usize];
         let font_instance = self
             .font_instances
-            .entry(make_font_instance_key(font_handle, pt_size))
-            .or_insert_with(|| {
-                FontInstance::new(font, pt_size, self.scale_factor.unwrap_or(1.0) as f32)
-            });
+            .entry(make_font_instance_key(font_handle, pt_size, scale_factor))
+            .or_insert_with(|| FontInstance::new(font, pt_size, scale_factor));
         FontInstanceRefMut {
             font,
             font_instance,

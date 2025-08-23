@@ -1,7 +1,7 @@
 use anyhow::Context as _;
 use app::AppHandler;
 use gl::api::Apier as _;
-use window::{Event, WindowAttrs, WindowEvent};
+use window::{Event, WindowAttrs};
 
 struct GuiExterns;
 
@@ -191,7 +191,11 @@ impl Console {
 
         let font_height = ctx
             .font_service
-            .get_font_instance(ctx.appearance.font_handle, ctx.appearance.font_size)
+            .get_font_instance(
+                ctx.appearance.font_handle,
+                ctx.appearance.font_size,
+                ctx.scale_factor,
+            )
             .height();
         let py = (rect.height() - font_height) / 2.0;
 
@@ -272,11 +276,6 @@ impl AppHandler for App {
 
     fn handle_event(&mut self, _ctx: app::AppContext, event: Event) {
         match event {
-            Event::Window(WindowEvent::ScaleFactorChanged { scale_factor }) => {
-                self.gui_context
-                    .font_service
-                    .set_scale_factor(scale_factor as f32, &mut self.gui_context.texture_service);
-            }
             Event::Pointer(ev) => {
                 self.input_state.handle_event(input::Event::Pointer(ev));
             }
@@ -288,7 +287,9 @@ impl AppHandler for App {
     }
 
     fn update(&mut self, ctx: app::AppContext) {
-        self.gui_context.begin_frame();
+        let scale_factor = ctx.window.scale_factor();
+
+        self.gui_context.begin_frame(scale_factor as f32);
 
         // ----
 
@@ -296,7 +297,6 @@ impl AppHandler for App {
         unsafe { ctx.gl_api.clear(gl::api::COLOR_BUFFER_BIT) };
 
         let physical_window_size = ctx.window.size();
-        let scale_factor = ctx.window.scale_factor();
         let logical_window_rect = gui::Rect::new(
             gui::Vec2::ZERO,
             gui::Vec2::from(gui::U32Vec2::from(physical_window_size)) / scale_factor as f32,
