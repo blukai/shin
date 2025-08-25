@@ -86,6 +86,8 @@ pub struct TextureService<E: Externs> {
     pending_updates: HashMap<(TextureHandle, TextureRegion), Range<usize>>,
     pending_destroys: HashSet<TextureHandle>,
 
+    // TODO: consider tracking access and doing something (yelling at the developer?) if texture
+    // was not used last frame or for n frames?
     materializations: HashMap<TextureHandle, Materialization<E>>,
 }
 
@@ -114,7 +116,7 @@ impl<E: Externs> TextureService<E> {
         };
         self.handle_id_acc += 1;
 
-        log::debug!("TextureService::enque_create ({handle:?}: {desc:?})");
+        log::debug!("TextureService::enque_create: ({handle:?}: {desc:?})");
 
         self.pending_creates.insert(handle, desc);
         handle
@@ -129,7 +131,7 @@ impl<E: Externs> TextureService<E> {
     }
 
     pub fn commit_create(&mut self, ticket: TextureCreateTicket, texture: E::TextureHandle) {
-        log::debug!("TextureService::commit_create ({:?})", &ticket.handle);
+        log::debug!("TextureService::commit_create: ({:?})", &ticket.handle);
 
         let TextureCreateTicket { handle } = ticket;
         let desc = self
@@ -153,7 +155,7 @@ impl<E: Externs> TextureService<E> {
     /// NOTE: returned buffer points into uninitialized or dirty memory (non-zeroed). you need to
     /// write each and every byte.
     pub fn enque_update(&mut self, handle: TextureHandle, region: TextureRegion) -> &mut [u8] {
-        log::debug!("TextureService::enque_update ({handle:?}: {region:?})");
+        log::debug!("TextureService::enque_update: ({handle:?}: {region:?})");
 
         let tex_format = self
             .materializations
@@ -205,7 +207,7 @@ impl<E: Externs> TextureService<E> {
     }
 
     pub fn enque_destroy(&mut self, handle: TextureHandle) {
-        log::debug!("TextureService::enque_destroy ({handle:?})");
+        log::debug!("TextureService::enque_destroy: ({handle:?})");
 
         self.pending_destroys.insert(handle);
     }

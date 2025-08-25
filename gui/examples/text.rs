@@ -79,7 +79,7 @@ impl AppHandler for App {
         let font_height_factor = self
             .gui_context
             .font_service
-            .get_font_instance(
+            .get_or_create_font_instance(
                 self.gui_context.appearance.font_handle,
                 self.gui_context.appearance.font_size,
                 self.gui_context.scale_factor,
@@ -184,23 +184,30 @@ impl AppHandler for App {
             .draw(&mut self.gui_context);
             rect.min.y += 4.0;
 
-            for tp in self.gui_context.font_service.iter_texture_pages() {
-                let size = gui::Vec2::from(gui::U32Vec2::from(tp.size()));
-                self.gui_context
-                    .draw_buffer
-                    .push_rect(gui::RectShape::new_with_fill(
-                        gui::Rect::new(rect.min, rect.min + size),
-                        gui::Fill::new(
-                            gui::Rgba8::WHITE,
-                            gui::FillTexture {
-                                kind: gui::TextureKind::Internal(tp.handle()),
-                                coords: gui::Rect::from_center_half_size(
-                                    gui::Vec2::splat(0.5),
-                                    1.0,
-                                ),
-                            },
-                        ),
+            for font_instance in self.gui_context.font_service.iter_font_instances() {
+                for texture_page in font_instance.iter_texture_pages() {
+                    let size = gui::Vec2::from(gui::U32Vec2::from(
+                        texture_page.texture_packer.texture_size(),
                     ));
+                    self.gui_context
+                        .draw_buffer
+                        .push_rect(gui::RectShape::new_with_fill(
+                            gui::Rect::new(rect.min, rect.min + size),
+                            gui::Fill::new(
+                                gui::Rgba8::WHITE,
+                                gui::FillTexture {
+                                    kind: gui::TextureKind::Internal(texture_page.texture_handle),
+                                    coords: gui::Rect::from_center_half_size(
+                                        gui::Vec2::splat(0.5),
+                                        1.0,
+                                    ),
+                                },
+                            ),
+                        ));
+
+                    // shift next texture to the right
+                    rect.min.x += size.x;
+                }
             }
         }
 

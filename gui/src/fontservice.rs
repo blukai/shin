@@ -8,7 +8,7 @@ use crate::{
     TextureService, Vec2,
 };
 
-// TODO: do not depend on texture service. instead generate output.
+// TODO: maybe do not depend on texture service. instead produce output?
 
 const TEXTURE_WIDTH: u32 = 256;
 const TEXTURE_HEIGHT: u32 = 256;
@@ -16,31 +16,23 @@ const TEXTURE_GAP: u32 = 1;
 
 #[derive(Debug)]
 pub struct TexturePage {
-    tex_packer: TexturePacker,
-    tex_handle: TextureHandle,
-}
-
-impl TexturePage {
-    pub fn size(&self) -> (u32, u32) {
-        self.tex_packer.texture_size()
-    }
-
-    pub fn handle(&self) -> TextureHandle {
-        self.tex_handle
-    }
+    pub texture_packer: TexturePacker,
+    pub texture_handle: TextureHandle,
 }
 
 #[derive(Debug)]
 struct Glyph {
-    tex_page_idx: usize,
-    tex_coords: Rect,
+    texture_page_idx: usize,
+    #[allow(dead_code, reason = "useful for debugging")]
+    texture_packer_entry_idx: usize,
+    texture_coords: Rect,
     bounds: Rect,
     advance_width: f32,
 }
 
 fn rasterize_glyph<E: Externs>(
     ch: char,
-    font: &FontArc,
+    font: FontArc,
     px_scale: PxScale,
     scale_factor: f32,
     texture_pages: &mut Vec<TexturePage>,
@@ -65,53 +57,58 @@ fn rasterize_glyph<E: Externs>(
     assert!(width <= TEXTURE_WIDTH);
     assert!(height <= TEXTURE_HEIGHT);
 
-    let mut tex_page_idx: Option<usize> = texture_pages.len().checked_sub(1);
-    let mut tex_packer_entry_idx: Option<usize> = None;
-
-    // try inserting into existing page if available
-    if let Some(pi) = tex_page_idx {
-        tex_packer_entry_idx = texture_pages[pi].tex_packer.insert(width, height);
+    let mut texture_page_idx: Option<usize> = None;
+    let mut texture_packer_entry_idx: Option<usize> = None;
+    // try inserting into existing pages
+    for (page_idx, texture_page) in texture_pages.iter_mut().enumerate() {
+        if let Some(packer_entry_idx) = texture_page.texture_packer.insert(width, height) {
+            texture_page_idx = Some(page_idx);
+            texture_packer_entry_idx = Some(packer_entry_idx);
+        }
     }
-
     // allocate new page if needed
-    if let None = tex_packer_entry_idx {
-        let mut tex_packer = TexturePacker::new(TEXTURE_WIDTH, TEXTURE_HEIGHT, TEXTURE_GAP);
-        tex_packer_entry_idx = tex_packer.insert(width, height);
-        // NOTE: this assert is somewhat redundant because there's another one above that
-        // ensures that char size is <= texture size.
-        assert!(tex_packer_entry_idx.is_some());
-        tex_page_idx = Some(texture_pages.len());
-        texture_pages.push(TexturePage {
-            tex_packer,
-            tex_handle: texture_service.enque_create(TextureDesc {
-                format: TextureFormat::R8Unorm,
-                w: TEXTURE_WIDTH,
-                h: TEXTURE_HEIGHT,
-            }),
-        });
-    }
+    let (texture_page_idx, texture_packer_entry_idx) =
+        match (texture_page_idx, texture_packer_entry_idx) {
+            (Some(page_idx), Some(packer_entry_idx)) => (page_idx, packer_entry_idx),
+            (None, None) => {
+                let mut texture_packer =
+                    TexturePacker::new(TEXTURE_WIDTH, TEXTURE_HEIGHT, TEXTURE_GAP);
+                // NOTE: this unwrap is somewhat redundant because there's an assertion above that
+                // ensures that char size is <= texture size.
+                let packer_entry_idx = texture_packer.insert(width, height).unwrap();
+                let page_idx = texture_pages.len();
+                texture_pages.push(TexturePage {
+                    texture_packer,
+                    texture_handle: texture_service.enque_create(TextureDesc {
+                        format: TextureFormat::R8Unorm,
+                        w: TEXTURE_WIDTH,
+                        h: TEXTURE_HEIGHT,
+                    }),
+                });
+                (page_idx, packer_entry_idx)
+            }
+            _ => unreachable!(),
+        };
 
-    // NOTE: it is okay to unwrap because necessary allocations happened right above ^.
-    let tex_page_idx = tex_page_idx.unwrap();
-    let tex_packer_entry_idx = tex_packer_entry_idx.unwrap();
-
-    let tex_page = &mut texture_pages[tex_page_idx];
-    let tex_packer_entry = tex_page.tex_packer.get(tex_packer_entry_idx);
+    let texture_page = &mut texture_pages[texture_page_idx];
+    let texture_packer_entry = texture_page
+        .texture_packer
+        .get_entry(texture_packer_entry_idx);
 
     if let Some(og) = &outlined_glyph {
         let buf = texture_service.enque_update(
-            tex_page.tex_handle,
+            texture_page.texture_handle,
             TextureRegion {
-                x: tex_packer_entry.x,
-                y: tex_packer_entry.y,
-                w: tex_packer_entry.w,
-                h: tex_packer_entry.h,
+                x: texture_packer_entry.x,
+                y: texture_packer_entry.y,
+                w: texture_packer_entry.w,
+                h: texture_packer_entry.h,
             },
         );
         og.draw(|x, y, c| {
-            assert!(x <= tex_packer_entry.w);
-            assert!(y <= tex_packer_entry.h);
-            let pixel = y * tex_packer_entry.w + x;
+            assert!(x <= texture_packer_entry.w);
+            assert!(y <= texture_packer_entry.h);
+            let pixel = y * texture_packer_entry.w + x;
             buf[pixel as usize] = ((u8::MAX as f32) * c.clamp(0.0, 1.0)) as u8;
         });
     } else {
@@ -120,15 +117,15 @@ fn rasterize_glyph<E: Externs>(
     }
 
     let min = Vec2::new(
-        tex_packer_entry.x as f32 / TEXTURE_WIDTH as f32,
-        tex_packer_entry.y as f32 / TEXTURE_HEIGHT as f32,
+        texture_packer_entry.x as f32 / TEXTURE_WIDTH as f32,
+        texture_packer_entry.y as f32 / TEXTURE_HEIGHT as f32,
     );
     let size = Vec2::new(
-        tex_packer_entry.w as f32 / TEXTURE_WIDTH as f32,
-        tex_packer_entry.h as f32 / TEXTURE_HEIGHT as f32,
+        texture_packer_entry.w as f32 / TEXTURE_WIDTH as f32,
+        texture_packer_entry.h as f32 / TEXTURE_HEIGHT as f32,
     );
     let max = min + size;
-    let tex_coords = Rect::new(min, max);
+    let texture_coords = Rect::new(min, max);
 
     let bounds = Rect::new(
         Vec2::new(bounds.min.x, bounds.min.y) / scale_factor,
@@ -137,8 +134,9 @@ fn rasterize_glyph<E: Externs>(
     let advance_width = font.as_scaled(px_scale).h_advance(glyph_id) / scale_factor;
 
     Glyph {
-        tex_page_idx,
-        tex_coords,
+        texture_page_idx,
+        texture_packer_entry_idx,
+        texture_coords,
         bounds,
         advance_width,
     }
@@ -147,7 +145,7 @@ fn rasterize_glyph<E: Externs>(
 #[derive(Debug)]
 pub struct GlyphRef<'a> {
     glyph: &'a Glyph,
-    tex_page: &'a TexturePage,
+    texture_page: &'a TexturePage,
 }
 
 impl<'a> GlyphRef<'a> {
@@ -162,13 +160,13 @@ impl<'a> GlyphRef<'a> {
     }
 
     #[inline]
-    pub fn tex_handle(&self) -> TextureHandle {
-        self.tex_page.tex_handle
+    pub fn texture_handle(&self) -> TextureHandle {
+        self.texture_page.texture_handle
     }
 
     #[inline]
-    pub fn tex_coords(&self) -> Rect {
-        self.glyph.tex_coords
+    pub fn texture_coords(&self) -> Rect {
+        self.glyph.texture_coords
     }
 }
 
@@ -184,7 +182,14 @@ fn make_font_instance_key(font_handle: FontHandle, pt_size: f32, scale_factor: f
 }
 
 #[derive(Debug)]
-struct FontInstance {
+pub struct FontInstance {
+    // NOTE: TexturePacker's partitioning is theoretically fine for same-sized rects.
+    // but not for distinct ones.
+    // even monospace fonts will want to allocate distinct rects because bounds of majority of the
+    // glyphs differ.
+    // thuse it makes more sense for font instance to own texture pages and when font instance need
+    // to be dropped - drop texture packers (and glyphs) along with it.
+    texture_pages: Vec<TexturePage>,
     glyphs: NoHashMap<u32, Glyph>,
 
     px_scale: PxScale,
@@ -194,10 +199,14 @@ struct FontInstance {
     ascent: f32,
     /// see https://developer.mozilla.org/en-US/docs/Web/CSS/length#ch
     typical_advance_width: f32,
+
+    // TODO: this will produce bad results when rendering to multiple surfaces.
+    // a single "pass" will consist of mutlple "frames" on different "surfaces".
+    touched_this_frame: bool,
 }
 
 impl FontInstance {
-    fn new(font: &FontArc, pt_size: f32, scale_factor: f32) -> Self {
+    fn new(font: FontArc, pt_size: f32, scale_factor: f32) -> Self {
         // NOTE: see https://github.com/alexheretic/ab-glyph/issues/14 for details.
         let font_scale = font
             .units_per_em()
@@ -213,6 +222,7 @@ impl FontInstance {
         let typical_advance_width = scaled.h_advance(font.glyph_id('0')) / scale_factor;
 
         Self {
+            texture_pages: Vec::default(),
             glyphs: NoHashMap::default(),
 
             px_scale,
@@ -221,16 +231,21 @@ impl FontInstance {
             height: ascent - descent + line_gap,
             ascent,
             typical_advance_width,
+
+            touched_this_frame: false,
         }
+    }
+
+    pub fn iter_texture_pages(&self) -> impl Iterator<Item = &TexturePage> {
+        self.texture_pages.iter()
     }
 }
 
 // NOTE: font instance != font. a single font may parent multiple font instances.
 #[derive(Debug)]
 pub struct FontInstanceRefMut<'a> {
-    font: &'a FontArc,
+    font: FontArc,
     font_instance: &'a mut FontInstance,
-    tex_pages: &'a mut Vec<TexturePage>,
 }
 
 impl<'a> FontInstanceRefMut<'a> {
@@ -260,19 +275,21 @@ impl<'a> FontInstanceRefMut<'a> {
             .font_instance
             .glyphs
             .entry(ch as u32)
-            // glyph does not exist
             .or_insert_with(|| {
                 rasterize_glyph(
                     ch,
-                    self.font,
+                    FontArc::clone(&self.font),
                     self.font_instance.px_scale,
                     self.font_instance.scale_factor,
-                    &mut self.tex_pages,
+                    &mut self.font_instance.texture_pages,
                     texture_service,
                 )
             });
-        let tex_page = &self.tex_pages[glyph.tex_page_idx];
-        GlyphRef { glyph, tex_page }
+        let texture_page = &self.font_instance.texture_pages[glyph.texture_page_idx];
+        GlyphRef {
+            glyph,
+            texture_page,
+        }
     }
 
     pub fn compute_text_width<E: Externs>(
@@ -288,15 +305,6 @@ impl<'a> FontInstanceRefMut<'a> {
         width
     }
 
-    /// the most obvious use case for this is to check something / do some assertions in tests
-    /// maybe.
-    pub fn iter_glyphs(&self) -> impl Iterator<Item = GlyphRef<'_>> {
-        self.font_instance.glyphs.values().map(|glyph| GlyphRef {
-            glyph,
-            tex_page: &self.tex_pages[glyph.tex_page_idx],
-        })
-    }
-
     /// all this really is is an alias for `clone` xd.
     ///
     /// you don't want to pass a reference to a thing that is carrying references; that creates
@@ -310,29 +318,50 @@ impl<'a> FontInstanceRefMut<'a> {
     /// for thisbecause it contains mutable references that are not "clonable">
     pub fn reborrow_mut(&mut self) -> FontInstanceRefMut<'a> {
         Self {
-            font: self.font,
+            font: FontArc::clone(&self.font),
             font_instance: unsafe { &mut *(self.font_instance as *mut FontInstance) },
-            tex_pages: unsafe { &mut *(self.tex_pages as *mut Vec<TexturePage>) },
         }
     }
 }
-
-// TODO: evict unused font instances (probably by iterating through font instances?).
-//
-// TODO: how to track what is used and what is not? how to determine what is old and what not?
-//
-// TODO: TexturePacker must support removal.
 
 #[derive(Default)]
 pub struct FontService {
     // NOTE: i don't need an Arc, but whatever. FontArc makes it convenient because it wraps both
     // FontRef and FontVec.
     fonts: Vec<FontArc>,
-    tex_pages: Vec<TexturePage>,
     font_instances: NoHashMap<u64, FontInstance>,
 }
 
 impl FontService {
+    pub fn begin_frame(&mut self) {
+        // TODO: should i just reset this at the end of the frame?
+        self.font_instances.values_mut().for_each(|font_instance| {
+            font_instance.touched_this_frame = false;
+        });
+    }
+
+    pub fn end_frame<E: Externs>(&mut self, texture_service: &mut TextureService<E>) {
+        let mut num_font_instances_evicted: usize = 0;
+
+        self.font_instances.retain(|_, font_instance| {
+            if font_instance.touched_this_frame {
+                return true;
+            }
+
+            font_instance.texture_pages.iter().for_each(|texture_page| {
+                texture_service.enque_destroy(texture_page.texture_handle);
+            });
+            num_font_instances_evicted += 1;
+            false
+        });
+
+        if num_font_instances_evicted > 0 {
+            log::debug!(
+                "FontService::end_frame: evicted {num_font_instances_evicted} unused font instances"
+            );
+        }
+    }
+
     pub fn register_font_slice(&mut self, font_data: &'static [u8]) -> anyhow::Result<FontHandle> {
         let idx = self.fonts.len();
         self.fonts.push(FontArc::try_from_slice(font_data)?);
@@ -345,7 +374,7 @@ impl FontService {
         Ok(FontHandle { idx: idx as u32 })
     }
 
-    pub fn get_font_instance(
+    pub fn get_or_create_font_instance(
         &mut self,
         font_handle: FontHandle,
         pt_size: f32,
@@ -357,16 +386,16 @@ impl FontService {
         let font_instance = self
             .font_instances
             .entry(make_font_instance_key(font_handle, pt_size, scale_factor))
-            .or_insert_with(|| FontInstance::new(font, pt_size, scale_factor));
+            .or_insert_with(|| FontInstance::new(FontArc::clone(font), pt_size, scale_factor));
+        font_instance.touched_this_frame = true;
+
         FontInstanceRefMut {
-            font,
+            font: FontArc::clone(font),
             font_instance,
-            tex_pages: &mut self.tex_pages,
         }
     }
 
-    /// allows to view font texture atlases.
-    pub fn iter_texture_pages(&self) -> impl Iterator<Item = &TexturePage> {
-        self.tex_pages.iter()
+    pub fn iter_font_instances(&self) -> impl Iterator<Item = &FontInstance> {
+        self.font_instances.values()
     }
 }

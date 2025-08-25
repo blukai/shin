@@ -1,11 +1,14 @@
+// NOTE: Node is marked as non_exhaustive because i want to be able to expose it and its fields for
+// debuging purposes, but i do not want it to be constructable from outside.
+#[non_exhaustive]
 #[derive(Debug)]
-struct Node<T> {
-    value: T,
-    parent: Option<usize>,
-    first_child: Option<usize>,
+pub struct Node<T> {
+    pub value: T,
+    pub parent: Option<usize>,
+    pub first_child: Option<usize>,
     // NOTE: having prev_sibling enables cheap unlink/remove.
-    prev_sibling: Option<usize>,
-    next_sibling: Option<usize>,
+    pub prev_sibling: Option<usize>,
+    pub next_sibling: Option<usize>,
 }
 
 impl<T> Node<T> {
@@ -39,20 +42,27 @@ impl<T> Tree<T> {
         }
     }
 
-    fn try_get_node(&self, index: usize) -> Option<&Node<T>> {
+    fn try_get(&self, index: usize) -> Option<&Node<T>> {
         self.nodes.get(index).and_then(|node| node.as_ref())
     }
 
-    fn get_node(&self, index: usize) -> &Node<T> {
-        self.try_get_node(index).expect("invalid index")
+    fn get(&self, index: usize) -> &Node<T> {
+        self.try_get(index).expect("invalid index")
     }
 
-    fn try_get_node_mut(&mut self, index: usize) -> Option<&mut Node<T>> {
+    fn try_get_mut(&mut self, index: usize) -> Option<&mut Node<T>> {
         self.nodes.get_mut(index).and_then(|node| node.as_mut())
     }
 
-    fn get_node_mut(&mut self, index: usize) -> &mut Node<T> {
-        self.try_get_node_mut(index).expect("invalid index")
+    fn get_mut(&mut self, index: usize) -> &mut Node<T> {
+        self.try_get_mut(index).expect("invalid index")
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (usize, &Node<T>)> {
+        self.nodes
+            .iter()
+            .enumerate()
+            .filter_map(|(i, node)| node.as_ref().map(|node| (i, node)))
     }
 
     fn insert_child_maybe_after(
@@ -71,16 +81,16 @@ impl<T> Tree<T> {
         child_node.parent = Some(parent_index);
         child_node.prev_sibling = maybe_after_index;
 
-        if let Some(after_node) = maybe_after_index.map(|i| self.get_node_mut(i)) {
+        if let Some(after_node) = maybe_after_index.map(|i| self.get_mut(i)) {
             child_node.next_sibling = after_node.next_sibling;
             after_node.next_sibling = Some(child_index);
         } else {
-            let parent_node = self.get_node_mut(parent_index);
+            let parent_node = self.get_mut(parent_index);
             child_node.next_sibling = parent_node.first_child;
             parent_node.first_child = Some(child_index);
         }
 
-        if let Some(next_sibling_node) = child_node.next_sibling.map(|i| self.get_node_mut(i)) {
+        if let Some(next_sibling_node) = child_node.next_sibling.map(|i| self.get_mut(i)) {
             next_sibling_node.prev_sibling = Some(child_index);
         }
 
@@ -88,26 +98,26 @@ impl<T> Tree<T> {
         child_index
     }
 
-    fn remove_node(&mut self, index: usize) {
+    fn remove(&mut self, index: usize) {
         let node = self.nodes[index].take().expect("invalid index");
         self.free_indices.push(index);
 
         // if we're the first guy, reset the head otherwise, make our previous node's next pointer
         // = our next
-        if let Some(prev_sibling_node) = node.prev_sibling.map(|i| self.get_node_mut(i)) {
+        if let Some(prev_sibling_node) = node.prev_sibling.map(|i| self.get_mut(i)) {
             prev_sibling_node.next_sibling = node.next_sibling;
         } else {
-            if let Some(parent_node) = node.parent.map(|i| self.get_node_mut(i)) {
+            if let Some(parent_node) = node.parent.map(|i| self.get_mut(i)) {
                 parent_node.first_child = node.next_sibling;
             } else if self.root_index == index {
-                // TODO: consider not panicking when removing root?
+                // NOTE: the tree is required to have a root.
                 self.root_index = node.next_sibling.expect("next sibling");
             }
         }
 
         // if we're the last guy, reset the tail otherwise, make our next node's prev pointer = our
         // prev
-        if let Some(next_sibling_node) = node.next_sibling.map(|i| self.get_node_mut(i)) {
+        if let Some(next_sibling_node) = node.next_sibling.map(|i| self.get_mut(i)) {
             next_sibling_node.prev_sibling = node.prev_sibling;
         }
     }
@@ -119,47 +129,47 @@ fn test_insert_child_maybe_after() {
 
     // insert first child / root
     let child1 = tree.insert_child_maybe_after(tree.root_index, None, 1);
-    assert_eq!(tree.get_node(child1).parent, Some(tree.root_index));
-    assert_eq!(tree.get_node(tree.root_index).first_child, Some(child1));
+    assert_eq!(tree.get(child1).parent, Some(tree.root_index));
+    assert_eq!(tree.get(tree.root_index).first_child, Some(child1));
 
     // insert second child after first
     let child2 = tree.insert_child_maybe_after(tree.root_index, Some(child1), 2);
-    assert_eq!(tree.get_node(child2).parent, Some(tree.root_index));
-    assert_eq!(tree.get_node(child2).prev_sibling, Some(child1));
-    assert_eq!(tree.get_node(child1).next_sibling, Some(child2));
+    assert_eq!(tree.get(child2).parent, Some(tree.root_index));
+    assert_eq!(tree.get(child2).prev_sibling, Some(child1));
+    assert_eq!(tree.get(child1).next_sibling, Some(child2));
 
     // insert third child after second
     let child3 = tree.insert_child_maybe_after(tree.root_index, Some(child2), 3);
-    assert_eq!(tree.get_node(child3).parent, Some(tree.root_index));
-    assert_eq!(tree.get_node(child3).prev_sibling, Some(child2));
-    assert_eq!(tree.get_node(child2).next_sibling, Some(child3));
-    assert_eq!(tree.get_node(child3).next_sibling, None);
+    assert_eq!(tree.get(child3).parent, Some(tree.root_index));
+    assert_eq!(tree.get(child3).prev_sibling, Some(child2));
+    assert_eq!(tree.get(child2).next_sibling, Some(child3));
+    assert_eq!(tree.get(child3).next_sibling, None);
 }
 
 #[test]
-fn test_remove_node() {
+fn test_remove() {
     let mut tree = Tree::new(0);
 
     let child1 = tree.insert_child_maybe_after(tree.root_index, None, 1);
     let child2 = tree.insert_child_maybe_after(tree.root_index, Some(child1), 2);
     let child3 = tree.insert_child_maybe_after(tree.root_index, Some(child2), 3);
 
-    tree.remove_node(child2);
-    assert!(tree.try_get_node(child2).is_none());
+    tree.remove(child2);
+    assert!(tree.try_get(child2).is_none());
     // check that child1 now points to child3
-    assert_eq!(tree.get_node(child1).next_sibling, Some(child3));
-    assert_eq!(tree.get_node(child3).prev_sibling, Some(child1));
+    assert_eq!(tree.get(child1).next_sibling, Some(child3));
+    assert_eq!(tree.get(child3).prev_sibling, Some(child1));
 
-    tree.remove_node(child1);
-    assert!(tree.try_get_node(child1).is_none());
+    tree.remove(child1);
+    assert!(tree.try_get(child1).is_none());
     // check that root now points to child3 as first child
-    assert_eq!(tree.get_node(tree.root_index).first_child, Some(child3));
-    assert_eq!(tree.get_node(child3).prev_sibling, None);
+    assert_eq!(tree.get(tree.root_index).first_child, Some(child3));
+    assert_eq!(tree.get(child3).prev_sibling, None);
 
-    tree.remove_node(child3);
-    assert!(tree.try_get_node(child3).is_none());
+    tree.remove(child3);
+    assert!(tree.try_get(child3).is_none());
     // check that root has no children
-    assert_eq!(tree.get_node(tree.root_index).first_child, None);
+    assert_eq!(tree.get(tree.root_index).first_child, None);
 }
 
 const DEFAULT_TEXTURE_WIDTH: u32 = 1024;
@@ -172,7 +182,7 @@ pub struct TexturePackerEntry {
     pub w: u32,
     pub h: u32,
 
-    in_use: bool,
+    pub in_use: bool,
 }
 
 /// manages texture packing of textures as they are added.
@@ -213,14 +223,14 @@ impl TexturePacker {
 
     fn is_leaf(&self, index: usize) -> bool {
         self.tree
-            .get_node(index)
+            .get(index)
             .first_child
-            .is_none_or(|h| self.tree.get_node(h).next_sibling.is_none())
+            .is_none_or(|h| self.tree.get(h).next_sibling.is_none())
     }
 
     fn is_left_child(&self, parent_index: usize, child_index: usize) -> bool {
         self.tree
-            .get_node(parent_index)
+            .get(parent_index)
             .first_child
             .is_some_and(|h| h == child_index)
     }
@@ -232,11 +242,7 @@ impl TexturePacker {
     fn insert_at(&mut self, width: u32, height: u32, index: usize) -> Option<usize> {
         if !self.is_leaf(index) {
             // try inserting under left child
-            let left_child_index = self
-                .tree
-                .get_node(index)
-                .first_child
-                .expect("left child index");
+            let left_child_index = self.tree.get(index).first_child.expect("left child index");
             let new_index = self.insert_at(width, height, left_child_index);
             if new_index.is_some() {
                 return new_index;
@@ -245,13 +251,13 @@ impl TexturePacker {
             // no room, insert under right child
             let right_child_index = self
                 .tree
-                .get_node(left_child_index)
+                .get(left_child_index)
                 .next_sibling
                 .expect("right child index");
             return self.insert_at(width, height, right_child_index);
         }
 
-        let entry = &self.tree.get_node(index).value;
+        let entry = &self.tree.get(index).value;
 
         // there is already a glpyh here
         if entry.in_use {
@@ -268,7 +274,7 @@ impl TexturePacker {
 
         if width == cache_slot_width && height == cache_slot_height {
             // if we're just right, accept
-            self.tree.get_node_mut(index).value.in_use = true;
+            self.tree.get_mut(index).value.in_use = true;
             return Some(index);
         }
 
@@ -287,6 +293,7 @@ impl TexturePacker {
                 },
                 TexturePackerEntry {
                     x: entry.x + width + self.gap,
+                    // TODO: what if dw > gap? this will panic.
                     w: dw - self.gap,
                     h: cache_slot_height,
                     in_use: false,
@@ -305,6 +312,7 @@ impl TexturePacker {
                 TexturePackerEntry {
                     y: entry.y + height + self.gap,
                     w: cache_slot_width,
+                    // TODO: what if dh > gap? this will panic.
                     h: dh - self.gap,
                     in_use: false,
                     ..*entry
@@ -320,11 +328,8 @@ impl TexturePacker {
                 .insert_child_maybe_after(index, Some(left_child_index), right_child);
         assert!(self.is_right_child(index, right_child_index));
 
-        assert!(
-            self.tree.get_node(left_child_index).parent
-                == self.tree.get_node(right_child_index).parent
-        );
-        assert!(self.tree.get_node(left_child_index).parent == Some(index));
+        assert!(self.tree.get(left_child_index).parent == self.tree.get(right_child_index).parent);
+        assert!(self.tree.get(left_child_index).parent == Some(index));
 
         // insert into first child we created
         self.insert_at(width, height, left_child_index)
@@ -334,55 +339,79 @@ impl TexturePacker {
         self.insert_at(width, height, self.tree.root_index)
     }
 
+    // NOTE: removing from texture packer where texture sizes are too-distinct is a bad idea.
+    // if you want to improve removal:
+    // - try to start by looking into how to reduce amount of splits at insertion;
+    // - or how to merge as much nodes as possible during removal, but for that you may need to
+    // re-arrange nodes (?) and for that you may need to hand-out stable handles.
     pub fn remove(&mut self, index: usize) {
-        self.tree.get_node_mut(index).value.in_use = false;
+        // NOTE: shouldn't be able nor try to remove root.
+        assert_ne!(index, self.tree.root_index);
+
+        self.tree.get_mut(index).value.in_use = false;
 
         if !self.is_leaf(index) {
             return;
         }
 
-        // if its a leaf, see if its peer is empty, if it is the split can go away.
-        let parent_index = self.tree.get_node(index).parent.expect("parent index");
-        match () {
+        // NOTE: if its a leaf, see if its peer is empty, if it is the split can go away.
+
+        let node = self.tree.get(index);
+        let parent_index = node.parent.expect("parent index");
+        let peer_index = match () {
             _ if self.is_left_child(parent_index, index) => {
-                if let Some(peer_index) = self.tree.get_node(index).next_sibling {
+                if let Some(peer_index) = node.next_sibling {
                     assert!(self.is_right_child(index, peer_index));
-                    if self.is_leaf(peer_index) && !self.tree.get_node(peer_index).value.in_use {
-                        // both children are leaves and neither is in use, remove the split here.
-                        self.tree.remove_node(index);
-                        self.tree.remove_node(peer_index);
-                    }
+                    peer_index
+                } else {
+                    return;
                 }
             }
             _ if self.is_right_child(parent_index, index) => {
-                if let Some(peer_index) = self.tree.get_node(parent_index).first_child {
+                if let Some(peer_index) = node.first_child {
                     assert!(self.is_left_child(parent_index, peer_index));
-                    assert_eq!(Some(index), self.tree.get_node(peer_index).next_sibling);
-                    if self.is_leaf(peer_index) && !self.tree.get_node(peer_index).value.in_use {
-                        // both children are leaves and neither is in use, remove the split here.
-                        self.tree.remove_node(index);
-                        self.tree.remove_node(peer_index);
-                    }
+                    assert_eq!(Some(index), self.tree.get(peer_index).next_sibling);
+                    peer_index
+                } else {
+                    return;
                 }
             }
             _ => unreachable!(),
+        };
+
+        let peer_node = self.tree.get(peer_index);
+        if self.is_leaf(peer_index) && !peer_node.value.in_use {
+            // both children are leaves and neither is in use, remove the split here.
+            self.tree.remove(index);
+            self.tree.remove(peer_index);
         }
+
         // maybe parent (that is not a root) is now empty.
         if self.is_leaf(parent_index) && parent_index != self.tree.root_index {
             self.remove(parent_index);
         }
     }
 
-    pub fn try_get(&self, index: usize) -> Option<&TexturePackerEntry> {
-        self.tree.try_get_node(index).map(|node| &node.value)
+    pub fn try_get_entry(&self, index: usize) -> Option<&TexturePackerEntry> {
+        self.tree.try_get(index).map(|node| &node.value)
     }
 
-    pub fn get(&self, index: usize) -> &TexturePackerEntry {
-        self.try_get(index).expect("invalud index")
+    pub fn get_entry(&self, index: usize) -> &TexturePackerEntry {
+        self.try_get_entry(index).expect("invalud index")
     }
 
     pub fn texture_size(&self) -> (u32, u32) {
         (self.w, self.h)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        // NOTE: tree can not exist without a root.
+        assert!(self.tree.nodes.len() > 0);
+        self.tree.nodes.len() == 1
+    }
+
+    pub fn iter_nodes(&self) -> impl Iterator<Item = (usize, &Node<TexturePackerEntry>)> {
+        self.tree.iter()
     }
 }
 
@@ -394,7 +423,7 @@ fn test_insert_exact_fit() {
     assert!(maybe_index.is_some());
 
     let index = maybe_index.unwrap();
-    let entry = &packer.tree.get_node(index).value;
+    let entry = &packer.tree.get(index).value;
     assert!(entry.in_use);
     assert_eq!(entry.x, 0);
     assert_eq!(entry.y, 0);
@@ -453,10 +482,10 @@ fn test_remove_leaf_node() {
     let mut packer = TexturePacker::default();
 
     let index = packer.insert(400, 400).expect("failed to insert");
-    assert!(packer.tree.get_node(index).value.in_use);
+    assert!(packer.tree.get(index).value.in_use);
     assert!(packer.is_leaf(index));
 
     packer.remove(index);
-    assert!(packer.try_get(index).is_none());
+    assert!(packer.try_get_entry(index).is_none());
     assert!(packer.is_leaf(packer.tree.root_index));
 }

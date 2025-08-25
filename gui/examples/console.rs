@@ -191,7 +191,7 @@ impl Console {
 
         let font_height = ctx
             .font_service
-            .get_font_instance(
+            .get_or_create_font_instance(
                 ctx.appearance.font_handle,
                 ctx.appearance.font_size,
                 ctx.scale_factor,

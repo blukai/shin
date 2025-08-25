@@ -272,6 +272,10 @@ impl Appearance {
 // TODO: would be cool to support some kind of render targets or something for viewports to make it
 // possible to render multiple ones onto a single surface?
 
+// TODO: begin_frame and end_frame stuff is bad.
+// when working with multiple surfaces a single "pass" will consist of mutlple "frames" on
+// different "surfaces".
+
 pub struct Context<E: Externs> {
     pub scale_factor: f32,
 
@@ -326,11 +330,16 @@ impl<E: Externs> Context<E> {
         self.delta_time = self.current_frame_start - self.previous_frame_start;
         self.previous_frame_start = self.current_frame_start;
 
+        self.font_service.begin_frame();
+
         self.interaction_state.begin_frame();
         self.clipboard_state.begin_frame(self.current_frame_start);
     }
 
     pub fn end_frame(&mut self) {
+        self.font_service.end_frame(&mut self.texture_service);
+        // TODO: rename draw_buffer's clear to end frame. but also make so that renderer drains it,
+        // not just gets the data from it.
         self.draw_buffer.clear();
 
         self.interaction_state.end_frame();

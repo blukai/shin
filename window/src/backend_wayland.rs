@@ -1177,7 +1177,9 @@ unsafe extern "C" fn handle_wl_keyboard_keymap(
             this.xkb_context = Some(xkb_context);
             log::info!("created xkb context");
         }
-        other => unreachable!("unknown keymap format: {other}"),
+        other => {
+            panic!("unknown keymap format: {other}");
+        }
     }
 
     unsafe { libc::close(fd) };
@@ -1758,7 +1760,6 @@ impl WaylandBackend {
 
     fn set_cursor_shape(&mut self, shape: CursorShape) -> anyhow::Result<()> {
         let Some(serial) = self.serial_tracker.get_serial(SerialType::PointerEnter) else {
-            log::warn!("could not set cursor shape (no pointer enter)");
             return Ok(());
         };
 

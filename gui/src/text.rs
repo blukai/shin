@@ -346,7 +346,7 @@ fn test_layout_row() {
     const CHARS_PER_ROW: usize = 16;
 
     let mut ctx = Context::<UnitExterns>::default();
-    let mut font_instance = ctx.font_service.get_font_instance(
+    let mut font_instance = ctx.font_service.get_or_create_font_instance(
         ctx.appearance.font_handle,
         ctx.appearance.font_size,
         ctx.scale_factor,
@@ -702,8 +702,8 @@ fn draw_singleline_text<E: Externs>(
             Fill::new(
                 appearance.fg,
                 FillTexture {
-                    kind: TextureKind::Internal(glyph.tex_handle()),
-                    coords: glyph.tex_coords(),
+                    kind: TextureKind::Internal(glyph.texture_handle()),
+                    coords: glyph.texture_coords(),
                 },
             ),
         ));
@@ -794,8 +794,8 @@ fn draw_multiline_text<E: Externs>(
             Fill::new(
                 appearance.fg,
                 FillTexture {
-                    kind: TextureKind::Internal(glyph.tex_handle()),
-                    coords: glyph.tex_coords(),
+                    kind: TextureKind::Internal(glyph.texture_handle()),
+                    coords: glyph.texture_coords(),
                 },
             ),
         ));
@@ -963,7 +963,7 @@ impl<Str, State, Interact> Text<Str, State, TextLineNone, Interact> {
 impl<'a> TextNonInteractiveSingle<'a> {
     pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>) {
         let appearance = self.resolved_appearance(ctx);
-        let font_instance = ctx.font_service.get_font_instance(
+        let font_instance = ctx.font_service.get_or_create_font_instance(
             appearance.font_handle,
             appearance.font_size,
             ctx.scale_factor,
@@ -1101,7 +1101,7 @@ impl<'a> TextSelectableSingle<'a> {
 
     pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>, input: &input::State) {
         let appearance = self.resolved_appearance(ctx);
-        let mut font_instance = ctx.font_service.get_font_instance(
+        let mut font_instance = ctx.font_service.get_or_create_font_instance(
             appearance.font_handle,
             appearance.font_size,
             ctx.scale_factor,
@@ -1324,7 +1324,7 @@ impl<'a> TextEditableSingle<'a> {
 
     pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>, input: &input::State) {
         let appearance = self.resolved_appearance(ctx);
-        let mut font_instance = ctx.font_service.get_font_instance(
+        let mut font_instance = ctx.font_service.get_or_create_font_instance(
             appearance.font_handle,
             appearance.font_size,
             ctx.scale_factor,
@@ -1362,7 +1362,7 @@ impl<'a> TextEditableSingle<'a> {
 impl<'a> TextNonInteractiveMulti<'a> {
     pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>) {
         let appearance = self.resolved_appearance(ctx);
-        let font_instance = ctx.font_service.get_font_instance(
+        let font_instance = ctx.font_service.get_or_create_font_instance(
             appearance.font_handle,
             appearance.font_size,
             ctx.scale_factor,
@@ -1525,7 +1525,7 @@ impl<'a> TextSelectableMulti<'a> {
 
     pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>, input: &input::State) {
         let appearance = self.resolved_appearance(ctx);
-        let mut font_instance = ctx.font_service.get_font_instance(
+        let mut font_instance = ctx.font_service.get_or_create_font_instance(
             appearance.font_handle,
             appearance.font_size,
             ctx.scale_factor,
