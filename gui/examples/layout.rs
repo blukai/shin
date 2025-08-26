@@ -8,7 +8,7 @@ impl gui::Externs for GuiExterns {
     type TextureHandle = <gui::GlRenderer as gui::Renderer>::TextureHandle;
 }
 
-fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, area: gui::Rect) {
+fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, vpt: &mut gui::Viewport<E>, area: gui::Rect) {
     use gui::*;
 
     // Tableau I, by Piet Mondriaan
@@ -32,7 +32,7 @@ fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, area: gui::Rect) {
 
     // top
     {
-        ctx.draw_buffer.push_rect(RectShape::new_with_fill(
+        vpt.draw_buffer.push_rect(RectShape::new_with_fill(
             top,
             Fill::new_with_color(Rgba8::WHITE),
         ));
@@ -54,29 +54,29 @@ fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, area: gui::Rect) {
                     Constraint::Fill(1.0),
                 ])
                 .split(left);
-                ctx.draw_buffer.push_rect(RectShape::new_with_fill(
+                vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                     top,
                     Fill::new_with_color(Rgba8::RED),
                 ));
-                ctx.draw_buffer.push_rect(RectShape::new_with_fill(
+                vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                     gap,
                     Fill::new_with_color(Rgba8::BLACK),
                 ));
-                ctx.draw_buffer.push_rect(RectShape::new_with_fill(
+                vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                     bottom,
                     Fill::new_with_color(Rgba8::WHITE),
                 ));
             }
 
-            ctx.draw_buffer.push_rect(RectShape::new_with_fill(
+            vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                 lgap,
                 Fill::new_with_color(Rgba8::BLACK),
             ));
-            ctx.draw_buffer.push_rect(RectShape::new_with_fill(
+            vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                 mid,
                 Fill::new_with_color(Rgba8::WHITE),
             ));
-            ctx.draw_buffer.push_rect(RectShape::new_with_fill(
+            vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                 rgap,
                 Fill::new_with_color(Rgba8::BLACK),
             ));
@@ -90,23 +90,23 @@ fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, area: gui::Rect) {
                     Constraint::Percentage(130.0 / TOP_HEIGHT),
                 ])
                 .split(right);
-                ctx.draw_buffer.push_rect(RectShape::new_with_fill(
+                vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                     top,
                     Fill::new_with_color(Rgba8::BLACK),
                 ));
-                ctx.draw_buffer.push_rect(RectShape::new_with_fill(
+                vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                     tgap,
                     Fill::new_with_color(Rgba8::BLACK),
                 ));
-                ctx.draw_buffer.push_rect(RectShape::new_with_fill(
+                vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                     mid,
                     Fill::new_with_color(Rgba8::WHITE),
                 ));
-                ctx.draw_buffer.push_rect(RectShape::new_with_fill(
+                vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                     bgap,
                     Fill::new_with_color(Rgba8::BLACK),
                 ));
-                ctx.draw_buffer.push_rect(RectShape::new_with_fill(
+                vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                     bottom,
                     Fill::new_with_color(Rgba8::WHITE),
                 ));
@@ -114,14 +114,14 @@ fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, area: gui::Rect) {
         }
     }
 
-    ctx.draw_buffer.push_rect(RectShape::new_with_fill(
+    vpt.draw_buffer.push_rect(RectShape::new_with_fill(
         gap,
         Fill::new_with_color(Rgba8::BLACK),
     ));
 
     // bottom
     {
-        ctx.draw_buffer.push_rect(RectShape::new_with_fill(
+        vpt.draw_buffer.push_rect(RectShape::new_with_fill(
             bottom,
             Fill::new_with_color(Rgba8::WHITE),
         ));
@@ -145,7 +145,7 @@ fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, area: gui::Rect) {
                 ])
                 .split(left);
                 lmgap = gap;
-                ctx.draw_buffer.push_rect(RectShape::new_with_fill(
+                vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                     gap,
                     Fill::new_with_color(Rgba8::BLACK),
                 ));
@@ -157,26 +157,26 @@ fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, area: gui::Rect) {
                         Constraint::Fill(1.0),
                     ])
                     .split(right);
-                    ctx.draw_buffer.push_rect(RectShape::new_with_fill(
+                    vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                         top,
                         Fill::new_with_color(Rgba8::BLUE),
                     ));
-                    ctx.draw_buffer.push_rect(RectShape::new_with_fill(
+                    vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                         gap,
                         Fill::new_with_color(Rgba8::BLACK),
                     ));
                 }
             }
 
-            ctx.draw_buffer.push_rect(RectShape::new_with_fill(
+            vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                 lgap,
                 Fill::new_with_color(Rgba8::BLACK),
             ));
-            ctx.draw_buffer.push_rect(RectShape::new_with_fill(
+            vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                 rgap,
                 Fill::new_with_color(Rgba8::BLACK),
             ));
-            ctx.draw_buffer.push_rect(RectShape::new_with_fill(
+            vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                 right,
                 Fill::new_with_color(Rgba8::ORANGE),
             ));
@@ -194,7 +194,7 @@ fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, area: gui::Rect) {
                     Vec2::new(min_x, 0.0),
                     Vec2::new(max_x, area.max.y),
                 ));
-                ctx.draw_buffer.push_rect(RectShape::new_with_fill(
+                vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                     gap,
                     Fill::new_with_color(Rgba8::BLACK),
                 ));
@@ -206,15 +206,15 @@ fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, area: gui::Rect) {
                         Constraint::Percentage(100.0 / SIZE.x),
                     ])
                     .split(bottom);
-                    ctx.draw_buffer.push_rect(RectShape::new_with_fill(
+                    vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                         left,
                         Fill::new_with_color(Rgba8::WHITE),
                     ));
-                    ctx.draw_buffer.push_rect(RectShape::new_with_fill(
+                    vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                         gap,
                         Fill::new_with_color(Rgba8::BLACK),
                     ));
-                    ctx.draw_buffer.push_rect(RectShape::new_with_fill(
+                    vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                         right,
                         Fill::new_with_color(Rgba8::BLACK),
                     ));
@@ -231,11 +231,12 @@ fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, area: gui::Rect) {
         gui::TextAppearance::from_appearance(&ctx.appearance).with_fg(gui::Rgba8::FUCHSIA),
     )
     .singleline()
-    .draw(ctx);
+    .draw(ctx, vpt);
 }
 
 struct App {
     gui_context: gui::Context<GuiExterns>,
+    gui_viewport: gui::Viewport<GuiExterns>,
     gui_renderer: gui::GlRenderer,
 
     input_state: input::State,
@@ -245,6 +246,7 @@ impl AppHandler for App {
     fn create(ctx: app::AppContext) -> Self {
         Self {
             gui_context: gui::Context::default(),
+            gui_viewport: gui::Viewport::default(),
             gui_renderer: gui::GlRenderer::new(ctx.gl_api).expect("gui gl renderer fucky wucky"),
 
             input_state: input::State::default(),
@@ -264,9 +266,10 @@ impl AppHandler for App {
     }
 
     fn update(&mut self, ctx: app::AppContext) {
-        let scale_factor = ctx.window.scale_factor();
+        let scale_factor = ctx.window.scale_factor() as f32;
 
-        self.gui_context.begin_frame(scale_factor as f32);
+        self.gui_context.begin_iteration();
+        self.gui_viewport.begin_frame(scale_factor);
 
         // ----
 
@@ -276,25 +279,31 @@ impl AppHandler for App {
         let physical_window_size = ctx.window.size();
         let logical_window_rect = gui::Rect::new(
             gui::Vec2::ZERO,
-            gui::Vec2::from(gui::U32Vec2::from(physical_window_size)) / scale_factor as f32,
+            gui::Vec2::from(gui::U32Vec2::from(physical_window_size)) / scale_factor,
         );
 
-        draw(&mut self.gui_context, logical_window_rect);
+        draw(
+            &mut self.gui_context,
+            &mut self.gui_viewport,
+            logical_window_rect,
+        );
 
         self.gui_context.interaction_state.take_cursor_shape();
 
         self.gui_renderer
             .render(
                 &mut self.gui_context,
+                &mut self.gui_viewport,
                 ctx.gl_api,
                 physical_window_size,
-                scale_factor as f32,
             )
             .expect("gui renderer fucky wucky");
 
         // ----
 
-        self.gui_context.end_frame();
+        self.gui_viewport.end_frame();
+        self.gui_context.end_iteration();
+
         self.input_state.end_frame();
     }
 }

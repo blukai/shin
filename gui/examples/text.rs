@@ -11,6 +11,7 @@ impl gui::Externs for GuiExterns {
 
 struct App {
     gui_context: gui::Context<GuiExterns>,
+    gui_viewport: gui::Viewport<GuiExterns>,
     gui_renderer: gui::GlRenderer,
 
     input_state: input::State,
@@ -27,6 +28,7 @@ impl AppHandler for App {
     fn create(ctx: app::AppContext) -> Self {
         Self {
             gui_context: gui::Context::default(),
+            gui_viewport: gui::Viewport::default(),
             gui_renderer: gui::GlRenderer::new(ctx.gl_api).expect("gui gl renderer fucky wucky"),
 
             input_state: input::State::default(),
@@ -53,9 +55,10 @@ impl AppHandler for App {
     }
 
     fn update(&mut self, ctx: app::AppContext) {
-        let scale_factor = ctx.window.scale_factor();
+        let scale_factor = ctx.window.scale_factor() as f32;
 
-        self.gui_context.begin_frame(scale_factor as f32);
+        self.gui_context.begin_iteration();
+        self.gui_viewport.begin_frame(scale_factor);
 
         // ----
 
@@ -65,7 +68,7 @@ impl AppHandler for App {
         let physical_window_size = ctx.window.size();
         let logical_window_rect = gui::Rect::new(
             gui::Vec2::ZERO,
-            gui::Vec2::from(gui::U32Vec2::from(physical_window_size)) / scale_factor as f32,
+            gui::Vec2::from(gui::U32Vec2::from(physical_window_size)) / scale_factor,
         );
 
         let primary_text_appearance =
@@ -82,7 +85,7 @@ impl AppHandler for App {
             .get_or_create_font_instance(
                 self.gui_context.appearance.font_handle,
                 self.gui_context.appearance.font_size,
-                self.gui_context.scale_factor,
+                self.gui_viewport.scale_factor,
             )
             .height()
             / self.gui_context.appearance.font_size;
@@ -104,7 +107,7 @@ impl AppHandler for App {
             )
             .with_appearance(caption_text_appearance.clone())
             .singleline()
-            .draw(&mut self.gui_context);
+            .draw(&mut self.gui_context, &mut self.gui_viewport);
 
             let (x, y) = self.input_state.pointer.position;
             gui::Text::new_non_interactive(
@@ -113,7 +116,7 @@ impl AppHandler for App {
             )
             .with_appearance(primary_text_appearance.clone())
             .singleline()
-            .draw(&mut self.gui_context);
+            .draw(&mut self.gui_context, &mut self.gui_viewport);
         }
 
         {
@@ -123,7 +126,7 @@ impl AppHandler for App {
             )
             .with_appearance(caption_text_appearance.clone())
             .singleline()
-            .draw(&mut self.gui_context);
+            .draw(&mut self.gui_context, &mut self.gui_viewport);
 
             gui::Text::new_selectable(
                 "なかなか興味深いですね",
@@ -132,7 +135,11 @@ impl AppHandler for App {
             )
             .with_appearance(primary_text_appearance.clone())
             .singleline()
-            .draw(&mut self.gui_context, &self.input_state);
+            .draw(
+                &mut self.gui_context,
+                &mut self.gui_viewport,
+                &self.input_state,
+            );
         }
 
         {
@@ -142,7 +149,7 @@ impl AppHandler for App {
             )
             .with_appearance(caption_text_appearance.clone())
             .singleline()
-            .draw(&mut self.gui_context);
+            .draw(&mut self.gui_context, &mut self.gui_viewport);
 
             gui::Text::new_editable(
                 &mut self.text_singleline_editable,
@@ -151,7 +158,11 @@ impl AppHandler for App {
             )
             .with_appearance(primary_text_appearance.clone())
             .singleline()
-            .draw(&mut self.gui_context, &self.input_state);
+            .draw(
+                &mut self.gui_context,
+                &mut self.gui_viewport,
+                &self.input_state,
+            );
         }
 
         {
@@ -161,7 +172,7 @@ impl AppHandler for App {
             )
             .with_appearance(caption_text_appearance.clone())
             .singleline()
-            .draw(&mut self.gui_context);
+            .draw(&mut self.gui_context, &mut self.gui_viewport);
 
             gui::Text::new_selectable(
                 "With no bamboo hat\nDoes the drizzle fall on me?\nWhat care I of that?",
@@ -170,7 +181,11 @@ impl AppHandler for App {
             )
             .with_appearance(primary_text_appearance.clone())
             .multiline()
-            .draw(&mut self.gui_context, &self.input_state);
+            .draw(
+                &mut self.gui_context,
+                &mut self.gui_viewport,
+                &self.input_state,
+            );
         }
 
         // TODO: need scroll area
@@ -181,7 +196,7 @@ impl AppHandler for App {
             )
             .with_appearance(caption_text_appearance.clone())
             .singleline()
-            .draw(&mut self.gui_context);
+            .draw(&mut self.gui_context, &mut self.gui_viewport);
             rect.min.y += 4.0;
 
             for font_instance in self.gui_context.font_service.iter_font_instances() {
@@ -189,7 +204,7 @@ impl AppHandler for App {
                     let size = gui::Vec2::from(gui::U32Vec2::from(
                         texture_page.texture_packer.texture_size(),
                     ));
-                    self.gui_context
+                    self.gui_viewport
                         .draw_buffer
                         .push_rect(gui::RectShape::new_with_fill(
                             gui::Rect::new(rect.min, rect.min + size),
@@ -239,16 +254,18 @@ impl AppHandler for App {
         self.gui_renderer
             .render(
                 &mut self.gui_context,
+                &mut self.gui_viewport,
                 ctx.gl_api,
                 physical_window_size,
-                scale_factor as f32,
             )
             // TODO: proper error handling
             .expect("gui renderer fucky wucky");
 
         // ----
 
-        self.gui_context.end_frame();
+        self.gui_viewport.end_frame();
+        self.gui_context.end_iteration();
+
         self.input_state.end_frame();
     }
 }

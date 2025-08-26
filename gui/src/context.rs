@@ -1,6 +1,8 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::mem;
 use std::time::{Duration, Instant};
 
+use anyhow::Context as _;
 use input::{Button, CursorShape};
 use nohash::NoHash;
 
@@ -60,13 +62,13 @@ pub struct InteractionState {
 }
 
 impl InteractionState {
-    pub fn begin_frame(&mut self) {
+    fn begin_iteration(&mut self) {
         // NOTE: start each frame with a default cursor so that the event loop can restore it to
         // default if nothing wants to set it.
         self.cursor_shape = Some(CursorShape::Default);
     }
 
-    pub fn end_frame(&mut self) {
+    fn end_iteration(&mut self) {
         self.hot_last_frame = self.hot.take();
         // NOTE: cursor shape needs to be taken before end of the frame.
         assert!(self.cursor_shape.is_none());
@@ -127,13 +129,13 @@ impl InteractionState {
 }
 
 struct ClipboardRead {
-    key: Key,
-    frame_time: Instant,
+    iteration_key: Key,
+    request_key: Key,
     payload: Option<anyhow::Result<String>>,
 }
 
 struct ClipboardWrite {
-    frame_time: Instant,
+    iteration_key: Key,
     payload: String,
 }
 
@@ -147,39 +149,48 @@ struct ClipboardWrite {
 /// - event loop fulfills it at the end of frame 1.
 #[derive(Default)]
 pub struct ClipboardState {
-    current_frame_start: Option<Instant>,
+    iteration_key: Option<Key>,
     read: Option<ClipboardRead>,
     write: Option<ClipboardWrite>,
 }
 
 impl ClipboardState {
-    pub fn begin_frame(&mut self, current_frame_start: Instant) {
-        self.current_frame_start = Some(current_frame_start);
+    fn take_iteration_key(&mut self) -> Key {
+        self.iteration_key.take().expect("didn't begin frame")
     }
 
-    pub fn end_frame(&mut self) {
-        let current_frame_start = self.current_frame_start.take().expect("didn't begin frame");
+    fn iteration_key(&self) -> Key {
+        self.iteration_key.expect("didn't begin frame")
+    }
+
+    fn begin_iteration(&mut self, iteration_key: Key) {
+        let prev_iteration_key = self.iteration_key.replace(iteration_key);
+        assert!(prev_iteration_key.is_none());
+    }
+
+    fn end_iteration(&mut self) {
+        let iteration_key = self.take_iteration_key();
 
         // NOTE: clean up request older than current frame (orphaned or unconsumed).
         self.read
-            .take_if(|r| r.frame_time < current_frame_start)
-            .inspect(|cr| log::debug!("[clipboard] evict read (key {:?})", cr.key));
+            .take_if(|r| r.iteration_key != iteration_key)
+            .inspect(|r| log::debug!("[clipboard] evict read (key {:?})", r.request_key));
 
         // NOTE: clean up request older than current frame (unconsumed).
         self.write
-            .take_if(|w| w.frame_time < current_frame_start)
+            .take_if(|w| w.iteration_key != iteration_key)
             .inspect(|_| log::debug!("[clipboard] evict write"));
     }
 
     /// widget requests clipboard read.
     ///
     /// it will only be possible to consume clipboard read next frame.
-    pub fn request_read(&mut self, key: Key) {
-        log::debug!("[clipboard] request read (key {key:?})");
-        let frame_time = self.current_frame_start.expect("didn't begin frame");
+    pub fn request_read(&mut self, request_key: Key) {
+        log::debug!("[clipboard] request read (key {request_key:?})");
+        let iteration_key = self.iteration_key();
         self.read = Some(ClipboardRead {
-            key,
-            frame_time,
+            iteration_key,
+            request_key,
             payload: None,
         });
     }
@@ -202,7 +213,7 @@ impl ClipboardState {
     /// widget(/the requester) takes(/consumes) clipboard read.
     pub fn try_take_read(&mut self, key: Key) -> Option<String> {
         self.read
-            .take_if(|r| r.key == key && r.payload.is_some())
+            .take_if(|r| r.request_key == key && r.payload.is_some())
             .and_then(|r| match r.payload {
                 Some(Ok(payload)) => {
                     log::debug!("[clipboard] took successful read ({key:?})");
@@ -221,9 +232,9 @@ impl ClipboardState {
     /// widget requests clipboard write.
     pub fn request_write(&mut self, payload: String) {
         log::debug!("[clipboard] request write (text {payload})");
-        let frame_time = self.current_frame_start.expect("didn't begin frame");
+        let iteration_key = self.iteration_key();
         self.write = Some(ClipboardWrite {
-            frame_time,
+            iteration_key,
             payload,
         });
     }
@@ -265,36 +276,88 @@ impl Appearance {
     }
 }
 
-// TODO: consider introducing viewports or something like that.
-// scale factor, refresh rate, etc. may vary per monitor thus each viewport probably will need to
-// own its timings, and possibly interaction state?
-
 // TODO: would be cool to support some kind of render targets or something for viewports to make it
 // possible to render multiple ones onto a single surface?
 
-// TODO: begin_frame and end_frame stuff is bad.
-// when working with multiple surfaces a single "pass" will consist of mutlple "frames" on
-// different "surfaces".
+// TODO: how context is supposed to be shared between different surfaces?
+// see https://stackoverflow.com/questions/29617370/multiple-opengl-contexts-multiple-windows-multithreading-and-vsync
 
-pub struct Context<E: Externs> {
+pub struct Viewport<E: Externs> {
     pub scale_factor: f32,
+    pub draw_buffer: DrawBuffer<E>,
 
     previous_frame_start: Instant,
     current_frame_start: Instant,
+    // TODO: consider storing delta_time as_secs_f32 because ViewportContext::dt is the only thing
+    // that accesses it and it always exposes it as_secs_f32; the computation is not absolutely
+    // free.
     delta_time: Duration,
 
-    pub font_service: FontService,
-    pub texture_service: TextureService<E>,
-    pub draw_buffer: DrawBuffer<E>,
+    touched_this_iteration: bool,
+}
+
+// @BlindDerive
+impl<E: Externs> Default for Viewport<E> {
+    fn default() -> Self {
+        Self {
+            scale_factor: 1.0,
+            draw_buffer: DrawBuffer::default(),
+
+            // TODO: unfuck instants. they shouldn't be constructed at now.
+            previous_frame_start: Instant::now(),
+            current_frame_start: Instant::now(),
+            delta_time: Duration::ZERO,
+
+            touched_this_iteration: false,
+        }
+    }
+}
+
+impl<E: Externs> Viewport<E> {
+    pub fn begin_frame(&mut self, scale_factor: f32) {
+        self.scale_factor = scale_factor;
+
+        self.current_frame_start = Instant::now();
+        self.delta_time = self.current_frame_start - self.previous_frame_start;
+        self.previous_frame_start = self.current_frame_start;
+
+        self.touched_this_iteration = true;
+    }
+
+    pub fn end_frame(&mut self) {
+        // TODO: rename draw_buffer's clear to end frame. but also make so that renderer drains it,
+        // not just gets the data from it.
+        self.draw_buffer.clear();
+
+        // NOTE: reset for the next iteration.
+        // TODO: this resent probably must not happen at the end of the frame, but at the beginning
+        // of the iteration?
+        let touched_this_iteration = mem::replace(&mut self.touched_this_iteration, false);
+        assert!(touched_this_iteration);
+    }
+
+    // TODO: consider removing dt method and instead storing dt as secs f32 and making it public.
+    pub fn dt(&self) -> f32 {
+        self.delta_time.as_secs_f32()
+    }
+}
+
+pub struct Context<E: Externs> {
+    iteration_num: u64,
 
     pub interaction_state: InteractionState,
     pub clipboard_state: ClipboardState,
-
     pub appearance: Appearance,
+
+    pub texture_service: TextureService<E>,
+    pub font_service: FontService,
 }
 
 impl<E: Externs> Default for Context<E> {
     fn default() -> Self {
+        // NOTE: am i okay with paniching here because the panic may only be caused by an invalid
+        // font file; you can guarantee valitidy of by not putting an invalid default font into
+        // fixtures directory xd.
         Self::new_with_default_font_slice(DEFAULT_FONT_DATA)
             .expect("somebody fucked things up; default font is invalid?")
     }
@@ -303,51 +366,38 @@ impl<E: Externs> Default for Context<E> {
 impl<E: Externs> Context<E> {
     pub fn new_with_default_font_slice(default_font_data: &'static [u8]) -> anyhow::Result<Self> {
         let mut font_service = FontService::default();
-        let default_font_handle = font_service.register_font_slice(default_font_data)?;
+        let default_font_handle = font_service
+            .register_font_slice(default_font_data)
+            .context("could not register font slice")?;
 
         Ok(Self {
-            scale_factor: 1.0,
-
-            previous_frame_start: Instant::now(),
-            current_frame_start: Instant::now(),
-            delta_time: Duration::ZERO,
-
-            texture_service: TextureService::default(),
-            font_service,
-            draw_buffer: DrawBuffer::default(),
+            iteration_num: 0,
 
             interaction_state: InteractionState::default(),
             clipboard_state: ClipboardState::default(),
-
             appearance: Appearance::new_dark(default_font_handle),
+
+            texture_service: TextureService::default(),
+            font_service,
         })
     }
 
-    pub fn begin_frame(&mut self, scale_factor: f32) {
-        self.scale_factor = scale_factor;
+    pub fn begin_iteration(&mut self) {
+        // will overflow in several billion years of running non stop; or in several thousand years
+        // in worst(/best) case scenarion of running at thousands frames per sec xd.
+        self.iteration_num += 1;
+        let iteration_key = Key::from_caller_location_and(self.iteration_num);
 
-        self.current_frame_start = Instant::now();
-        self.delta_time = self.current_frame_start - self.previous_frame_start;
-        self.previous_frame_start = self.current_frame_start;
+        self.interaction_state.begin_iteration();
+        self.clipboard_state.begin_iteration(iteration_key);
 
-        self.font_service.begin_frame();
-
-        self.interaction_state.begin_frame();
-        self.clipboard_state.begin_frame(self.current_frame_start);
+        self.font_service.begin_iteration();
     }
 
-    pub fn end_frame(&mut self) {
-        self.font_service.end_frame(&mut self.texture_service);
-        // TODO: rename draw_buffer's clear to end frame. but also make so that renderer drains it,
-        // not just gets the data from it.
-        self.draw_buffer.clear();
+    pub fn end_iteration(&mut self) {
+        self.interaction_state.end_iteration();
+        self.clipboard_state.end_iteration();
 
-        self.interaction_state.end_frame();
-        self.clipboard_state.end_frame();
-    }
-
-    // TODO: consider removing dt method and instead storing dt as secs f32 and making it public.
-    pub fn dt(&self) -> f32 {
-        self.delta_time.as_secs_f32()
+        self.font_service.end_iteration(&mut self.texture_service);
     }
 }

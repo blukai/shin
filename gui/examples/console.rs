@@ -112,6 +112,7 @@ impl Console {
         &mut self,
         rect: gui::Rect,
         ctx: &mut gui::Context<E>,
+        vpt: &mut gui::Viewport<E>,
         input: &input::State,
     ) {
         assert!(self.is_open());
@@ -122,13 +123,14 @@ impl Console {
             &mut self.history_state,
         )
         .multiline()
-        .draw(ctx, input);
+        .draw(ctx, vpt, input);
     }
 
     fn update_command_editor<E: gui::Externs>(
         &mut self,
         rect: gui::Rect,
         ctx: &mut gui::Context<E>,
+        vpt: &mut gui::Viewport<E>,
         input: &input::State,
     ) {
         assert!(self.is_open());
@@ -175,7 +177,7 @@ impl Console {
         // ----
 
         // background
-        ctx.draw_buffer.push_rect(gui::RectShape::new(
+        vpt.draw_buffer.push_rect(gui::RectShape::new(
             rect,
             gui::Fill::new_with_color(gui::Rgba8::from_u32(0xffffff0c)),
             gui::Stroke {
@@ -194,7 +196,7 @@ impl Console {
             .get_or_create_font_instance(
                 ctx.appearance.font_handle,
                 ctx.appearance.font_size,
-                ctx.scale_factor,
+                vpt.scale_factor,
             )
             .height();
         let py = (rect.height() - font_height) / 2.0;
@@ -207,13 +209,14 @@ impl Console {
         .with_key(key)
         .with_maybe_hot_or_active(ctx.interaction_state.is_hot(key), active)
         .singleline()
-        .draw(ctx, input);
+        .draw(ctx, vpt, input);
     }
 
     fn update<E: gui::Externs>(
         &mut self,
         rect: gui::Rect,
         ctx: &mut gui::Context<E>,
+        vpt: &mut gui::Viewport<E>,
         input: &input::State,
     ) {
         let input::KeyboardState { ref scancodes, .. } = input.keyboard;
@@ -227,7 +230,7 @@ impl Console {
                 .transition(0.0, -Self::HEIGHT, Self::ANIMATION_DURATION);
         }
 
-        self.open_animation.maybe_step(ctx.dt());
+        self.open_animation.maybe_step(vpt.dt());
         if !self.is_open() {
             return;
         }
@@ -236,7 +239,7 @@ impl Console {
             let min = rect.min + gui::Vec2::new(0.0, self.open_animation.get_value());
             gui::Rect::new(min, min + gui::Vec2::new(rect.max.x, Self::HEIGHT))
         };
-        ctx.draw_buffer.push_rect(gui::RectShape::new_with_fill(
+        vpt.draw_buffer.push_rect(gui::RectShape::new_with_fill(
             container_rect,
             gui::Fill::new_with_color(gui::Rgba8::from_u32(0x1f1f1fff)),
         ));
@@ -248,13 +251,14 @@ impl Console {
         ])
         .split(container_rect);
 
-        self.update_history(history_container_rect, ctx, input);
-        self.update_command_editor(command_editor_container_rect, ctx, input);
+        self.update_history(history_container_rect, ctx, vpt, input);
+        self.update_command_editor(command_editor_container_rect, ctx, vpt, input);
     }
 }
 
 struct App {
     gui_context: gui::Context<GuiExterns>,
+    gui_viewport: gui::Viewport<GuiExterns>,
     gui_renderer: gui::GlRenderer,
 
     input_state: input::State,
@@ -266,6 +270,7 @@ impl AppHandler for App {
     fn create(ctx: app::AppContext) -> Self {
         Self {
             gui_context: gui::Context::default(),
+            gui_viewport: gui::Viewport::default(),
             gui_renderer: gui::GlRenderer::new(ctx.gl_api).expect("gui gl renderer fucky wucky"),
 
             input_state: input::State::default(),
@@ -287,9 +292,10 @@ impl AppHandler for App {
     }
 
     fn update(&mut self, ctx: app::AppContext) {
-        let scale_factor = ctx.window.scale_factor();
+        let scale_factor = ctx.window.scale_factor() as f32;
 
-        self.gui_context.begin_frame(scale_factor as f32);
+        self.gui_context.begin_iteration();
+        self.gui_viewport.begin_frame(scale_factor);
 
         // ----
 
@@ -299,7 +305,7 @@ impl AppHandler for App {
         let physical_window_size = ctx.window.size();
         let logical_window_rect = gui::Rect::new(
             gui::Vec2::ZERO,
-            gui::Vec2::from(gui::U32Vec2::from(physical_window_size)) / scale_factor as f32,
+            gui::Vec2::from(gui::U32Vec2::from(physical_window_size)) / scale_factor,
         );
 
         gui::Text::new_non_interactive(
@@ -307,11 +313,12 @@ impl AppHandler for App {
             logical_window_rect.inflate(-gui::Vec2::new(16.0, 16.0 * 1.0)),
         )
         .singleline()
-        .draw(&mut self.gui_context);
+        .draw(&mut self.gui_context, &mut self.gui_viewport);
 
         self.console.update(
             logical_window_rect,
             &mut self.gui_context,
+            &mut self.gui_viewport,
             &self.input_state,
         );
 
@@ -343,16 +350,18 @@ impl AppHandler for App {
         self.gui_renderer
             .render(
                 &mut self.gui_context,
+                &mut self.gui_viewport,
                 ctx.gl_api,
                 physical_window_size,
-                scale_factor as f32,
             )
             // TODO: proper error handling
             .expect("gui renderer fucky wucky");
 
         // ----
 
-        self.gui_context.end_frame();
+        self.gui_viewport.end_frame();
+        self.gui_context.end_iteration();
+
         self.input_state.end_frame();
     }
 }

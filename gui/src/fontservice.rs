@@ -200,9 +200,9 @@ pub struct FontInstance {
     /// see https://developer.mozilla.org/en-US/docs/Web/CSS/length#ch
     typical_advance_width: f32,
 
-    // TODO: this will produce bad results when rendering to multiple surfaces.
-    // a single "pass" will consist of mutlple "frames" on different "surfaces".
-    touched_this_frame: bool,
+    // NOTE: touched_this_iteration is a flag that determines whether this font instance needs to
+    // be evicted or not.
+    touched_this_iteration: bool,
 }
 
 impl FontInstance {
@@ -232,7 +232,7 @@ impl FontInstance {
             ascent,
             typical_advance_width,
 
-            touched_this_frame: false,
+            touched_this_iteration: false,
         }
     }
 
@@ -333,18 +333,21 @@ pub struct FontService {
 }
 
 impl FontService {
-    pub fn begin_frame(&mut self) {
+    // TODO: begin_iteration and end_iteration need to go away. instead expose a way to inspect and
+    // evict font instances per decision of the owner of FontService.
+
+    pub fn begin_iteration(&mut self) {
         // TODO: should i just reset this at the end of the frame?
         self.font_instances.values_mut().for_each(|font_instance| {
-            font_instance.touched_this_frame = false;
+            font_instance.touched_this_iteration = false;
         });
     }
 
-    pub fn end_frame<E: Externs>(&mut self, texture_service: &mut TextureService<E>) {
+    pub fn end_iteration<E: Externs>(&mut self, texture_service: &mut TextureService<E>) {
         let mut num_font_instances_evicted: usize = 0;
 
         self.font_instances.retain(|_, font_instance| {
-            if font_instance.touched_this_frame {
+            if font_instance.touched_this_iteration {
                 return true;
             }
 
@@ -387,7 +390,7 @@ impl FontService {
             .font_instances
             .entry(make_font_instance_key(font_handle, pt_size, scale_factor))
             .or_insert_with(|| FontInstance::new(FontArc::clone(font), pt_size, scale_factor));
-        font_instance.touched_this_frame = true;
+        font_instance.touched_this_iteration = true;
 
         FontInstanceRefMut {
             font: FontArc::clone(font),

@@ -9,7 +9,7 @@ use input::{
 use crate::{
     Appearance, ClipboardState, Context, DrawBuffer, Externs, F64Vec2, Fill, FillTexture,
     FontHandle, FontInstanceRefMut, InteractionState, Key, Rect, RectShape, Rgba8, TextureKind,
-    TextureService, Vec2,
+    TextureService, Vec2, Viewport,
 };
 
 // TODO: per-char layout styling
@@ -29,8 +29,7 @@ use crate::{
 
 // TODO: draw inactive cursor (maybe only outline?)
 
-// TODO: support scrolling in non-selectable and non-editable text too. but input needs to support
-// scrolling (mouse wheel / trackpad).
+// TODO: consider supporting scrolling in non-selectable and non-editable text.
 
 // TODO: draw scrollbars.
 
@@ -47,6 +46,8 @@ use crate::{
 
 // TODO: vertical and horizontal multiline text alignment.
 // might want to finally make some kind of glyph buffer (within the Context) for this?
+
+// TODO: it should be possible to scroll in hot, and not necessarily active, text.
 
 // ----
 // testing utils
@@ -345,18 +346,20 @@ fn test_layout_row() {
 
     const CHARS_PER_ROW: usize = 16;
 
-    let mut ctx = Context::<UnitExterns>::default();
-    let mut font_instance = ctx.font_service.get_or_create_font_instance(
-        ctx.appearance.font_handle,
-        ctx.appearance.font_size,
-        ctx.scale_factor,
+    let mut context = Context::<UnitExterns>::default();
+    let mut viewport = Viewport::<UnitExterns>::default();
+
+    let mut font_instance = context.font_service.get_or_create_font_instance(
+        context.appearance.font_handle,
+        context.appearance.font_size,
+        viewport.scale_factor,
     );
 
     let haiku = "With no bamboo hat\nDoes the drizzle fall on me?\nWhat care I of that?";
     tests::assert_all_glyphs_have_equal_advance_width(
         haiku,
         font_instance.reborrow_mut(),
-        &mut ctx.texture_service,
+        &mut context.texture_service,
     );
     // NOTE: assertion above /\ ensures that the width below \/ matches the assumption.
     let width = font_instance.typical_advance_width() * CHARS_PER_ROW as f32;
@@ -369,7 +372,7 @@ fn test_layout_row() {
             last_row_range.end,
             container_rect,
             font_instance.reborrow_mut(),
-            &mut ctx.texture_service,
+            &mut context.texture_service,
         );
         // NOTE: a line may include invisible(/ chars that must not be rendered) at the end.
         let row = &haiku[last_row_range.clone()];
@@ -961,14 +964,14 @@ impl<Str, State, Interact> Text<Str, State, TextLineNone, Interact> {
 // singleline
 
 impl<'a> TextNonInteractiveSingle<'a> {
-    pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>) {
+    pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>, vpt: &mut Viewport<E>) {
         let appearance = self.resolved_appearance(ctx);
         let font_instance = ctx.font_service.get_or_create_font_instance(
             appearance.font_handle,
             appearance.font_size,
-            ctx.scale_factor,
+            vpt.scale_factor,
         );
-        let mut draw_buffer = ctx.draw_buffer.clip_scope(self.container_rect);
+        let mut draw_buffer = vpt.draw_buffer.clip_scope(self.container_rect);
 
         draw_singleline_text(
             self.str,
@@ -1099,12 +1102,17 @@ impl<'a> TextSelectableSingle<'a> {
         }
     }
 
-    pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>, input: &input::State) {
+    pub fn draw<E: Externs>(
+        mut self,
+        ctx: &mut Context<E>,
+        vpt: &mut Viewport<E>,
+        input: &input::State,
+    ) {
         let appearance = self.resolved_appearance(ctx);
         let mut font_instance = ctx.font_service.get_or_create_font_instance(
             appearance.font_handle,
             appearance.font_size,
-            ctx.scale_factor,
+            vpt.scale_factor,
         );
 
         self.update(
@@ -1115,7 +1123,7 @@ impl<'a> TextSelectableSingle<'a> {
             input,
         );
 
-        let mut draw_buffer = ctx.draw_buffer.clip_scope(self.container_rect);
+        let mut draw_buffer = vpt.draw_buffer.clip_scope(self.container_rect);
         draw_singleline_text(
             self.str,
             self.container_rect,
@@ -1322,12 +1330,17 @@ impl<'a> TextEditableSingle<'a> {
         }
     }
 
-    pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>, input: &input::State) {
+    pub fn draw<E: Externs>(
+        mut self,
+        ctx: &mut Context<E>,
+        vpt: &mut Viewport<E>,
+        input: &input::State,
+    ) {
         let appearance = self.resolved_appearance(ctx);
         let mut font_instance = ctx.font_service.get_or_create_font_instance(
             appearance.font_handle,
             appearance.font_size,
-            ctx.scale_factor,
+            vpt.scale_factor,
         );
 
         self.update(
@@ -1339,7 +1352,7 @@ impl<'a> TextEditableSingle<'a> {
             input,
         );
 
-        let mut draw_buffer = ctx.draw_buffer.clip_scope(self.container_rect);
+        let mut draw_buffer = vpt.draw_buffer.clip_scope(self.container_rect);
         draw_singleline_text(
             self.str,
             self.container_rect,
@@ -1360,14 +1373,14 @@ impl<'a> TextEditableSingle<'a> {
 // multiline
 
 impl<'a> TextNonInteractiveMulti<'a> {
-    pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>) {
+    pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>, vpt: &mut Viewport<E>) {
         let appearance = self.resolved_appearance(ctx);
         let font_instance = ctx.font_service.get_or_create_font_instance(
             appearance.font_handle,
             appearance.font_size,
-            ctx.scale_factor,
+            vpt.scale_factor,
         );
-        let mut draw_buffer = ctx.draw_buffer.clip_scope(self.container_rect);
+        let mut draw_buffer = vpt.draw_buffer.clip_scope(self.container_rect);
 
         draw_multiline_text(
             self.str,
@@ -1523,12 +1536,17 @@ impl<'a> TextSelectableMulti<'a> {
         }
     }
 
-    pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>, input: &input::State) {
+    pub fn draw<E: Externs>(
+        mut self,
+        ctx: &mut Context<E>,
+        vpt: &mut Viewport<E>,
+        input: &input::State,
+    ) {
         let appearance = self.resolved_appearance(ctx);
         let mut font_instance = ctx.font_service.get_or_create_font_instance(
             appearance.font_handle,
             appearance.font_size,
-            ctx.scale_factor,
+            vpt.scale_factor,
         );
 
         self.update(
@@ -1540,7 +1558,7 @@ impl<'a> TextSelectableMulti<'a> {
             input,
         );
 
-        let mut draw_buffer = ctx.draw_buffer.clip_scope(self.container_rect);
+        let mut draw_buffer = vpt.draw_buffer.clip_scope(self.container_rect);
         draw_multiline_text(
             self.str,
             self.container_rect,

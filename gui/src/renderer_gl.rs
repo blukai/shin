@@ -6,7 +6,7 @@ use anyhow::{Context as _, anyhow};
 use gl::api::Apier as _;
 
 use super::Renderer;
-use crate::{Context, DrawCommand, Externs, TextureKind, TextureService, Vertex};
+use crate::{Context, DrawCommand, Externs, TextureKind, TextureService, Vertex, Viewport};
 
 const SHADER_SOURCE: &str = include_str!("shader.glsl");
 
@@ -279,9 +279,10 @@ impl GlRenderer {
     pub fn render<E>(
         &self,
         ctx: &mut Context<E>,
+        vpt: &mut Viewport<E>,
         gl_api: &gl::api::Api,
+        // TODO: viewport should be aware of its view size.
         physical_view_size: (u32, u32),
-        scale_factor: f32,
     ) -> anyhow::Result<()>
     where
         E: Externs<TextureHandle = <Self as Renderer>::TextureHandle>,
@@ -298,12 +299,12 @@ impl GlRenderer {
             );
             gl_api.uniform_2f(
                 self.u_view_size_location,
-                (physical_view_size.0 as f32 / scale_factor) as gl::api::GLfloat,
-                (physical_view_size.1 as f32 / scale_factor) as gl::api::GLfloat,
+                (physical_view_size.0 as f32 / vpt.scale_factor) as gl::api::GLfloat,
+                (physical_view_size.1 as f32 / vpt.scale_factor) as gl::api::GLfloat,
             );
         }
 
-        for draw_data in ctx.draw_buffer.iter_draw_data() {
+        for draw_data in vpt.draw_buffer.iter_draw_data() {
             unsafe {
                 gl_api.buffer_data(
                     gl::api::ARRAY_BUFFER,
@@ -327,11 +328,11 @@ impl GlRenderer {
                     if let Some(clip_rect) = clip_rect {
                         gl_api.enable(gl::api::SCISSOR_TEST);
 
-                        let x = (clip_rect.min.x * scale_factor).round() as i32;
+                        let x = (clip_rect.min.x * vpt.scale_factor).round() as i32;
                         let y = physical_view_size.1 as i32
-                            - (clip_rect.max.y * scale_factor).round() as i32;
-                        let width = (clip_rect.width() * scale_factor).round() as i32;
-                        let height = (clip_rect.height() * scale_factor).round() as i32;
+                            - (clip_rect.max.y * vpt.scale_factor).round() as i32;
+                        let width = (clip_rect.width() * vpt.scale_factor).round() as i32;
+                        let height = (clip_rect.height() * vpt.scale_factor).round() as i32;
                         gl_api.scissor(x, y, width, height);
                     }
 
