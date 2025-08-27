@@ -130,8 +130,8 @@ pub trait Window: rwh::HasDisplayHandle + rwh::HasWindowHandle {
     // TODO: might need to introduce a method that would allow to list mime types that are
     // currently available for read from the clipboard.
 
+    fn physical_size(&self) -> (u32, u32);
     fn scale_factor(&self) -> f64;
-    fn size(&self) -> (u32, u32);
 }
 
 pub fn create_window(window_attrs: WindowAttrs) -> anyhow::Result<Box<dyn Window>> {

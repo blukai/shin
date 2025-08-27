@@ -281,8 +281,6 @@ impl GlRenderer {
         ctx: &mut Context<E>,
         vpt: &mut Viewport<E>,
         gl_api: &gl::api::Api,
-        // TODO: viewport should be aware of its view size.
-        physical_view_size: (u32, u32),
     ) -> anyhow::Result<()>
     where
         E: Externs<TextureHandle = <Self as Renderer>::TextureHandle>,
@@ -294,13 +292,13 @@ impl GlRenderer {
             gl_api.viewport(
                 0,
                 0,
-                physical_view_size.0 as gl::api::GLsizei,
-                physical_view_size.1 as gl::api::GLsizei,
+                vpt.physical_size.x as gl::api::GLsizei,
+                vpt.physical_size.y as gl::api::GLsizei,
             );
             gl_api.uniform_2f(
                 self.u_view_size_location,
-                (physical_view_size.0 as f32 / vpt.scale_factor) as gl::api::GLfloat,
-                (physical_view_size.1 as f32 / vpt.scale_factor) as gl::api::GLfloat,
+                (vpt.physical_size.x / vpt.scale_factor) as gl::api::GLfloat,
+                (vpt.physical_size.y / vpt.scale_factor) as gl::api::GLfloat,
             );
         }
 
@@ -329,7 +327,7 @@ impl GlRenderer {
                         gl_api.enable(gl::api::SCISSOR_TEST);
 
                         let x = (clip_rect.min.x * vpt.scale_factor).round() as i32;
-                        let y = physical_view_size.1 as i32
+                        let y = vpt.physical_size.y as i32
                             - (clip_rect.max.y * vpt.scale_factor).round() as i32;
                         let width = (clip_rect.width() * vpt.scale_factor).round() as i32;
                         let height = (clip_rect.height() * vpt.scale_factor).round() as i32;

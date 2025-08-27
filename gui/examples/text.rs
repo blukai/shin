@@ -55,21 +55,20 @@ impl AppHandler for App {
     }
 
     fn update(&mut self, ctx: app::AppContext) {
+        let physical_window_size = gui::Vec2::from(gui::U32Vec2::from(ctx.window.physical_size()));
         let scale_factor = ctx.window.scale_factor() as f32;
 
         self.gui_context.begin_iteration();
-        self.gui_viewport.begin_frame(scale_factor);
+        self.gui_viewport
+            .begin_frame(physical_window_size, scale_factor);
 
         // ----
 
         unsafe { ctx.gl_api.clear_color(0.0, 0.0, 0.4, 1.0) };
         unsafe { ctx.gl_api.clear(gl::api::COLOR_BUFFER_BIT) };
 
-        let physical_window_size = ctx.window.size();
-        let logical_window_rect = gui::Rect::new(
-            gui::Vec2::ZERO,
-            gui::Vec2::from(gui::U32Vec2::from(physical_window_size)) / scale_factor,
-        );
+        let logical_window_size = physical_window_size / scale_factor;
+        let logical_window_rect = gui::Rect::new(gui::Vec2::ZERO, logical_window_size);
 
         let primary_text_appearance =
             gui::TextAppearance::from_appearance(&self.gui_context.appearance);
@@ -252,12 +251,7 @@ impl AppHandler for App {
         }
 
         self.gui_renderer
-            .render(
-                &mut self.gui_context,
-                &mut self.gui_viewport,
-                ctx.gl_api,
-                physical_window_size,
-            )
+            .render(&mut self.gui_context, &mut self.gui_viewport, ctx.gl_api)
             // TODO: proper error handling
             .expect("gui renderer fucky wucky");
 

@@ -1841,7 +1841,7 @@ impl WaylandBackend {
         }
 
         self.events.push_back(Event::Window(WindowEvent::Resized {
-            physical_size: self.size(),
+            physical_size: self.physical_size(),
         }));
 
         if scale_factor_changed {
@@ -2110,16 +2110,16 @@ impl Window for WaylandBackend {
         self.set_clipboard_data(data_provider)
     }
 
-    fn scale_factor(&self) -> f64 {
-        self.scale_factor.unwrap_or(1.0)
-    }
-
-    fn size(&self) -> (u32, u32) {
+    fn physical_size(&self) -> (u32, u32) {
         let logical_size = self.logical_size.expect("logical size");
         let scale_factor = self.scale_factor.unwrap_or(1.0);
         (
             (logical_size.0 as f64 * scale_factor) as u32,
             (logical_size.1 as f64 * scale_factor) as u32,
         )
+    }
+
+    fn scale_factor(&self) -> f64 {
+        self.scale_factor.unwrap_or(1.0)
     }
 }

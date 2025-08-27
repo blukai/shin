@@ -345,14 +345,14 @@ fn test_layout_row() {
     use crate::UnitExterns;
 
     const CHARS_PER_ROW: usize = 16;
+    const SCALE_FACTOR: f32 = 1.0;
 
     let mut context = Context::<UnitExterns>::default();
-    let mut viewport = Viewport::<UnitExterns>::default();
 
     let mut font_instance = context.font_service.get_or_create_font_instance(
         context.appearance.font_handle,
         context.appearance.font_size,
-        viewport.scale_factor,
+        SCALE_FACTOR,
     );
 
     let haiku = "With no bamboo hat\nDoes the drizzle fall on me?\nWhat care I of that?";

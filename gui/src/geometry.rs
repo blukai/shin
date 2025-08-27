@@ -1,5 +1,7 @@
 use std::ops;
 
+// TODO: introduce as_vec2 method for F64Vec2 and U32Vec2.
+
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct Vec2 {
     pub x: f32,

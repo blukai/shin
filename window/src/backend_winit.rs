@@ -403,14 +403,14 @@ impl Window for WinitBackend {
         Ok(())
     }
 
+    fn physical_size(&self) -> (u32, u32) {
+        let window = self.app.window.as_ref().expect("initialized window");
+        let inner_physical_size = window.inner_size();
+        (inner_physical_size.width, inner_physical_size.height)
+    }
+
     fn scale_factor(&self) -> f64 {
         let window = self.app.window.as_ref().expect("initialized window");
         window.scale_factor()
-    }
-
-    fn size(&self) -> (u32, u32) {
-        let window = self.app.window.as_ref().expect("initialized window");
-        let inner_size = window.inner_size();
-        (inner_size.width, inner_size.height)
     }
 }

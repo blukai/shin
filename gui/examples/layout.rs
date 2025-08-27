@@ -8,7 +8,7 @@ impl gui::Externs for GuiExterns {
     type TextureHandle = <gui::GlRenderer as gui::Renderer>::TextureHandle;
 }
 
-fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, vpt: &mut gui::Viewport<E>, area: gui::Rect) {
+fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, vpt: &mut gui::Viewport<E>) {
     use gui::*;
 
     // Tableau I, by Piet Mondriaan
@@ -23,12 +23,15 @@ fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, vpt: &mut gui::Viewport<E>, 
     const GAP: Constraint = gui::Constraint::Length(20.0);
     const BOTTOM_HEIGHT: f32 = 540.0;
 
+    let viewport_logical_size = vpt.physical_size / vpt.scale_factor;
+    let viewport_area = Rect::new(Vec2::ZERO, viewport_logical_size);
+
     let [top, gap, bottom] = vstack([
         Constraint::Percentage(TOP_HEIGHT / SIZE.y),
         GAP,
         Constraint::Percentage(BOTTOM_HEIGHT / SIZE.y),
     ])
-    .split(area);
+    .split(viewport_area);
 
     // top
     {
@@ -192,7 +195,7 @@ fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, vpt: &mut gui::Viewport<E>, 
                 ])
                 .split(Rect::new(
                     Vec2::new(min_x, 0.0),
-                    Vec2::new(max_x, area.max.y),
+                    Vec2::new(max_x, viewport_area.max.y),
                 ));
                 vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                     gap,
@@ -225,7 +228,7 @@ fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, vpt: &mut gui::Viewport<E>, 
 
     gui::Text::new_non_interactive(
         "Tableau I, by Piet Mondriaan",
-        area.inflate(-Vec2::splat(24.0)),
+        viewport_area.inflate(-Vec2::splat(24.0)),
     )
     .with_appearance(
         gui::TextAppearance::from_appearance(&ctx.appearance).with_fg(gui::Rgba8::FUCHSIA),
@@ -266,37 +269,24 @@ impl AppHandler for App {
     }
 
     fn update(&mut self, ctx: app::AppContext) {
+        let physical_window_size = gui::Vec2::from(gui::U32Vec2::from(ctx.window.physical_size()));
         let scale_factor = ctx.window.scale_factor() as f32;
 
         self.gui_context.begin_iteration();
-        self.gui_viewport.begin_frame(scale_factor);
+        self.gui_viewport
+            .begin_frame(physical_window_size, scale_factor);
 
         // ----
 
         unsafe { ctx.gl_api.clear_color(0.0, 0.0, 0.3, 1.0) };
         unsafe { ctx.gl_api.clear(gl::api::COLOR_BUFFER_BIT) };
 
-        let physical_window_size = ctx.window.size();
-        let logical_window_rect = gui::Rect::new(
-            gui::Vec2::ZERO,
-            gui::Vec2::from(gui::U32Vec2::from(physical_window_size)) / scale_factor,
-        );
-
-        draw(
-            &mut self.gui_context,
-            &mut self.gui_viewport,
-            logical_window_rect,
-        );
+        draw(&mut self.gui_context, &mut self.gui_viewport);
 
         self.gui_context.interaction_state.take_cursor_shape();
 
         self.gui_renderer
-            .render(
-                &mut self.gui_context,
-                &mut self.gui_viewport,
-                ctx.gl_api,
-                physical_window_size,
-            )
+            .render(&mut self.gui_context, &mut self.gui_viewport, ctx.gl_api)
             .expect("gui renderer fucky wucky");
 
         // ----

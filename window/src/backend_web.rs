@@ -110,11 +110,11 @@ impl Window for WebBackend {
         unimplemented!()
     }
 
-    fn scale_factor(&self) -> f64 {
+    fn physical_size(&self) -> (u32, u32) {
         unimplemented!()
     }
 
-    fn size(&self) -> (u32, u32) {
+    fn scale_factor(&self) -> f64 {
         unimplemented!()
     }
 }

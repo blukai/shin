@@ -89,7 +89,7 @@ impl InteractionState {
         // TODO: setting thing inactive on press (not on release) seem too feel more natural, but i
         // am not completely sure yet.
         //
-        // NOTE: setting thing inactive on release makes things weird with for example text
+        // NOTE: setting thing inactive on relase makes things weird with for example text
         // selection.
         if self.active == Some(key)
             && input.pointer.buttons.just_pressed(Button::Primary)
@@ -121,6 +121,10 @@ impl InteractionState {
 
     pub fn is_active(&self, key: Key) -> bool {
         self.active == Some(key)
+    }
+
+    pub fn set_cursor_shape(&mut self, cursor_shape: CursorShape) {
+        self.cursor_shape = Some(cursor_shape);
     }
 
     pub fn take_cursor_shape(&mut self) -> Option<CursorShape> {
@@ -283,7 +287,9 @@ impl Appearance {
 // see https://stackoverflow.com/questions/29617370/multiple-opengl-contexts-multiple-windows-multithreading-and-vsync
 
 pub struct Viewport<E: Externs> {
+    pub physical_size: Vec2,
     pub scale_factor: f32,
+
     pub draw_buffer: DrawBuffer<E>,
 
     previous_frame_start: Instant,
@@ -300,7 +306,8 @@ pub struct Viewport<E: Externs> {
 impl<E: Externs> Default for Viewport<E> {
     fn default() -> Self {
         Self {
-            scale_factor: 1.0,
+            physical_size: Vec2::ZERO,
+            scale_factor: 0.0,
             draw_buffer: DrawBuffer::default(),
 
             // TODO: unfuck instants. they shouldn't be constructed at now.
@@ -314,7 +321,11 @@ impl<E: Externs> Default for Viewport<E> {
 }
 
 impl<E: Externs> Viewport<E> {
-    pub fn begin_frame(&mut self, scale_factor: f32) {
+    pub fn begin_frame(&mut self, physical_size: Vec2, scale_factor: f32) {
+        assert!(physical_size.x > 0.0 && physical_size.y > 0.0);
+        assert!(scale_factor > 0.0);
+
+        self.physical_size = physical_size;
         self.scale_factor = scale_factor;
 
         self.current_frame_start = Instant::now();
