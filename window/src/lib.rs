@@ -33,6 +33,9 @@ pub struct WindowAttrs {
     pub resizable: bool,
 }
 
+// TODO: i don't want this ti be called window event. maybe it does not even need to be separated
+// from Event? cosider either renaming WindowEvent to SurfaceEvent or moving all variants into
+// Event? or maybe you'll get better ideas?
 #[derive(Debug)]
 pub enum WindowEvent {
     Configure { logical_size: (u32, u32) },
@@ -41,6 +44,9 @@ pub enum WindowEvent {
     CloseRequested,
 }
 
+// TODO: event probably needs to be split into Event and EventKind where Event will contain
+// additional info such as surface id and possibly device id? it must be possible to ~route input
+// events per-surface and possibly per-device?
 #[derive(Debug)]
 pub enum Event {
     Window(WindowEvent),

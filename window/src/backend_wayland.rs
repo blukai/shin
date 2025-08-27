@@ -135,6 +135,7 @@ impl Cursor {
         scale: f64,
     ) -> anyhow::Result<Self> {
         assert!(!wl_compositor.is_null());
+        assert!(!wl_shm.is_null());
 
         let libwayland_cursor = wayland::CursorApi::load()?;
 

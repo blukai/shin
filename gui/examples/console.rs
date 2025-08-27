@@ -292,30 +292,30 @@ impl AppHandler for App {
     }
 
     fn update(&mut self, ctx: app::AppContext) {
-        let physical_window_size = gui::Vec2::from(gui::U32Vec2::from(ctx.window.physical_size()));
+        let physical_size = gui::Vec2::from(gui::U32Vec2::from(ctx.window.physical_size()));
         let scale_factor = ctx.window.scale_factor() as f32;
 
+        self.input_state.begin_iteration();
         self.gui_context.begin_iteration();
-        self.gui_viewport
-            .begin_frame(physical_window_size, scale_factor);
+        self.gui_viewport.begin_frame(physical_size, scale_factor);
 
         // ----
 
         unsafe { ctx.gl_api.clear_color(0.094, 0.094, 0.094, 1.0) };
         unsafe { ctx.gl_api.clear(gl::api::COLOR_BUFFER_BIT) };
 
-        let logical_window_size = physical_window_size / scale_factor;
-        let logical_window_rect = gui::Rect::new(gui::Vec2::ZERO, logical_window_size);
+        let logical_size = physical_size / scale_factor;
+        let logical_rect = gui::Rect::new(gui::Vec2::ZERO, logical_size);
 
         gui::Text::new_non_interactive(
             "press ` to open console",
-            logical_window_rect.inflate(-gui::Vec2::new(16.0, 16.0 * 1.0)),
+            logical_rect.inflate(-gui::Vec2::new(16.0, 16.0 * 1.0)),
         )
         .singleline()
         .draw(&mut self.gui_context, &mut self.gui_viewport);
 
         self.console.update(
-            logical_window_rect,
+            logical_rect,
             &mut self.gui_context,
             &mut self.gui_viewport,
             &self.input_state,
@@ -355,8 +355,7 @@ impl AppHandler for App {
 
         self.gui_viewport.end_frame();
         self.gui_context.end_iteration();
-
-        self.input_state.end_frame();
+        self.input_state.end_iteration();
     }
 }
 

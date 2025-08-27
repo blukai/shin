@@ -9,6 +9,9 @@ use nohash::{NoHash, NoHashMap};
 // device id because maybe you want to let people play split screen with with different controllers
 // (event though i am absolutely clueless and never did own one).
 
+// TODO: what's currently in end_iteration probably must be in begin_iteration. unfuck AppHandler
+// thing first. or maybe get rid of it?
+
 // pointer
 // ----
 
@@ -67,8 +70,10 @@ pub enum GesturePhase {
     Cancelled,
 }
 
-// TODO: combine Press and Release events into Button event with
-// enum KeyState { Pressed, Released }
+// TODO: PointerEvent is awkward because it does not carry position info for events other then
+// Move. PointerState has it, but there's absolutely no guaranttee that it's in sync. InputState
+// always represents the latest, but use may be processing events one by one and when click happens
+// position in InputState may not exactly-correctly represent click's position.
 //
 // TODO: consider implementing Swipe event. on wayland perhaps you can listen for hold event with 2
 // fingers followed by horizontal scroll?
@@ -411,7 +416,9 @@ impl<B> StateTracker<B>
 where
     B: Copy + Eq + NoHash,
 {
-    pub fn end_frame(&mut self) {
+    pub fn begin_iteration(&mut self) {}
+
+    pub fn end_iteration(&mut self) {
         self.map.values_mut().for_each(|state| {
             state.0 &= !StateFlags::JUST_PRESSED;
             state.0 &= !StateFlags::JUST_RELEASED;
@@ -528,7 +535,11 @@ where
 #[derive(Debug, Default)]
 pub struct PointerState {
     pub position: (f64, f64),
-    // TODO: how to handle this on the very first frame? do i care?
+    // NOTE: a single iteration (of an event loop) may accumulate multiple move events thus to
+    // compute correct deltas we need to diff against prev frame and not against prev value.
+    prev_position: (f64, f64),
+    // TODO: how to handle position_delta on the very first frame? new position minus zero position
+    // will yield a weird result. do i care?
     pub position_delta: (f64, f64),
     pub buttons: StateTracker<Button>,
     pub press_origins: NoHashMap<Button, (f64, f64)>,
@@ -536,18 +547,32 @@ pub struct PointerState {
 
 impl PointerState {
     #[inline]
+    pub fn begin_iteration(&mut self) {
+        self.buttons.begin_iteration();
+    }
+
+    #[inline]
+    pub fn end_iteration(&mut self) {
+        self.prev_position = self.position;
+        self.position_delta = (0.0, 0.0);
+        self.buttons.end_iteration();
+    }
+
+    #[inline]
     pub fn handle_event(&mut self, ev: PointerEvent) {
         use PointerEvent::*;
         match ev {
             // NOTE: (on Enter) when window spawns right under the cursor doing this helps to
             // compute correct deltas and dispatch press with correct delta.
             Enter {
-                position: Some(next),
+                position: Some(next_position),
             }
-            | Move { position: next } => {
-                self.position_delta.0 = next.0 - self.position.0;
-                self.position_delta.1 = next.1 - self.position.1;
-                self.position = next;
+            | Move {
+                position: next_position,
+            } => {
+                self.position = next_position;
+                self.position_delta.0 = self.position.0 - self.prev_position.0;
+                self.position_delta.1 = self.position.1 - self.prev_position.1;
             }
             Button {
                 state: ButtonState::Pressed,
@@ -565,11 +590,6 @@ impl PointerState {
             }
             _ => {}
         }
-    }
-
-    #[inline]
-    pub fn end_frame(&mut self) {
-        self.buttons.end_frame();
     }
 }
 
@@ -625,6 +645,18 @@ pub struct KeyboardState {
 
 impl KeyboardState {
     #[inline]
+    pub fn begin_iteration(&mut self) {
+        self.scancodes.begin_iteration();
+        self.keycodes.begin_iteration();
+    }
+
+    #[inline]
+    pub fn end_iteration(&mut self) {
+        self.scancodes.end_iteration();
+        self.keycodes.end_iteration();
+    }
+
+    #[inline]
     pub fn handle_event(&mut self, ev: KeyboardEvent) {
         use KeyboardEvent::*;
         match ev {
@@ -654,12 +686,6 @@ impl KeyboardState {
             }
         }
     }
-
-    #[inline]
-    pub fn end_frame(&mut self) {
-        self.scancodes.end_frame();
-        self.keycodes.end_frame();
-    }
 }
 
 /// Event is not for you to really use on your side. it's more of an internal thing for this mod.
@@ -673,11 +699,21 @@ pub enum Event {
 pub struct State {
     pub pointer: PointerState,
     pub keyboard: KeyboardState,
-
     pub events: Vec<Event>,
 }
 
 impl State {
+    pub fn begin_iteration(&mut self) {
+        self.pointer.begin_iteration();
+        self.keyboard.begin_iteration();
+    }
+
+    pub fn end_iteration(&mut self) {
+        self.pointer.end_iteration();
+        self.keyboard.end_iteration();
+        self.events.clear();
+    }
+
     #[inline]
     pub fn handle_event(&mut self, ev: Event) {
         use Event::*;
@@ -687,13 +723,5 @@ impl State {
         }
 
         self.events.push(ev);
-    }
-
-    #[inline]
-    pub fn end_frame(&mut self) {
-        self.pointer.end_frame();
-        self.keyboard.end_frame();
-
-        self.events.clear();
     }
 }

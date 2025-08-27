@@ -55,20 +55,20 @@ impl AppHandler for App {
     }
 
     fn update(&mut self, ctx: app::AppContext) {
-        let physical_window_size = gui::Vec2::from(gui::U32Vec2::from(ctx.window.physical_size()));
+        let physical_size = gui::Vec2::from(gui::U32Vec2::from(ctx.window.physical_size()));
         let scale_factor = ctx.window.scale_factor() as f32;
 
+        self.input_state.begin_iteration();
         self.gui_context.begin_iteration();
-        self.gui_viewport
-            .begin_frame(physical_window_size, scale_factor);
+        self.gui_viewport.begin_frame(physical_size, scale_factor);
 
         // ----
 
         unsafe { ctx.gl_api.clear_color(0.0, 0.0, 0.4, 1.0) };
         unsafe { ctx.gl_api.clear(gl::api::COLOR_BUFFER_BIT) };
 
-        let logical_window_size = physical_window_size / scale_factor;
-        let logical_window_rect = gui::Rect::new(gui::Vec2::ZERO, logical_window_size);
+        let logical_size = physical_size / scale_factor;
+        let logical_rect = gui::Rect::new(gui::Vec2::ZERO, logical_size);
 
         let primary_text_appearance =
             gui::TextAppearance::from_appearance(&self.gui_context.appearance);
@@ -88,7 +88,7 @@ impl AppHandler for App {
             )
             .height()
             / self.gui_context.appearance.font_size;
-        let mut rect = logical_window_rect.inflate(-gui::Vec2::splat(16.0));
+        let mut rect = logical_rect.inflate(-gui::Vec2::splat(16.0));
         let mut use_rect = |font_size: f32, times: usize, add_gap: bool| -> gui::Rect {
             let prev = rect;
             let font_height = font_size * font_height_factor;
@@ -259,8 +259,7 @@ impl AppHandler for App {
 
         self.gui_viewport.end_frame();
         self.gui_context.end_iteration();
-
-        self.input_state.end_frame();
+        self.input_state.end_iteration();
     }
 }
 

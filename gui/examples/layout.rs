@@ -269,12 +269,12 @@ impl AppHandler for App {
     }
 
     fn update(&mut self, ctx: app::AppContext) {
-        let physical_window_size = gui::Vec2::from(gui::U32Vec2::from(ctx.window.physical_size()));
+        let physical_size = gui::Vec2::from(gui::U32Vec2::from(ctx.window.physical_size()));
         let scale_factor = ctx.window.scale_factor() as f32;
 
+        self.input_state.begin_iteration();
         self.gui_context.begin_iteration();
-        self.gui_viewport
-            .begin_frame(physical_window_size, scale_factor);
+        self.gui_viewport.begin_frame(physical_size, scale_factor);
 
         // ----
 
@@ -293,8 +293,7 @@ impl AppHandler for App {
 
         self.gui_viewport.end_frame();
         self.gui_context.end_iteration();
-
-        self.input_state.end_frame();
+        self.input_state.end_iteration();
     }
 }
 
