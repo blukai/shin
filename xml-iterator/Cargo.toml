@@ -1,6 +1,0 @@
-[package]
-# TODO: consider renaming this to just "xml"
-name = "xml-iterator"
-version = "0.0.0"
-edition.workspace = true
-

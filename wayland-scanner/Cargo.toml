@@ -6,4 +6,4 @@ edition.workspace = true
 [dependencies]
 anyhow.workspace = true
 # workspace
-xml-iterator.workspace = true
+xml.workspace = true

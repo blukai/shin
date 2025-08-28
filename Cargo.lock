@@ -386,7 +386,7 @@ name = "gl-generator"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "xml-iterator",
+ "xml",
 ]
 
 [[package]]
@@ -1367,7 +1367,7 @@ name = "wayland-scanner"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "xml-iterator",
+ "xml",
 ]
 
 [[package]]
@@ -1768,7 +1768,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
 
 [[package]]
-name = "xml-iterator"
+name = "xml"
 version = "0.0.0"
 
 [[package]]

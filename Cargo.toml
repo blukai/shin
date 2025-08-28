@@ -11,7 +11,7 @@ members = [
   "wayland-scanner",
   "window",
   "xkbcommon",
-  "xml-iterator",
+  "xml",
 ]
 
 [workspace.package]
@@ -39,7 +39,7 @@ wayland = { path = "wayland" }
 wayland-scanner = { path = "wayland-scanner" }
 window = { path = "window" }
 xkbcommon = { path = "xkbcommon" }
-xml-iterator = { path = "xml-iterator" }
+xml = { path = "xml" }
 
 # TODO: do i need this package declaration here? probably yes, just for the
 # examples/first.rs?

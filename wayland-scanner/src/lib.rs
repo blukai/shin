@@ -1,7 +1,7 @@
 use std::io;
 
 use anyhow::Context as _;
-use xml_iterator::Element;
+use xml::Element;
 
 // https://gitlab.freedesktop.org/wayland/wayland/-/blob/9cb3d7aa9dc995ffafdbdef7ab86a949d0fb0e7d/protocol/wayland.dtd
 
@@ -91,7 +91,7 @@ fn parse_arg_type(bytes: &[u8]) -> Option<ArgType> {
 }
 
 pub fn parse_protocol<'a>(input: &'a str) -> anyhow::Result<Protocol<'a>> {
-    let mut element_iterator = xml_iterator::ElementIterator::new(input);
+    let mut element_iterator = xml::ElementIterator::new(input);
 
     let mut protocol = Protocol::default();
 

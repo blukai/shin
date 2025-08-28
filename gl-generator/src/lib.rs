@@ -3,7 +3,7 @@ use std::io;
 use std::str::FromStr;
 
 use anyhow::{Context as _, bail};
-use xml_iterator::{Element, ElementIterator, StartTag};
+use xml::{Element, ElementIterator, StartTag};
 
 #[derive(Debug)]
 pub enum Api {
