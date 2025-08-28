@@ -303,6 +303,7 @@ impl winit::application::ApplicationHandler for App {
                     _ => Keycode::Unidentified(RawKey::Unidentified),
                 };
                 self.events.push_back(Event::Keyboard(KeyboardEvent {
+                    surface_id,
                     kind: KeyboardEventKind::Key {
                         state,
                         scancode,

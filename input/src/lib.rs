@@ -380,6 +380,7 @@ pub enum KeyboardEventKind {
 
 #[derive(Debug, Clone)]
 pub struct KeyboardEvent {
+    pub surface_id: SurfaceId,
     pub kind: KeyboardEventKind,
 }
 

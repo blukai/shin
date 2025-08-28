@@ -525,7 +525,7 @@ pub struct WaylandBackend {
     wl_surface: *mut wayland::wl_surface,
     xdg_surface: *mut wayland::xdg_surface,
     xdg_toplevel: *mut wayland::xdg_toplevel,
-    acked_first_xdg_surface_ack_configure: bool,
+    acked_first_xdg_surface_configure: bool,
 
     // dpi
     wp_fractional_scale_v1: *mut wayland::wp_fractional_scale_v1,
@@ -564,6 +564,9 @@ pub struct WaylandBackend {
 
     // keyboard
     wl_keyboard: *mut wayland::wl_keyboard,
+    // TODO: do i need to care about handling surface change with pointer_leave? is this situation
+    // in any way similar to pointer frames?
+    keyboard_enter_surface: Option<*mut wayland::wl_surface>,
     xkb_context: Option<xkb::Context>,
     key_repeat_timerfd: TimerFD,
     key_repeat_info: Option<KeyRepeatInfo>,
@@ -733,7 +736,7 @@ unsafe extern "C" fn handle_xdg_surface_configure(
 ) {
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
     unsafe { wayland::xdg_surface_ack_configure(&this.libwayland_client, xdg_surface, serial) };
-    this.acked_first_xdg_surface_ack_configure = true;
+    this.acked_first_xdg_surface_configure = true;
 }
 
 const XDG_SURFACE_LISTENER: wayland::xdg_surface_listener = wayland::xdg_surface_listener {
@@ -747,16 +750,15 @@ unsafe extern "C" fn handle_xdg_toplevel_configure(
     height: i32,
     _states: *mut wayland::wl_array,
 ) {
-    let this = unsafe { &mut *(data as *mut WaylandBackend) };
+    assert!(width >= 0 && height >= 0);
 
+    let this = unsafe { &mut *(data as *mut WaylandBackend) };
     // NOTE: if the width or height arguments are zero, it means the client should decide its own
     // window dimension.
-    assert!(width >= 0 && height >= 0);
     let logical_size = (width > 0 || height > 0)
         .then_some((width as u32, height as u32))
         .or(this.logical_size)
         .unwrap_or(DEFAULT_LOGICAL_SIZE);
-
     this.maybe_resize(Some(logical_size), None);
 }
 
@@ -781,10 +783,9 @@ unsafe extern "C" fn handle_wp_fractional_scale_v1_preferred_scale(
     _wp_fractional_scale_v1: *mut wayland::wp_fractional_scale_v1,
     scale: u32,
 ) {
+    let this = unsafe { &mut *(data as *mut WaylandBackend) };
     // > The sent scale is the numerator of a fraction with a denominator of 120.
     let scale_factor = scale as f64 / 120.0;
-
-    let this = unsafe { &mut *(data as *mut WaylandBackend) };
     this.maybe_resize(None, Some(scale_factor));
 }
 
@@ -830,7 +831,7 @@ unsafe extern "C" fn handle_wl_pointer_leave(
     data: *mut c_void,
     _wl_pointer: *mut wayland::wl_pointer,
     _serial: u32,
-    _surface: *mut wayland::wl_surface,
+    _wl_surface: *mut wayland::wl_surface,
 ) {
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
 
@@ -1000,7 +1001,7 @@ unsafe extern "C" fn handle_zwp_pointer_gesture_swipe_v1_begin(
     _zwp_pointer_gesture_swipe_v1: *mut wayland::zwp_pointer_gesture_swipe_v1,
     _serial: u32,
     _time: u32,
-    _surface: *mut wayland::wl_surface,
+    _wl_surface: *mut wayland::wl_surface,
     fingers: u32,
 ) {
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
@@ -1084,7 +1085,7 @@ unsafe extern "C" fn handle_zwp_pointer_gesture_pinch_v1_begin(
     _zwp_pointer_gesture_pinch_v1: *mut wayland::zwp_pointer_gesture_pinch_v1,
     _serial: u32,
     _time: u32,
-    _surface: *mut wayland::wl_surface,
+    _wl_surface: *mut wayland::wl_surface,
     fingers: u32,
 ) {
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
@@ -1241,7 +1242,6 @@ unsafe extern "C" fn handle_wl_keyboard_keymap(
     size: u32,
 ) {
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
-
     match format {
         wayland::WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1 => {
             // TODO: this need to be more robust. panics on sway reload (mod+shift+c).
@@ -1255,7 +1255,6 @@ unsafe extern "C" fn handle_wl_keyboard_keymap(
             panic!("unknown keymap format: {other}");
         }
     }
-
     unsafe { libc::close(fd) };
 }
 
@@ -1263,10 +1262,11 @@ unsafe extern "C" fn handle_wl_keyboard_enter(
     data: *mut c_void,
     _wl_keyboard: *mut wayland::wl_keyboard,
     serial: u32,
-    _surface: *mut wayland::wl_surface,
+    wl_surface: *mut wayland::wl_surface,
     _keys: *mut wayland::wl_array,
 ) {
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
+    this.keyboard_enter_surface = Some(wl_surface);
     this.serial_tracker
         .update_serial(SerialType::KeyboardEnter, serial);
 }
@@ -1275,7 +1275,7 @@ unsafe extern "C" fn handle_wl_keyboard_leave(
     data: *mut c_void,
     _wl_keyboard: *mut wayland::wl_keyboard,
     _serial: u32,
-    _surface: *mut wayland::wl_surface,
+    _wl_surface: *mut wayland::wl_surface,
 ) {
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
     this.serial_tracker.reset_serial(SerialType::KeyboardEnter);
@@ -1299,6 +1299,7 @@ unsafe extern "C" fn handle_wl_keyboard_key(
         .as_ref()
         .expect("xkb contex has not been created");
 
+    let surface_id = this.get_keyboard_enter_surface_id();
     let scancode = map_keyboard_key(key);
 
     // NOTE: convert to xkb. for more info see comment above EVDEV_OFFSET.
@@ -1312,6 +1313,7 @@ unsafe extern "C" fn handle_wl_keyboard_key(
     match state {
         wayland::WL_KEYBOARD_KEY_STATE_PRESSED => {
             this.events.push_back(Event::Keyboard(KeyboardEvent {
+                surface_id,
                 kind: KeyboardEventKind::Key {
                     state: KeyState::Pressed,
                     scancode,
@@ -1319,7 +1321,6 @@ unsafe extern "C" fn handle_wl_keyboard_key(
                     repeat: false,
                 },
             }));
-
             if let Some(KeyRepeatInfo { rate, delay }) = this.key_repeat_info {
                 assert!(!xkb_context.keymap.is_null());
                 if unsafe {
@@ -1335,6 +1336,7 @@ unsafe extern "C" fn handle_wl_keyboard_key(
         }
         wayland::WL_KEYBOARD_KEY_STATE_RELEASED => {
             this.events.push_back(Event::Keyboard(KeyboardEvent {
+                surface_id,
                 kind: KeyboardEventKind::Key {
                     state: KeyState::Released,
                     scancode,
@@ -1342,7 +1344,6 @@ unsafe extern "C" fn handle_wl_keyboard_key(
                     repeat: false,
                 },
             }));
-
             this.key_repeat = None;
             if let Err(err) = unsafe { this.key_repeat_timerfd.disarm() } {
                 log::error!("could not disarm key repeat: {err}");
@@ -1536,7 +1537,7 @@ impl WaylandBackend {
             wl_surface: null_mut(),
             xdg_surface: null_mut(),
             xdg_toplevel: null_mut(),
-            acked_first_xdg_surface_ack_configure: false,
+            acked_first_xdg_surface_configure: false,
 
             wp_fractional_scale_v1: null_mut(),
             wp_viewport: null_mut(),
@@ -1558,6 +1559,7 @@ impl WaylandBackend {
             pinch_fingers: None,
 
             wl_keyboard: null_mut(),
+            keyboard_enter_surface: None,
             xkb_context: None,
             key_repeat_timerfd,
             key_repeat_info: None,
@@ -1827,7 +1829,7 @@ impl WaylandBackend {
         unsafe { (this.libwayland_client.wl_display_roundtrip)(this.wl_display.as_ptr()) };
 
         // TODO: consider waiting for fractional scale event (if fractional scale interface exists)
-        assert!(this.acked_first_xdg_surface_ack_configure);
+        assert!(this.acked_first_xdg_surface_configure);
         this.events.push_back(Event::Window(WindowEvent::Configure {
             logical_size: this.logical_size.expect("configured logical size"),
         }));
@@ -1840,8 +1842,17 @@ impl WaylandBackend {
     /// panics if called before wl_pointer::enter event can store wl_surface into
     /// pointer_enter_surface field.
     fn get_pointer_enter_surface_id(&self) -> SurfaceId {
-        let pointer_enter_surface = self.pointer_enter_surface.expect("wl_pointer::enter event must have been received before accessing pointer_enter_surface");
+        let pointer_enter_surface = self.pointer_enter_surface
+            .expect("wl_pointer::enter event must have been received before accessing pointer_enter_surface");
         make_surface_id(pointer_enter_surface)
+    }
+
+    /// panics if called before wl_keyboard::enter event can store wl_surface into
+    /// keyboard_enter_surface field.
+    fn get_keyboard_enter_surface_id(&self) -> SurfaceId {
+        let keyboard_enter_surface = self.keyboard_enter_surface
+            .expect("wl_keyboard::enter event must have been received before accessing keyboard_enter_surface");
+        make_surface_id(keyboard_enter_surface)
     }
 
     fn set_cursor_shape(&mut self, shape: CursorShape) -> anyhow::Result<()> {
@@ -2151,9 +2162,11 @@ impl Window for WaylandBackend {
 
                 if fds[1].revents & libc::POLLIN == libc::POLLIN {
                     if let Some((scancode, keycode)) = self.key_repeat {
+                        let surface_id = self.get_keyboard_enter_surface_id();
                         let exp: u64 = unsafe { self.key_repeat_timerfd.read() }?;
                         for _ in 0..exp {
                             self.events.push_back(Event::Keyboard(KeyboardEvent {
+                                surface_id,
                                 kind: KeyboardEventKind::Key {
                                     state: KeyState::Pressed,
                                     scancode,
@@ -2199,6 +2212,7 @@ impl Window for WaylandBackend {
     }
 
     fn physical_size(&self) -> (u32, u32) {
+        // TODO: don't panic, but return WindowAttrs' logical_size or DEFAULT_LOGICAL_SIZE.
         let logical_size = self.logical_size.expect("logical size");
         let scale_factor = self.scale_factor.unwrap_or(1.0);
         (

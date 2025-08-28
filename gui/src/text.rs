@@ -1232,6 +1232,7 @@ impl<'a> TextEditableSingle<'a> {
                                 keycode: Keycode::Char(ch),
                                 ..
                             },
+                        ..
                     }) if *ch as u32 >= 32 && *ch as u32 != 127 => {
                         // TODO: maybe better printability check ^.
                         self.state.selection.insert_char(self.str, *ch);
