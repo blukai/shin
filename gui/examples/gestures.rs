@@ -40,26 +40,27 @@ impl AppHandler for App {
             Event::Pointer(ref ev) => {
                 self.input_state
                     .handle_event(input::Event::Pointer(ev.clone()));
+
+                match ev.kind {
+                    input::PointerEventKind::Pan {
+                        translation_delta, ..
+                    } => {
+                        self.translation += gui::Vec2::from(gui::F64Vec2::from(translation_delta));
+                    }
+                    input::PointerEventKind::Zoom { scale_delta, .. } => {
+                        self.scale += scale_delta as f32;
+                    }
+                    input::PointerEventKind::Rotate { rotation_delta, .. } => {
+                        self.rotation += rotation_delta as f32;
+                    }
+
+                    _ => {}
+                }
             }
+
             Event::Keyboard(ref ev) => {
                 self.input_state
                     .handle_event(input::Event::Keyboard(ev.clone()));
-            }
-
-            _ => {}
-        }
-
-        match event {
-            Event::Pointer(input::PointerEvent::Pan {
-                translation_delta, ..
-            }) => {
-                self.translation += gui::Vec2::from(gui::F64Vec2::from(translation_delta));
-            }
-            Event::Pointer(input::PointerEvent::Zoom { scale_delta, .. }) => {
-                self.scale += scale_delta as f32;
-            }
-            Event::Pointer(input::PointerEvent::Rotate { rotation_delta, .. }) => {
-                self.rotation += rotation_delta as f32;
             }
 
             _ => {}

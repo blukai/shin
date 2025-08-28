@@ -2,8 +2,8 @@ use std::marker::PhantomData;
 use std::ops::{DerefMut, Range};
 
 use input::{
-    Button, ButtonState, CursorShape, Event, KeyState, KeyboardEvent, KeyboardState, Keycode,
-    PointerEvent, Scancode,
+    Button, CursorShape, Event, KeyState, KeyboardEvent, KeyboardEventKind, KeyboardState, Keycode,
+    PointerState, Scancode,
 };
 
 use crate::{
@@ -1019,85 +1019,51 @@ impl<'a> TextSelectableSingle<'a> {
             return;
         }
 
-        let KeyboardState { ref modifiers, .. } = input.keyboard;
-        for event in input.events.iter() {
-            match event {
-                Event::Keyboard(KeyboardEvent::Key {
-                    state: KeyState::Pressed,
-                    scancode: Scancode::ArrowLeft,
-                    ..
-                }) if modifiers.shift() => {
-                    self.state.selection.move_left(self.str, true);
-                }
-                Event::Keyboard(KeyboardEvent::Key {
-                    state: KeyState::Pressed,
-                    scancode: Scancode::ArrowRight,
-                    ..
-                }) if modifiers.shift() => {
-                    self.state.selection.move_right(self.str, true);
-                }
+        #[rustfmt::skip]
+        let input::State {
+            keyboard: KeyboardState { scancodes, modifiers, .. },
+            pointer: PointerState { position_delta, buttons, press_origins, .. },
+            ..
+        } = input;
 
-                Event::Keyboard(KeyboardEvent::Key {
-                    state: KeyState::Pressed,
-                    scancode: Scancode::Home,
-                    ..
-                }) if modifiers.shift() => {
-                    self.state.selection.move_home(self.str, true);
-                }
-                Event::Keyboard(KeyboardEvent::Key {
-                    state: KeyState::Pressed,
-                    scancode: Scancode::End,
-                    ..
-                }) if modifiers.shift() => {
-                    self.state.selection.move_end(self.str, true);
-                }
+        if scancodes.just_pressed(Scancode::ArrowLeft) && modifiers.shift() {
+            self.state.selection.move_left(self.str, true);
+        }
+        if scancodes.just_pressed(Scancode::ArrowRight) && modifiers.shift() {
+            self.state.selection.move_right(self.str, true);
+        }
 
-                Event::Keyboard(KeyboardEvent::Key {
-                    state: KeyState::Pressed,
-                    scancode: Scancode::C,
-                    ..
-                }) if modifiers.ctrl() => {
-                    if let Some(copy) = self.state.selection.copy(self.str) {
-                        // TODO: consider allocating copy into single-frame arena or something.
-                        clipboard_state.request_write(copy.to_string());
-                    }
-                }
+        if scancodes.just_pressed(Scancode::Home) && modifiers.shift() {
+            self.state.selection.move_home(self.str, true);
+        }
+        if scancodes.just_pressed(Scancode::End) && modifiers.shift() {
+            self.state.selection.move_end(self.str, true);
+        }
 
-                Event::Pointer(
-                    pe @ PointerEvent::Button {
-                        state: ButtonState::Pressed,
-                        button: Button::Primary,
-                    },
-                )
-                | Event::Pointer(pe @ PointerEvent::Move { .. })
-                    if input
-                        .pointer
-                        .press_origins
-                        .get(&Button::Primary)
-                        .is_some_and(|p| {
-                            self.container_rect.contains(Vec2::from(F64Vec2::from(*p)))
-                        }) =>
-                {
-                    let byte_offset = locate_singleline_coord(
-                        self.str,
-                        self.container_rect,
-                        self.state.scroll,
-                        Vec2::from(F64Vec2::from(input.pointer.position)),
-                        font_instance.reborrow_mut(),
-                        texture_service,
-                    );
-                    if let PointerEvent::Button {
-                        state: ButtonState::Pressed,
-                        ..
-                    } = pe
-                    {
-                        self.state.selection = TextSelection::from_range(byte_offset..byte_offset);
-                    } else {
-                        self.state.selection.end = byte_offset;
-                    }
-                }
+        if scancodes.just_pressed(Scancode::C) && modifiers.ctrl() {
+            if let Some(copy) = self.state.selection.copy(self.str) {
+                // TODO: consider allocating copy into single-frame arena or something.
+                clipboard_state.request_write(copy.to_string());
+            }
+        }
 
-                _ => {}
+        if press_origins
+            .get(&Button::Primary)
+            .is_some_and(|p| self.container_rect.contains(Vec2::from(F64Vec2::from(*p))))
+        {
+            let byte_offset = locate_singleline_coord(
+                self.str,
+                self.container_rect,
+                self.state.scroll,
+                Vec2::from(F64Vec2::from(input.pointer.position)),
+                font_instance.reborrow_mut(),
+                texture_service,
+            );
+            if buttons.just_pressed(Button::Primary) {
+                self.state.selection = TextSelection::from_range(byte_offset..byte_offset);
+            }
+            if position_delta != &(0.0, 0.0) {
+                self.state.selection.end = byte_offset;
             }
         }
     }
@@ -1173,142 +1139,105 @@ impl<'a> TextEditableSingle<'a> {
 
         let prev_selection = self.state.selection;
 
-        let KeyboardState { ref modifiers, .. } = input.keyboard;
-        for event in input.events.iter() {
-            match event {
-                Event::Keyboard(KeyboardEvent::Key {
-                    state: KeyState::Pressed,
-                    scancode: Scancode::ArrowLeft,
-                    ..
-                }) => {
-                    self.state.selection.move_left(self.str, modifiers.shift());
-                }
-                Event::Keyboard(KeyboardEvent::Key {
-                    state: KeyState::Pressed,
-                    scancode: Scancode::ArrowRight,
-                    ..
-                }) => {
-                    self.state.selection.move_right(self.str, modifiers.shift());
-                }
+        #[rustfmt::skip]
+        let input::State {
+            keyboard: KeyboardState { scancodes, modifiers, .. },
+            pointer: PointerState { position_delta, scroll_delta, buttons, press_origins, .. },
+            ..
+        } = input;
 
-                Event::Keyboard(KeyboardEvent::Key {
-                    state: KeyState::Pressed,
-                    scancode: Scancode::Home,
-                    ..
-                }) => {
-                    self.state.selection.move_home(self.str, modifiers.shift());
-                }
-                Event::Keyboard(KeyboardEvent::Key {
-                    state: KeyState::Pressed,
-                    scancode: Scancode::End,
-                    ..
-                }) => {
-                    self.state.selection.move_end(self.str, modifiers.shift());
-                }
+        if scancodes.just_pressed(Scancode::ArrowLeft) {
+            self.state.selection.move_left(self.str, modifiers.shift());
+        }
+        if scancodes.just_pressed(Scancode::ArrowRight) {
+            self.state.selection.move_right(self.str, modifiers.shift());
+        }
 
-                Event::Keyboard(KeyboardEvent::Key {
-                    state: KeyState::Pressed,
-                    scancode: Scancode::V,
-                    ..
-                }) if modifiers.ctrl() => {
-                    clipboard_state.request_read(self.key);
-                }
-                Event::Keyboard(KeyboardEvent::Key {
-                    state: KeyState::Pressed,
-                    scancode: Scancode::C,
-                    ..
-                }) if modifiers.ctrl() => {
-                    if let Some(copy) = self.state.selection.copy(self.str) {
-                        // TODO: consider allocating copy into single-frame arena or something.
-                        clipboard_state.request_write(copy.to_string());
+        if scancodes.just_pressed(Scancode::Home) {
+            self.state.selection.move_home(self.str, modifiers.shift());
+        }
+        if scancodes.just_pressed(Scancode::End) {
+            self.state.selection.move_end(self.str, modifiers.shift());
+        }
+
+        if scancodes.just_pressed(Scancode::C) && modifiers.ctrl() {
+            if let Some(copy) = self.state.selection.copy(self.str) {
+                // TODO: consider allocating copy into single-frame arena or something.
+                clipboard_state.request_write(copy.to_string());
+            }
+        }
+        if scancodes.just_pressed(Scancode::V) && modifiers.ctrl() {
+            clipboard_state.request_read(self.key);
+        }
+        if scancodes.just_pressed(Scancode::X) && modifiers.ctrl() {
+            if let Some(copy) = self.state.selection.copy(self.str) {
+                // TODO: consider allocating copy into single-frame arena or something.
+                clipboard_state.request_write(copy.to_string());
+                self.state.selection.delete_selection(self.str);
+            }
+        }
+
+        if scancodes.just_pressed(Scancode::Backspace) {
+            self.state.selection.delete_left(self.str);
+        }
+        if scancodes.just_pressed(Scancode::Delete) {
+            self.state.selection.delete_right(self.str);
+        }
+
+        if press_origins
+            .get(&Button::Primary)
+            .is_some_and(|p| self.container_rect.contains(Vec2::from(F64Vec2::from(*p))))
+        {
+            let byte_offset = locate_singleline_coord(
+                self.str,
+                self.container_rect,
+                self.state.scroll,
+                Vec2::from(F64Vec2::from(input.pointer.position)),
+                font_instance.reborrow_mut(),
+                texture_service,
+            );
+            if buttons.just_pressed(Button::Primary) {
+                self.state.selection = TextSelection::from_range(byte_offset..byte_offset);
+            }
+            if position_delta != &(0.0, 0.0) {
+                self.state.selection.end = byte_offset;
+            }
+        }
+
+        // TODO: element doesn't have to be active to be scrollable, but hot.
+        if scroll_delta != &(0.0, 0.0) {
+            // NOTE: singleline text doesn't need to be vertically scrollable. only horizontally.
+            let delta = Vec2::new(scroll_delta.0 as f32, 0.0);
+            let next_offset = self.state.scroll.offset + delta * appearance.scroll_delta_factor;
+
+            let container_width = self.container_rect.width();
+            let cursor_width = font_instance.typical_advance_width();
+
+            self.state.scroll.offset = next_offset.clamp(
+                Vec2::ZERO,
+                (interaction_rect.size() - Vec2::ZERO.with_x(container_width - cursor_width))
+                    .max(Vec2::ZERO),
+            );
+        }
+
+        // NOTE: for actual char inputs we want to guarantee that they will appear in correct order
+        // no matter what.
+        if !modifiers.ctrl() && !modifiers.alt() {
+            for event in input.events.iter() {
+                match event {
+                    Event::Keyboard(KeyboardEvent {
+                        kind:
+                            KeyboardEventKind::Key {
+                                state: KeyState::Pressed,
+                                keycode: Keycode::Char(ch),
+                                ..
+                            },
+                    }) if *ch as u32 >= 32 && *ch as u32 != 127 => {
+                        // TODO: maybe better printability check ^.
+                        self.state.selection.insert_char(self.str, *ch);
                     }
+                    _ => {}
                 }
-                Event::Keyboard(KeyboardEvent::Key {
-                    state: KeyState::Pressed,
-                    scancode: Scancode::X,
-                    ..
-                }) if modifiers.ctrl() => {
-                    if let Some(copy) = self.state.selection.copy(self.str) {
-                        // TODO: consider allocating copy into single-frame arena or something.
-                        clipboard_state.request_write(copy.to_string());
-                        self.state.selection.delete_selection(self.str);
-                    }
-                }
-
-                Event::Keyboard(KeyboardEvent::Key {
-                    state: KeyState::Pressed,
-                    scancode: Scancode::Backspace,
-                    ..
-                }) => {
-                    self.state.selection.delete_left(self.str);
-                }
-                Event::Keyboard(KeyboardEvent::Key {
-                    state: KeyState::Pressed,
-                    scancode: Scancode::Delete,
-                    ..
-                }) => {
-                    self.state.selection.delete_right(self.str);
-                }
-                Event::Keyboard(KeyboardEvent::Key {
-                    state: KeyState::Pressed,
-                    keycode: Keycode::Char(ch),
-                    ..
-                }) if *ch as u32 >= 32 && *ch as u32 != 127 => {
-                    // TODO: maybe better printability check ^.
-                    self.state.selection.insert_char(self.str, *ch);
-                }
-
-                Event::Pointer(
-                    ev @ PointerEvent::Button {
-                        state: ButtonState::Pressed,
-                        button: Button::Primary,
-                    },
-                )
-                | Event::Pointer(ev @ PointerEvent::Move { .. })
-                    if input
-                        .pointer
-                        .press_origins
-                        .get(&Button::Primary)
-                        .is_some_and(|p| {
-                            self.container_rect.contains(Vec2::from(F64Vec2::from(*p)))
-                        }) =>
-                {
-                    let byte_offset = locate_singleline_coord(
-                        self.str,
-                        self.container_rect,
-                        self.state.scroll,
-                        Vec2::from(F64Vec2::from(input.pointer.position)),
-                        font_instance.reborrow_mut(),
-                        texture_service,
-                    );
-                    if let PointerEvent::Button {
-                        state: ButtonState::Pressed,
-                        ..
-                    } = ev
-                    {
-                        self.state.selection = TextSelection::from_range(byte_offset..byte_offset);
-                    } else {
-                        self.state.selection.end = byte_offset;
-                    }
-                }
-
-                Event::Pointer(PointerEvent::Scroll { delta }) => {
-                    let delta = Vec2::new(delta.0 as f32, 0.0);
-                    let next_offset =
-                        self.state.scroll.offset + delta * appearance.scroll_delta_factor;
-
-                    let container_width = self.container_rect.width();
-                    let cursor_width = font_instance.typical_advance_width();
-
-                    self.state.scroll.offset = next_offset.clamp(
-                        Vec2::ZERO,
-                        (interaction_rect.size()
-                            - Vec2::ZERO.with_x(container_width - cursor_width))
-                        .max(Vec2::ZERO),
-                    );
-                }
-
-                _ => {}
             }
         }
 
@@ -1431,96 +1360,62 @@ impl<'a> TextSelectableMulti<'a> {
 
         let prev_selection = self.state.selection;
 
-        let KeyboardState { ref modifiers, .. } = input.keyboard;
-        for event in input.events.iter() {
-            match event {
-                Event::Keyboard(KeyboardEvent::Key {
-                    state: KeyState::Pressed,
-                    scancode: Scancode::ArrowLeft,
-                    ..
-                }) if modifiers.shift() => {
-                    self.state.selection.move_left(self.str, true);
-                }
-                Event::Keyboard(KeyboardEvent::Key {
-                    state: KeyState::Pressed,
-                    scancode: Scancode::ArrowRight,
-                    ..
-                }) if modifiers.shift() => {
-                    self.state.selection.move_right(self.str, true);
-                }
+        #[rustfmt::skip]
+        let input::State {
+            keyboard: KeyboardState { scancodes, modifiers, .. },
+            pointer: PointerState { position_delta, scroll_delta, buttons, press_origins, .. },
+            ..
+        } = input;
 
-                Event::Keyboard(KeyboardEvent::Key {
-                    state: KeyState::Pressed,
-                    scancode: Scancode::Home,
-                    ..
-                }) if modifiers.shift() => {
-                    self.state.selection.move_home(self.str, true);
-                }
-                Event::Keyboard(KeyboardEvent::Key {
-                    state: KeyState::Pressed,
-                    scancode: Scancode::End,
-                    ..
-                }) if modifiers.shift() => {
-                    self.state.selection.move_end(self.str, true);
-                }
+        if scancodes.just_pressed(Scancode::ArrowLeft) && modifiers.shift() {
+            self.state.selection.move_left(self.str, true);
+        }
+        if scancodes.just_pressed(Scancode::ArrowRight) && modifiers.shift() {
+            self.state.selection.move_right(self.str, true);
+        }
 
-                Event::Keyboard(KeyboardEvent::Key {
-                    state: KeyState::Pressed,
-                    scancode: Scancode::C,
-                    ..
-                }) if modifiers.ctrl() => {
-                    if let Some(copy) = self.state.selection.copy(self.str) {
-                        // TODO: consider allocating copy into single-frame arena or something.
-                        clipboard_state.request_write(copy.to_string());
-                    }
-                }
+        if scancodes.just_pressed(Scancode::Home) && modifiers.shift() {
+            self.state.selection.move_home(self.str, true);
+        }
+        if scancodes.just_pressed(Scancode::End) && modifiers.shift() {
+            self.state.selection.move_end(self.str, true);
+        }
 
-                Event::Pointer(
-                    pe @ PointerEvent::Button {
-                        state: ButtonState::Pressed,
-                        button: Button::Primary,
-                    },
-                )
-                | Event::Pointer(pe @ PointerEvent::Move { .. })
-                    if input
-                        .pointer
-                        .press_origins
-                        .get(&Button::Primary)
-                        .is_some_and(|p| {
-                            self.container_rect.contains(Vec2::from(F64Vec2::from(*p)))
-                        }) =>
-                {
-                    let byte_offset = locate_multiline_coord(
-                        self.str,
-                        self.container_rect,
-                        self.state.scroll,
-                        Vec2::from(F64Vec2::from(input.pointer.position)),
-                        font_instance.reborrow_mut(),
-                        texture_service,
-                    );
-                    if let PointerEvent::Button {
-                        state: ButtonState::Pressed,
-                        ..
-                    } = pe
-                    {
-                        self.state.selection = TextSelection::from_range(byte_offset..byte_offset);
-                    } else {
-                        self.state.selection.end = byte_offset;
-                    }
-                }
-
-                Event::Pointer(PointerEvent::Scroll { delta }) => {
-                    let delta = Vec2::from(F64Vec2::from(delta));
-                    let next_offset =
-                        self.state.scroll.offset + delta * appearance.scroll_delta_factor;
-                    self.state.scroll.offset = next_offset.clamp(
-                        Vec2::ZERO,
-                        (interaction_rect.size() - self.container_rect.size()).max(Vec2::ZERO),
-                    );
-                }
-
-                _ => {}
+        if scancodes.just_pressed(Scancode::C) && modifiers.ctrl() {
+            if let Some(copy) = self.state.selection.copy(self.str) {
+                // TODO: consider allocating copy into single-frame arena or something.
+                clipboard_state.request_write(copy.to_string());
             }
+        }
+
+        if press_origins
+            .get(&Button::Primary)
+            .is_some_and(|p| self.container_rect.contains(Vec2::from(F64Vec2::from(*p))))
+        {
+            let byte_offset = locate_multiline_coord(
+                self.str,
+                self.container_rect,
+                self.state.scroll,
+                Vec2::from(F64Vec2::from(input.pointer.position)),
+                font_instance.reborrow_mut(),
+                texture_service,
+            );
+            if buttons.just_pressed(Button::Primary) {
+                self.state.selection = TextSelection::from_range(byte_offset..byte_offset);
+            }
+            if position_delta != &(0.0, 0.0) {
+                self.state.selection.end = byte_offset;
+            }
+        }
+
+        // TODO: element doesn't have to be active to be scrollable, but hot.
+        if scroll_delta != &(0.0, 0.0) {
+            let delta = Vec2::from(F64Vec2::from(scroll_delta));
+            let next_offset = self.state.scroll.offset + delta * appearance.scroll_delta_factor;
+            self.state.scroll.offset = next_offset.clamp(
+                Vec2::ZERO,
+                (interaction_rect.size() - self.container_rect.size()).max(Vec2::ZERO),
+            );
         }
 
         if self.state.selection != prev_selection {

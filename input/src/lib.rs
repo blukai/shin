@@ -2,15 +2,15 @@ use std::hash::{Hash, Hasher};
 
 use nohash::{NoHash, NoHashMap};
 
-// TODO: events must provide some kind of surface id and device id.
-//
-// surface id because an app may have multiple surfaces.
-//
-// device id because maybe you want to let people play split screen with with different controllers
+// TODO: events must carry device id in addition to surface id.
+// (on device id) maybe you want to let people play split screen with with different controllers
 // (event though i am absolutely clueless and never did own one).
 
 // TODO: what's currently in end_iteration probably must be in begin_iteration. unfuck AppHandler
 // thing first. or maybe get rid of it?
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SurfaceId(pub u64);
 
 // pointer
 // ----
@@ -70,7 +70,7 @@ pub enum GesturePhase {
     Cancelled,
 }
 
-// TODO: PointerEvent is awkward because it does not carry position info for events other then
+// TODO: PointerEventKind is awkward because it does not carry position info for events other then
 // Move. PointerState has it, but there's absolutely no guaranttee that it's in sync. InputState
 // always represents the latest, but use may be processing events one by one and when click happens
 // position in InputState may not exactly-correctly represent click's position.
@@ -78,7 +78,7 @@ pub enum GesturePhase {
 // TODO: consider implementing Swipe event. on wayland perhaps you can listen for hold event with 2
 // fingers followed by horizontal scroll?
 #[derive(Debug, Clone)]
-pub enum PointerEvent {
+pub enum PointerEventKind {
     Enter {
         // NOTE: winit (v 0.30.12) does not provide enter position. but it seems like future
         // versions will.
@@ -107,7 +107,7 @@ pub enum PointerEvent {
         phase: GesturePhase,
         translation_delta: (f64, f64),
         /// on wayland might be 2 if pan is triggered pinch, might be 3 if triggered by swipe.
-        num_touches: u8,
+        touches: u8,
     },
     Zoom {
         phase: GesturePhase,
@@ -119,6 +119,12 @@ pub enum PointerEvent {
         /// angle in degrees cw relative to the previous event
         rotation_delta: f64,
     },
+}
+
+#[derive(Debug, Clone)]
+pub struct PointerEvent {
+    pub surface_id: SurfaceId,
+    pub kind: PointerEventKind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -351,8 +357,8 @@ impl Hash for Keycode {
 
 impl NoHash for Keycode {}
 
-// TODO: consider converting KeyboardEvent::Key's repeat bool into KeyState::Repeated variant (this
-// will match WL_KEYBOARD_KEY_STATE_* enum).
+// TODO: consider converting KeyboardEventKind::Key's repeat bool into KeyState::Repeated variant
+// (this will match WL_KEYBOARD_KEY_STATE_* enum).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyState {
     Pressed,
@@ -362,7 +368,7 @@ pub enum KeyState {
 // TODO: combine Press and Release events into Button event with
 // enum ButtonState { Pressed, Released }
 #[derive(Debug, Clone)]
-pub enum KeyboardEvent {
+pub enum KeyboardEventKind {
     Key {
         state: KeyState,
         scancode: Scancode,
@@ -372,11 +378,13 @@ pub enum KeyboardEvent {
     },
 }
 
+#[derive(Debug, Clone)]
+pub struct KeyboardEvent {
+    pub kind: KeyboardEventKind,
+}
+
 // states
 // ----
-
-// TODO: come up with a better name for Button* stuff. name that will combine and describe / UNIFY
-// / pointer buttons and keyboard keys.
 
 // TODO: might want to implement bitwise op traits for StateFlags.
 //
@@ -385,6 +393,7 @@ pub enum KeyboardEvent {
 pub struct StateFlags(u8);
 
 impl StateFlags {
+    pub const NONE: u8 = 0;
     pub const JUST_PRESSED: u8 = 1 << 0;
     pub const JUST_RELEASED: u8 = 1 << 1;
     pub const DOWN: u8 = 1 << 2;
@@ -430,12 +439,10 @@ where
 
     pub fn press(&mut self, button: B, repeat: bool) {
         let state = self.map.entry(button).or_insert(StateFlags(0));
-        state.0 = StateFlags::DOWN
-            | if repeat {
-                StateFlags::REPEAT
-            } else {
-                StateFlags::JUST_PRESSED
-            };
+        state.0 = StateFlags::JUST_PRESSED | StateFlags::DOWN;
+        if repeat {
+            state.0 |= StateFlags::REPEAT
+        }
     }
 
     pub fn release(&mut self, button: B) {
@@ -535,12 +542,17 @@ where
 #[derive(Debug, Default)]
 pub struct PointerState {
     pub position: (f64, f64),
-    // NOTE: a single iteration (of an event loop) may accumulate multiple move events thus to
-    // compute correct deltas we need to diff against prev frame and not against prev value.
+    // NOTE: prev_position is needed to compute position_delta.
+    // a single iteration (of an event loop) may accumulate multiple move events thus to compute
+    // correct deltas we need to diff against prev frame and not against prev value.
     prev_position: (f64, f64),
     // TODO: how to handle position_delta on the very first frame? new position minus zero position
     // will yield a weird result. do i care?
     pub position_delta: (f64, f64),
+
+    // NOTE: scroll_delta is a accumulator that is being reset each iteration.
+    pub scroll_delta: (f64, f64),
+
     pub buttons: StateTracker<Button>,
     pub press_origins: NoHashMap<Button, (f64, f64)>,
 }
@@ -555,24 +567,29 @@ impl PointerState {
     pub fn end_iteration(&mut self) {
         self.prev_position = self.position;
         self.position_delta = (0.0, 0.0);
+
+        self.scroll_delta = (0.0, 0.0);
+
         self.buttons.end_iteration();
     }
 
     #[inline]
     pub fn handle_event(&mut self, ev: PointerEvent) {
-        use PointerEvent::*;
-        match ev {
+        use PointerEventKind::*;
+        match ev.kind {
             // NOTE: (on Enter) when window spawns right under the cursor doing this helps to
             // compute correct deltas and dispatch press with correct delta.
             Enter {
-                position: Some(next_position),
+                position: Some(position),
             }
-            | Move {
-                position: next_position,
-            } => {
-                self.position = next_position;
+            | Move { position } => {
+                self.position = position;
                 self.position_delta.0 = self.position.0 - self.prev_position.0;
                 self.position_delta.1 = self.position.1 - self.prev_position.1;
+            }
+            Scroll { delta } => {
+                self.scroll_delta.0 += delta.0;
+                self.scroll_delta.1 += delta.1;
             }
             Button {
                 state: ButtonState::Pressed,
@@ -658,8 +675,8 @@ impl KeyboardState {
 
     #[inline]
     pub fn handle_event(&mut self, ev: KeyboardEvent) {
-        use KeyboardEvent::*;
-        match ev {
+        use KeyboardEventKind::*;
+        match ev.kind {
             Key {
                 state: KeyState::Pressed,
                 scancode,
@@ -699,6 +716,13 @@ pub enum Event {
 pub struct State {
     pub pointer: PointerState,
     pub keyboard: KeyboardState,
+
+    /// event accumulator.
+    ///
+    /// NOTE: do not rely on `PointerState`/`KeyboardState` while iterating over `events` because
+    /// states reflect the latest values while events preserve historical sequence.
+    /// for example a press at events[0] may have happened at different position than the current
+    /// pointer state's position if subsequent events updated the position.
     pub events: Vec<Event>,
 }
 
@@ -711,6 +735,7 @@ impl State {
     pub fn end_iteration(&mut self) {
         self.pointer.end_iteration();
         self.keyboard.end_iteration();
+
         self.events.clear();
     }
 

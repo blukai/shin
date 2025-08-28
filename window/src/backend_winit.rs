@@ -1,14 +1,22 @@
 use std::collections::VecDeque;
+use std::hash::{DefaultHasher, Hash as _, Hasher as _};
 
 use anyhow::{Context, anyhow};
 use input::{
-    Button, ButtonState, CursorShape, KeyState, KeyboardEvent, Keycode, PointerEvent, RawKey,
-    Scancode,
+    Button, ButtonState, CursorShape, KeyState, KeyboardEvent, KeyboardEventKind, Keycode,
+    PointerEvent, PointerEventKind, RawKey, Scancode, SurfaceId,
 };
 use raw_window_handle as rwh;
 use winit::platform::pump_events::EventLoopExtPumpEvents;
 
 use crate::{ClipboardDataProvider, DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent};
+
+#[inline]
+fn make_surface_id(window_id: winit::window::WindowId) -> SurfaceId {
+    let mut state = DefaultHasher::new();
+    window_id.hash(&mut state);
+    SurfaceId(state.finish())
+}
 
 #[inline]
 fn map_element_state_to_button_state(element_state: winit::event::ElementState) -> ButtonState {
@@ -238,32 +246,50 @@ impl winit::application::ApplicationHandler for App {
     ) {
         let window = self.window.as_ref().unwrap();
         assert!(window.id() == window_id);
+        let surface_id = make_surface_id(window_id);
 
         use winit::event::WindowEvent::*;
-        let maybe_event = match window_event {
-            Resized(physical_size) => Some(Event::Window(WindowEvent::Resized {
-                physical_size: (physical_size.width, physical_size.height),
-            })),
-            ScaleFactorChanged { scale_factor, .. } => {
-                Some(Event::Window(WindowEvent::ScaleFactorChanged {
-                    scale_factor,
-                }))
+        match window_event {
+            Resized(physical_size) => {
+                self.events.push_back(Event::Window(WindowEvent::Resized {
+                    physical_size: (physical_size.width, physical_size.height),
+                }));
             }
-            CursorEntered { .. } => Some(Event::Pointer(PointerEvent::Enter { position: None })),
-            CursorLeft { .. } => Some(Event::Pointer(PointerEvent::Leave)),
+            ScaleFactorChanged { scale_factor, .. } => {
+                self.events
+                    .push_back(Event::Window(WindowEvent::ScaleFactorChanged {
+                        scale_factor,
+                    }));
+            }
+            CursorEntered { .. } => {
+                self.events.push_back(Event::Pointer(PointerEvent {
+                    surface_id,
+                    kind: PointerEventKind::Enter { position: None },
+                }));
+            }
+            CursorLeft { .. } => {
+                self.events.push_back(Event::Pointer(PointerEvent {
+                    surface_id,
+                    kind: PointerEventKind::Leave,
+                }));
+            }
             CursorMoved { position, .. } => {
                 // NOTE: sdl, wayland provide positions in logical pixels. i kind of want to
                 // conform to that across the board.
                 let scale_factor = window.scale_factor();
                 let position = (position.x / scale_factor, position.y / scale_factor);
-                Some(Event::Pointer(PointerEvent::Move { position }))
+                self.events.push_back(Event::Pointer(PointerEvent {
+                    surface_id,
+                    kind: PointerEventKind::Move { position },
+                }));
             }
             MouseInput { button, state, .. } => {
                 if let Some(button) = try_map_pointer_button(button) {
                     let state = map_element_state_to_button_state(state);
-                    Some(Event::Pointer(PointerEvent::Button { state, button }))
-                } else {
-                    None
+                    self.events.push_back(Event::Pointer(PointerEvent {
+                        surface_id,
+                        kind: PointerEventKind::Button { state, button },
+                    }));
                 }
             }
             KeyboardInput { event, .. } => {
@@ -276,12 +302,14 @@ impl winit::application::ApplicationHandler for App {
                     // TODO: maybe map NativeKeyCode::Xkb to RawKey::Unix ?
                     _ => Keycode::Unidentified(RawKey::Unidentified),
                 };
-                Some(Event::Keyboard(KeyboardEvent::Key {
-                    state,
-                    scancode,
-                    keycode,
-                    repeat: event.repeat,
-                }))
+                self.events.push_back(Event::Keyboard(KeyboardEvent {
+                    kind: KeyboardEventKind::Key {
+                        state,
+                        scancode,
+                        keycode,
+                        repeat: event.repeat,
+                    },
+                }));
             }
             MouseWheel {
                 delta: mouse_scroll_delta,
@@ -294,10 +322,10 @@ impl winit::application::ApplicationHandler for App {
                         use raw_window_handle::HasWindowHandle as _;
                         match window.window_handle().map(|wh| wh.as_raw()) {
                             Ok(rwh::RawWindowHandle::Wayland(_)) => {
-                                // NOTE: on wayland winit does not do anything with wl_pointer_axis values,
-                                // which is great. we can normanize them the same way we do in wayland
-                                // backend (in wayland pointer frame handling code look for comments
-                                // surrounding axis handling).
+                                // NOTE: on wayland winit does not do anything with wl_pointer_axis
+                                // values, which is great. we can normanize them the same way we do
+                                // in wayland backend (in wayland pointer frame handling code look
+                                // for comments surrounding axis handling).
                                 const SCALE: f64 = 10.0;
                                 (physical_position.x / SCALE, physical_position.y / SCALE)
                             }
@@ -305,19 +333,21 @@ impl winit::application::ApplicationHandler for App {
                         }
                     }
                 };
-                Some(Event::Pointer(PointerEvent::Scroll {
-                    // NOTE: winit inverts deltas.
-                    delta: (-delta.0, -delta.1),
-                }))
+                self.events.push_back(Event::Pointer(PointerEvent {
+                    surface_id,
+                    kind: PointerEventKind::Scroll {
+                        // NOTE: winit inverts deltas.
+                        delta: (-delta.0, -delta.1),
+                    },
+                }));
             }
-            CloseRequested => Some(Event::Window(WindowEvent::CloseRequested)),
+            CloseRequested => {
+                self.events
+                    .push_back(Event::Window(WindowEvent::CloseRequested));
+            }
             other => {
                 log::debug!("unused window event: {other:?}");
-                None
             }
-        };
-        if let Some(event) = maybe_event {
-            self.events.push_back(event);
         }
     }
 }
