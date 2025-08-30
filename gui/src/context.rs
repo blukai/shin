@@ -17,6 +17,7 @@ pub struct Key(u64);
 
 impl Key {
     pub fn new<T: Hash>(hashable: T) -> Self {
+        // TODO: i probably should not rely on default hasher here?
         let mut hasher = DefaultHasher::default();
         hashable.hash(&mut hasher);
         Self(hasher.finish())
@@ -46,6 +47,30 @@ impl Hash for Key {
 
 impl NoHash for Key {}
 
+pub struct InteractionRequest {
+    key: Key,
+    rect: Rect,
+    hot_cursor_shape: Option<CursorShape>,
+    active_cursor_shape: Option<CursorShape>,
+}
+
+impl InteractionRequest {
+    pub fn new(key: Key, rect: Rect) -> Self {
+        Self {
+            key,
+            rect,
+            hot_cursor_shape: None,
+            active_cursor_shape: None,
+        }
+    }
+
+    pub fn with_cursor_shape(mut self, cursor_shape: CursorShape) -> Self {
+        self.hot_cursor_shape = Some(cursor_shape);
+        self.active_cursor_shape = Some(cursor_shape);
+        self
+    }
+}
+
 // NOTE: on interactivity (hot, active) watch https://www.youtube.com/watch?v=Z1qyvQsjK5Y.
 #[derive(Default)]
 pub struct InteractionState {
@@ -54,7 +79,7 @@ pub struct InteractionState {
     /// items can only become active if they were hot last frame and clicked this frame
     hot_last_frame: Option<Key>,
     /// actually interacting with this item
-    active: Option<Key>,
+    active: Option<(Key, Rect)>,
 
     // NOTE: ui thing has no direct relationship/connection with the windowing system - those would
     // need to consume cursor shape at the end of the ui frame.
@@ -62,57 +87,58 @@ pub struct InteractionState {
 }
 
 impl InteractionState {
-    fn begin_iteration(&mut self) {
+    fn begin_iteration(&mut self, input: &input::State) {
+        self.hot_last_frame = self.hot.take();
+        // NOTE: blur on press, not on release.
+        // we don't want to blur active element that maybe is handling text selection (it is normal
+        // for text selection to keep updating even if pointer is dragging outside of the widget's
+        // bounds) when button is released outside.
+        if input.pointer.buttons.just_pressed(Button::Primary)
+            && matches!(self.active, Some((_, active_rect)) if {
+                    assert!(active_rect.is_normalized());
+                    let pointer_position = Vec2::from(F64Vec2::from(input.pointer.position));
+                    !active_rect.contains(pointer_position)
+            })
+        {
+            self.active = None;
+        }
+
         // NOTE: start each frame with a default cursor so that the event loop can restore it to
         // default if nothing wants to set it.
         self.cursor_shape = Some(CursorShape::Default);
     }
 
     fn end_iteration(&mut self) {
-        self.hot_last_frame = self.hot.take();
+        // NOTE: start next frame with a default cursor so that the event loop can restore it to
+        // default if nothing wants to set it.
+        //
         // NOTE: cursor shape needs to be taken before end of the frame.
         assert!(self.cursor_shape.is_none());
     }
 
-    /// returns `true` if element just became active.
-    pub fn maybe_set_hot_or_active(
-        &mut self,
-        key: Key,
-        rect: Rect,
-        cursor_shape: CursorShape,
-        input: &input::State,
-    ) -> bool {
-        let mut ret = false;
+    /// returns true if hit-test succedded.
+    pub fn maybe_interact(&mut self, params: InteractionRequest, input: &input::State) -> bool {
+        let InteractionRequest {
+            key,
+            rect,
+            hot_cursor_shape,
+            active_cursor_shape,
+        } = params;
+        let pointer_position = Vec2::from(F64Vec2::from(input.pointer.position));
 
-        let inside = rect.contains(Vec2::from(F64Vec2::from(input.pointer.position)));
-
-        // TODO: setting thing inactive on press (not on release) seem too feel more natural, but i
-        // am not completely sure yet.
-        //
-        // NOTE: setting thing inactive on relase makes things weird with for example text
-        // selection.
-        if self.active == Some(key)
-            && input.pointer.buttons.just_pressed(Button::Primary)
-            && !inside
-        {
-            self.active = None;
+        if !rect.is_normalized() || !rect.contains(pointer_position) {
+            return false;
         }
 
-        if self.hot_last_frame == Some(key)
-            && input.pointer.buttons.just_pressed(Button::Primary)
-            && inside
-        {
-            self.active = Some(key);
-            self.cursor_shape = Some(cursor_shape);
-            ret = true;
+        self.hot = Some(key);
+        self.cursor_shape = hot_cursor_shape;
+
+        if input.pointer.buttons.just_pressed(Button::Primary) && self.hot_last_frame == Some(key) {
+            self.active = Some((key, rect));
+            self.cursor_shape = active_cursor_shape;
         }
 
-        if inside {
-            self.hot = Some(key);
-            self.cursor_shape = Some(cursor_shape);
-        }
-
-        ret
+        return true;
     }
 
     pub fn is_hot(&self, key: Key) -> bool {
@@ -120,7 +146,7 @@ impl InteractionState {
     }
 
     pub fn is_active(&self, key: Key) -> bool {
-        self.active == Some(key)
+        matches!(self.active, Some((active_key, _)) if active_key == key)
     }
 
     pub fn set_cursor_shape(&mut self, cursor_shape: CursorShape) {
@@ -393,13 +419,13 @@ impl<E: Externs> Context<E> {
         })
     }
 
-    pub fn begin_iteration(&mut self) {
+    pub fn begin_iteration(&mut self, input: &input::State) {
         // will overflow in several billion years of running non stop; or in several thousand years
         // in worst(/best) case scenarion of running at thousands frames per sec xd.
         self.iteration_num += 1;
         let iteration_key = Key::from_caller_location_and(self.iteration_num);
 
-        self.interaction_state.begin_iteration();
+        self.interaction_state.begin_iteration(input);
         self.clipboard_state.begin_iteration(iteration_key);
 
         self.font_service.begin_iteration();

@@ -8,8 +8,8 @@ use input::{
 
 use crate::{
     Appearance, ClipboardState, Context, DrawBuffer, Externs, F64Vec2, Fill, FillTexture,
-    FontHandle, FontInstanceRefMut, InteractionState, Key, Rect, RectShape, Rgba8, TextureKind,
-    TextureService, Vec2, Viewport,
+    FontHandle, FontInstanceRefMut, InteractionRequest, InteractionState, Key, Rect, RectShape,
+    Rgba8, TextureKind, TextureService, Vec2, Viewport,
 };
 
 // TODO: per-char layout styling
@@ -1006,10 +1006,9 @@ impl<'a> TextSelectableSingle<'a> {
         );
 
         if self.hot.is_none() && self.active.is_none() {
-            interaction_state.maybe_set_hot_or_active(
-                self.key,
-                interaction_rect,
-                CursorShape::Text,
+            interaction_state.maybe_interact(
+                InteractionRequest::new(self.key, interaction_rect)
+                    .with_cursor_shape(CursorShape::Text),
                 input,
             );
             self.hot.replace(interaction_state.is_hot(self.key));
@@ -1124,10 +1123,9 @@ impl<'a> TextEditableSingle<'a> {
         );
 
         if self.hot.is_none() && self.active.is_none() {
-            interaction_state.maybe_set_hot_or_active(
-                self.key,
-                interaction_rect,
-                CursorShape::Text,
+            interaction_state.maybe_interact(
+                InteractionRequest::new(self.key, interaction_rect)
+                    .with_cursor_shape(CursorShape::Text),
                 input,
             );
             self.hot.replace(interaction_state.is_hot(self.key));
@@ -1346,10 +1344,9 @@ impl<'a> TextSelectableMulti<'a> {
         );
 
         if self.hot.is_none() && self.active.is_none() {
-            interaction_state.maybe_set_hot_or_active(
-                self.key,
-                interaction_rect,
-                CursorShape::Text,
+            interaction_state.maybe_interact(
+                InteractionRequest::new(self.key, interaction_rect)
+                    .with_cursor_shape(CursorShape::Text),
                 input,
             );
             self.hot.replace(interaction_state.is_hot(self.key));

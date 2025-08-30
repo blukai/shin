@@ -313,12 +313,16 @@ impl Rect {
         Self::new(self.min * amount, self.max * amount)
     }
 
-    // NOTE: do no think of this as vector normalize or anything alike, unrealted.
+    // NOTE: do no think of this as vector normalize or anything alike; - unrealted.
     //
     // TODO: think of a better name for this function that basically flips `min` and `max` if
     // needed, so that `min <= max`.
     pub fn normalize(self) -> Self {
         Self::new(self.min.min(self.max), self.min.max(self.max))
+    }
+
+    pub fn is_normalized(&self) -> bool {
+        self.min.x <= self.max.x && self.min.y <= self.max.y
     }
 
     pub fn clamp(self, other: Self) -> Self {
@@ -346,21 +350,25 @@ impl Rect {
         self.max
     }
 
-    pub fn set_top_left(&mut self, top_left: Vec2) {
+    pub fn with_top_left(mut self, top_left: Vec2) -> Self {
         self.min = top_left;
+        self
     }
 
-    pub fn set_top_right(&mut self, top_right: Vec2) {
+    pub fn with_top_right(mut self, top_right: Vec2) -> Self {
         self.min = Vec2::new(self.min.x, top_right.y);
         self.max = Vec2::new(top_right.x, self.max.y);
+        self
     }
 
-    pub fn set_bottom_right(&mut self, bottom_right: Vec2) {
+    pub fn with_bottom_right(mut self, bottom_right: Vec2) -> Self {
         self.max = bottom_right;
+        self
     }
 
-    pub fn set_bottom_left(&mut self, bottom_left: Vec2) {
+    pub fn with_bottom_left(mut self, bottom_left: Vec2) -> Self {
         self.min = Vec2::new(bottom_left.x, self.min.y);
         self.max = Vec2::new(self.max.x, bottom_left.y);
+        self
     }
 }

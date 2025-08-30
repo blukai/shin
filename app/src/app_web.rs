@@ -81,6 +81,7 @@ impl GraphicsContext {
 struct Context<A: AppHandler> {
     window: Box<dyn Window>,
     graphics_context: GraphicsContext,
+    events: Vec<Event>,
     app_handler: Option<A>,
 }
 
@@ -92,6 +93,7 @@ impl<A: AppHandler> Context<A> {
         Ok(Self {
             window,
             graphics_context,
+            events: Vec::new(),
             app_handler: None,
         })
     }
@@ -105,40 +107,25 @@ impl<A: AppHandler> Context<A> {
                     match self.graphics_context {
                         GraphicsContext::Uninit => {
                             let igc = self.graphics_context.init(self.window.window_handle()?)?;
-
                             self.app_handler = Some(A::create(AppContext {
                                 window: self.window.as_mut(),
                                 gl_api: &mut igc.gl_api,
                             }));
                         }
-
                         GraphicsContext::Initialized(_) => {
                             unreachable!();
                         }
                     }
-
-                    continue;
                 }
-
                 _ => {}
             }
-
-            let (
-                Some(app_handler),
-                GraphicsContext::Initialized(InitializedGraphicsContext { gl_api, .. }),
-            ) = (self.app_handler.as_mut(), &mut self.graphics_context)
-            else {
-                continue;
-            };
-            app_handler.handle_event(
-                AppContext {
-                    window: self.window.as_mut(),
-                    // TODO: should gl be included into event context? prob not.
-                    gl_api,
-                },
-                event,
-            );
+            self.events.push(event);
         }
+
+        // TODO: would this drainage cause any problems?
+        // probably not? the fact that this is a drain means it can be iterated just once, but you
+        // shouldn't need to iterate more then once.
+        let events = self.events.drain(..);
 
         let (
             Some(app_handler),
@@ -148,10 +135,13 @@ impl<A: AppHandler> Context<A> {
             return Ok(());
         };
 
-        app_handler.update(AppContext {
-            window: self.window.as_mut(),
-            gl_api,
-        });
+        app_handler.iterate(
+            AppContext {
+                window: self.window.as_mut(),
+                gl_api,
+            },
+            events,
+        );
 
         Ok(())
     }

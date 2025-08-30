@@ -33,46 +33,36 @@ impl AppHandler for App {
         }
     }
 
-    fn handle_event(&mut self, _ctx: app::AppContext, event: Event) {
-        // this is ugly
-
-        match event {
-            Event::Pointer(ref ev) => {
-                self.input_state
-                    .handle_event(input::Event::Pointer(ev.clone()));
-
-                match ev.kind {
-                    input::PointerEventKind::Pan {
-                        translation_delta, ..
-                    } => {
-                        self.translation += gui::Vec2::from(gui::F64Vec2::from(translation_delta));
-                    }
-                    input::PointerEventKind::Zoom { scale_delta, .. } => {
-                        self.scale += scale_delta as f32;
-                    }
-                    input::PointerEventKind::Rotate { rotation_delta, .. } => {
-                        self.rotation += rotation_delta as f32;
-                    }
-
-                    _ => {}
-                }
-            }
-
-            Event::Keyboard(ref ev) => {
-                self.input_state
-                    .handle_event(input::Event::Keyboard(ev.clone()));
-            }
-
-            _ => {}
-        }
-    }
-
-    fn update(&mut self, ctx: app::AppContext) {
+    fn iterate(&mut self, ctx: app::AppContext, events: impl Iterator<Item = Event>) {
         let physical_size = gui::Vec2::from(gui::U32Vec2::from(ctx.window.physical_size()));
         let scale_factor = ctx.window.scale_factor() as f32;
 
-        self.input_state.begin_iteration();
-        self.gui_context.begin_iteration();
+        self.input_state
+            .begin_iteration(events.filter_map(|event| match event {
+                Event::Window(_) => None,
+                Event::Pointer(pointer_event) => {
+                    // TODO: this is ugly
+                    match pointer_event.kind {
+                        input::PointerEventKind::Pan {
+                            translation_delta, ..
+                        } => {
+                            self.translation +=
+                                gui::Vec2::from(gui::F64Vec2::from(translation_delta));
+                        }
+                        input::PointerEventKind::Zoom { scale_delta, .. } => {
+                            self.scale += scale_delta as f32;
+                        }
+                        input::PointerEventKind::Rotate { rotation_delta, .. } => {
+                            self.rotation += rotation_delta as f32;
+                        }
+                        _ => {}
+                    }
+
+                    Some(input::Event::Pointer(pointer_event))
+                }
+                Event::Keyboard(keyboard_event) => Some(input::Event::Keyboard(keyboard_event)),
+            }));
+        self.gui_context.begin_iteration(&self.input_state);
         self.gui_viewport.begin_frame(physical_size, scale_factor);
 
         // ----

@@ -9,9 +9,7 @@ impl AppHandler for App {
         Self
     }
 
-    fn handle_event(&mut self, _ctx: app::AppContext, _event: Event) {}
-
-    fn update(&mut self, ctx: app::AppContext) {
+    fn iterate(&mut self, ctx: app::AppContext, _events: impl Iterator<Item = Event>) {
         unsafe { ctx.gl_api.clear_color(1.0, 0.0, 0.0, 1.0) };
         unsafe { ctx.gl_api.clear(gl::api::COLOR_BUFFER_BIT) };
     }

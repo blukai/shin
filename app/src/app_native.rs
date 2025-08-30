@@ -96,6 +96,7 @@ impl GraphicsContext {
 struct Context<A: AppHandler> {
     window: Box<dyn Window>,
     graphics_context: GraphicsContext,
+    events: Vec<Event>,
     app_handler: Option<A>,
     close_requested: bool,
 }
@@ -104,10 +105,10 @@ impl<A: AppHandler> Context<A> {
     fn new(window_attrs: WindowAttrs) -> anyhow::Result<Self> {
         let window = window::create_window(window_attrs)?;
         let graphics_context = GraphicsContext::new_uninit();
-
         Ok(Self {
             window,
             graphics_context,
+            events: Vec::new(),
             app_handler: None,
             close_requested: false,
         })
@@ -133,46 +134,30 @@ impl<A: AppHandler> Context<A> {
                                 gl_api: &mut igc.gl_api,
                             }));
                         }
-
                         GraphicsContext::Initialized(_) => {
                             unreachable!();
                         }
                     }
-
-                    continue;
                 }
-
                 Event::Window(WindowEvent::Resized { physical_size }) => {
                     if let GraphicsContext::Initialized(ref mut igc) = self.graphics_context {
                         igc.egl_surface.resize(physical_size.0, physical_size.1)?;
                     }
                 }
-
                 Event::Window(WindowEvent::CloseRequested) => {
                     self.close_requested = true;
-                    return Ok(());
                 }
-
                 _ => {}
             }
-
-            let (
-                Some(app_handler),
-                GraphicsContext::Initialized(InitializedGraphicsContext { gl_api, .. }),
-            ) = (self.app_handler.as_mut(), &mut self.graphics_context)
-            else {
-                continue;
-            };
-            app_handler.handle_event(
-                AppContext {
-                    window: self.window.as_mut(),
-                    // TODO: should gl be included into event context? prob not.
-                    gl_api,
-                },
-                event,
-            );
+            self.events.push(event);
         }
 
+        // TODO: would this drainage cause any problems?
+        // probably not? the fact that this is a drain means it can be iterated just once, but you
+        // shouldn't need to iterate more then once.
+        let events = self.events.drain(..);
+
+        // TODO: maybe don't do this?
         let (
             Some(app_handler),
             GraphicsContext::Initialized(InitializedGraphicsContext {
@@ -187,10 +172,13 @@ impl<A: AppHandler> Context<A> {
 
         egl_context.make_current(egl_surface.as_ptr())?;
 
-        app_handler.update(AppContext {
-            window: self.window.as_mut(),
-            gl_api,
-        });
+        app_handler.iterate(
+            AppContext {
+                window: self.window.as_mut(),
+                gl_api,
+            },
+            events,
+        );
 
         egl_context.swap_buffers(egl_surface.as_ptr())?;
 

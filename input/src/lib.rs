@@ -728,26 +728,22 @@ pub struct State {
 }
 
 impl State {
-    pub fn begin_iteration(&mut self) {
+    pub fn begin_iteration(&mut self, events: impl Iterator<Item = Event>) {
         self.pointer.begin_iteration();
         self.keyboard.begin_iteration();
+
+        self.events.clear();
+        for event in events {
+            match event.clone() {
+                Event::Pointer(ev) => self.pointer.handle_event(ev),
+                Event::Keyboard(ev) => self.keyboard.handle_event(ev),
+            }
+            self.events.push(event);
+        }
     }
 
     pub fn end_iteration(&mut self) {
         self.pointer.end_iteration();
         self.keyboard.end_iteration();
-
-        self.events.clear();
-    }
-
-    #[inline]
-    pub fn handle_event(&mut self, ev: Event) {
-        use Event::*;
-        match ev.clone() {
-            Pointer(ev) => self.pointer.handle_event(ev),
-            Keyboard(ev) => self.keyboard.handle_event(ev),
-        }
-
-        self.events.push(ev);
     }
 }
