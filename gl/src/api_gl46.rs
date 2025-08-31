@@ -7,8 +7,9 @@ use super::Apier;
 use super::enums::*;
 use super::types::*;
 
-#[allow(non_snake_case)]
 #[allow(dead_code)]
+#[allow(non_camel_case_types)]
+#[allow(non_snake_case)]
 mod sys {
     use crate::api::types::*;
 

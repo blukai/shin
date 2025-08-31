@@ -685,15 +685,60 @@ pub fn emit_enums<W: io::Write>(w: &mut W, registry: &Registry, api: &Api) -> an
     Ok(())
 }
 
+fn emit_api_commands<W: io::Write>(
+    w: &mut W,
+    registry: &Registry,
+    api: &Api,
+) -> anyhow::Result<()> {
+    for cmd in registry.commands.iter() {
+        write!(
+            w,
+            "pub type {} = unsafe extern \"C\" fn(",
+            normalize_command_name(cmd.proto.name, api),
+        )?;
+        cmd.params
+            .iter()
+            .enumerate()
+            .try_for_each(|(i, param)| -> anyhow::Result<()> {
+                emit_command_type_parts(w, &param.type_parts)?;
+                if i < cmd.params.len() - 1 {
+                    write!(w, ", ")?;
+                }
+                Ok(())
+            })?;
+        write!(w, ")")?;
+        if will_emit_command_type_parts(&cmd.proto.type_parts) {
+            write!(w, " -> ")?;
+            emit_command_type_parts(w, &cmd.proto.type_parts)?;
+        }
+        write!(w, ";\n")?;
+    }
+    write!(w, "\n")?;
+    Ok(())
+}
+
+fn normalize_command_name<'a>(name: &'a str, api: &Api) -> &'a str {
+    let prefix = api.command_prefix();
+    assert!(name.starts_with(prefix));
+    &name[prefix.len()..]
+}
+
+fn will_emit_command_type_parts(parts: &[CommandTypePart]) -> bool {
+    // NOTE: it's always at least `void`. len cannot be 0.
+    !matches!(&parts[0], CommandTypePart::Other("void"))
+}
+
 fn emit_command_type_parts<W: io::Write>(
     w: &mut W,
     parts: &[CommandTypePart],
 ) -> anyhow::Result<()> {
     use CommandTypePart::*;
     match parts.len() {
+        // NOTE: it's always at least `void`.
         0 => unreachable!(),
         1 => match parts[0] {
             Other(other) => match other {
+                // NOTE: return void in c constitutes to no return in rust.
                 "void" => {}
                 "void *" => write!(w, "*mut std::ffi::c_void")?,
                 "const void *" => write!(w, "*const std::ffi::c_void")?,
@@ -728,14 +773,6 @@ fn emit_command_type_parts<W: io::Write>(
     Ok(())
 }
 
-#[inline]
-fn normalize_command_name<'a>(name: &'a str, api: &Api) -> &'a str {
-    let prefix = api.command_prefix();
-    assert!(name.starts_with(prefix));
-    &name[prefix.len()..]
-}
-
-#[inline]
 fn normalize_command_param_name(name: &str) -> &str {
     match name {
         "type" => "r#type",
@@ -748,38 +785,16 @@ fn emit_api_struct<W: io::Write>(w: &mut W, registry: &Registry, api: &Api) -> a
     write!(w, "pub struct Api {{\n")?;
     for cmd in registry.commands.iter() {
         let name = normalize_command_name(cmd.proto.name, api);
-        write!(w, "    {name}: FnPtr,\n")?;
+        write!(w, "    pub {name}: Sym<{name}>,\n")?;
     }
-    write!(w, "}}\n")?;
+    write!(w, "}}\n\n")?;
     Ok(())
 }
 
 fn emit_api_impl<W: io::Write>(w: &mut W, registry: &Registry, api: &Api) -> anyhow::Result<()> {
-    let mut command_type_parts_buf: Vec<u8> = Vec::new();
-
     write!(
         w,
-        "#[cold]
-#[inline(never)]
-fn null_fn_ptr_panic() -> ! {{
-    panic!(\"function was not loaded\")
-}}
-
-struct FnPtr {{
-    ptr: *const std::ffi::c_void,
-}}
-
-impl FnPtr {{
-    fn new(ptr: *const std::ffi::c_void) -> FnPtr {{
-        if ptr.is_null() {{
-            FnPtr {{ ptr: null_fn_ptr_panic as *const std::ffi::c_void }}
-        }} else {{
-            FnPtr {{ ptr }}
-        }}
-    }}
-}}
-
-impl Api {{
+        "impl Api {{
     pub unsafe fn load_with<F>(mut get_proc_address: F) -> Self
     where
         F: FnMut(*const std::ffi::c_char) -> *mut std::ffi::c_void,
@@ -791,7 +806,7 @@ impl Api {{
     for cmd in registry.commands.iter() {
         write!(
             w,
-            "            {}: FnPtr::new(get_proc_address(c\"{}\".as_ptr())),\n",
+            "            {}: Sym::from_ptr(get_proc_address(c\"{}\".as_ptr())),\n",
             normalize_command_name(cmd.proto.name, api),
             cmd.proto.name,
         )?;
@@ -812,12 +827,9 @@ impl Api {{
         }
         write!(w, ") ")?;
 
-        emit_command_type_parts(&mut command_type_parts_buf, &cmd.proto.type_parts)?;
-        if !command_type_parts_buf.is_empty() {
+        if will_emit_command_type_parts(&cmd.proto.type_parts) {
             write!(w, "-> ")?;
-            w.write(&command_type_parts_buf)?;
-            write!(w, " ")?;
-            command_type_parts_buf.clear();
+            emit_command_type_parts(w, &cmd.proto.type_parts)?;
         }
 
         // body
@@ -831,31 +843,10 @@ impl Api {{
         )?;
         write!(w, "        log::debug!(\"calling {name}\");\n")?;
 
-        // type
-        write!(w, "        type Dst = extern \"C\" fn(")?;
-        cmd.params
-            .iter()
-            .enumerate()
-            .try_for_each(|(i, param)| -> anyhow::Result<()> {
-                emit_command_type_parts(w, &param.type_parts)?;
-                if i < cmd.params.len() - 1 {
-                    write!(w, ", ")?;
-                }
-                Ok(())
-            })?;
-        write!(w, ")")?;
-        emit_command_type_parts(&mut command_type_parts_buf, &cmd.proto.type_parts)?;
-        if !command_type_parts_buf.is_empty() {
-            write!(w, " -> ")?;
-            w.write(&command_type_parts_buf)?;
-            command_type_parts_buf.clear();
-        }
-        write!(w, ";\n")?;
-
         // call
         write!(
             w,
-            "        unsafe {{ std::mem::transmute::<_, Dst>(self.{name}.ptr)("
+            "        unsafe {{ (std::mem::transmute::<_, {name}>(self.{name}.ptr))("
         )?;
         cmd.params
             .iter()
@@ -878,7 +869,43 @@ impl Api {{
 }
 
 pub fn emit_api<W: io::Write>(w: &mut W, registry: &Registry, api: &Api) -> anyhow::Result<()> {
+    emit_api_commands(w, registry, api)?;
+
+    write!(
+        w,
+        "#[cold]
+#[inline(never)]
+fn null_fn_ptr_panic() -> ! {{
+    panic!(\"function was not loaded\")
+}}
+
+pub struct Sym<T> {{
+    ptr: *mut T,
+    _marker: std::marker::PhantomData<T>,
+}}
+
+impl<T> Sym<T> {{
+    fn from_ptr(ptr: *mut std::ffi::c_void) -> Self {{
+        Sym {{
+            ptr: if ptr.is_null() {{
+                null_fn_ptr_panic as *mut T
+            }} else {{
+                ptr as *mut T
+            }},
+            _marker: std::marker::PhantomData,
+        }}
+    }}
+
+    pub fn as_ptr(&self) -> *mut T {{
+        self.ptr
+    }}
+}}
+
+"
+    )?;
     emit_api_struct(w, &registry, api)?;
+
     emit_api_impl(w, &registry, api)?;
+
     Ok(())
 }
