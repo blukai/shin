@@ -8,7 +8,7 @@ use crate::{AppContext, AppHandler};
 
 fn panic_hook(info: &std::panic::PanicHookInfo) {
     let msg = info.to_string();
-    unsafe { js::throw_str(msg.as_ptr(), msg.len()) };
+    unsafe { js::throw_str(msg.as_ptr(), msg.len() as u32) };
 }
 
 struct Logger;

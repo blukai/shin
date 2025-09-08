@@ -2,21 +2,21 @@
 <html lang="en">
     <head>
         <meta charset="utf-8">
-        <title>shin</title>
+        <title>hi helloo</title>
         <style></style>
     </head>
     <body>
-        <script src="/shin.js"></script>
-        <script>
-            const shin = new Shin();
+        <script type="module">
+            import { Glue } from "./glue.mjs";
+            const glue = new Glue();
             WebAssembly.instantiateStreaming(
                 // TODO: don't hardcode? can i list compiled wasm modules? or
                 // maybe display a file select?
-                fetch("/target/wasm32-unknown-unknown/debug/examples/first.wasm"),
-                shin.importObject
+                fetch("../target/wasm32-unknown-unknown/debug/examples/first.wasm"),
+                glue.importObject
             ).then((result) => {
-                shin.init(result.instance);
-                shin.instance.exports.main();
+                glue.init(result.instance);
+                glue.instance.exports.main();
             });
         </script>
     </body>

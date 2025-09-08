@@ -1,16 +1,14 @@
 use std::{error, fmt};
 
 mod sys {
-    use std::alloc::{Layout, alloc};
+    use std::alloc;
 
     use super::Handle;
 
-    // TODO: don't use usize. be specific and strict.
-
     unsafe extern "C" {
-        pub fn throw_str(ptr: *const u8, len: usize) -> !;
+        pub fn throw_str(ptr: *const u8, len: u32) -> !;
 
-        pub fn string_new(ptr: *const u8, len: usize) -> Handle;
+        pub fn string_new(ptr: *const u8, len: u32) -> Handle;
         pub fn number_new(value: f64) -> Handle;
         pub fn closure_new(call_by_ptr: extern "C" fn(ptr: *mut ()), ptr: *mut ()) -> Handle;
 
@@ -22,12 +20,12 @@ mod sys {
         pub fn is_number(handle: Handle) -> bool;
         pub fn is_string(handle: Handle) -> bool;
 
-        pub fn get(handle: Handle, prop_ptr: *const u8, prop_len: usize) -> Handle;
-        pub fn set(handle: Handle, prop_ptr: *const u8, prop_len: usize, value_handle: Handle);
+        pub fn get(handle: Handle, prop_ptr: *const u8, prop_len: u32) -> Handle;
+        pub fn set(handle: Handle, prop_ptr: *const u8, prop_len: u32, value_handle: Handle);
         pub fn call(
             handle: Handle,
             agrs_ptr: *const Handle,
-            args_len: usize,
+            args_len: u32,
             ret_handle_ptr: *mut Handle,
         ) -> bool;
 
@@ -36,13 +34,13 @@ mod sys {
     }
 
     #[unsafe(no_mangle)]
-    extern "C" fn malloc(size: u32, align: u32) -> *mut u8 {
-        let Ok(layout) = Layout::from_size_align(size as usize, align as usize) else {
+    extern "C" fn alloc(size: u32, align: u32) -> *mut u8 {
+        let Ok(layout) = alloc::Layout::from_size_align(size as usize, align as usize) else {
             // TODO: should this be handled better somehow?
             const INVALID_LAYOUT: &str = "invalid layout";
-            unsafe { throw_str(INVALID_LAYOUT.as_ptr(), INVALID_LAYOUT.len()) };
+            unsafe { throw_str(INVALID_LAYOUT.as_ptr(), INVALID_LAYOUT.len() as u32) };
         };
-        unsafe { alloc(layout) }
+        unsafe { alloc::alloc(layout) }
     }
 }
 
@@ -92,7 +90,7 @@ impl Drop for Value {
 impl Value {
     /// NOTE: the string is copied to the js heap and will be owned by the js garbage collector.
     pub fn from_str(value: &str) -> Self {
-        let handle = unsafe { sys::string_new(value.as_ptr(), value.len()) };
+        let handle = unsafe { sys::string_new(value.as_ptr(), value.len() as u32) };
         Self { handle }
     }
 
@@ -129,18 +127,18 @@ impl Value {
     // ----
 
     pub fn get(&self, p: &str) -> Value {
-        assert!(self.is_object());
-        let handle = unsafe { sys::get(self.handle, p.as_ptr(), p.len()) };
+        debug_assert!(self.is_object());
+        let handle = unsafe { sys::get(self.handle, p.as_ptr(), p.len() as u32) };
         Self { handle }
     }
 
     pub fn set(&self, p: &str, value: &Self) {
-        assert!(self.is_object());
-        unsafe { sys::set(self.handle, p.as_ptr(), p.len(), value.handle) }
+        debug_assert!(self.is_object());
+        unsafe { sys::set(self.handle, p.as_ptr(), p.len() as u32, value.handle) }
     }
 
     pub fn call(&self, args: &[Self]) -> Result<Value, Error> {
-        assert!(self.is_function());
+        debug_assert!(self.is_function());
         let mut ret = Value {
             handle: Handle(u32::MAX),
         };
@@ -149,7 +147,7 @@ impl Value {
                 self.handle,
                 // NOTE: ok to cast; Value wraps Handle and nothing else.
                 args.as_ptr().cast(),
-                args.len(),
+                args.len() as u32,
                 &mut ret.handle,
             )
         };
@@ -179,7 +177,7 @@ impl Value {
             let mut ptr: u32 = u32::MAX;
             let mut len: u32 = u32::MAX;
             unsafe { sys::string_get(self.handle, &mut ptr, &mut len) };
-            assert!(ptr != u32::MAX && len != u32::MAX);
+            debug_assert!(ptr != u32::MAX && len != u32::MAX);
             let buf = unsafe { Vec::from_raw_parts(ptr as *mut u8, len as usize, len as usize) };
             String::from_utf8(buf).ok()
         } else {
@@ -221,7 +219,7 @@ impl Closure<dyn FnMut()> {
         where
             F: FnMut() + 'static,
         {
-            assert!(!ptr.is_null());
+            debug_assert!(!ptr.is_null());
             let f: &mut F = unsafe { &mut *(ptr as *mut F) };
             f();
         }
