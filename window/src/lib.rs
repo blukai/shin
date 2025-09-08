@@ -14,8 +14,6 @@ mod backend_winit;
 
 #[cfg(target_family = "wasm")]
 mod backend_web;
-#[cfg(target_family = "wasm")]
-pub use backend_web::js_sys;
 
 // TODO: consider separating wayland clipboard stuff out of wayland window backend into a separate
 // wayland clipboard thing. because winit does not provide any clipboard apis and separate wayland

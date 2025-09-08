@@ -37,7 +37,7 @@ impl Logger {
 struct InitializedGraphicsContext {
     egl_context: gl::context_egl::Context,
     egl_surface: gl::context_egl::Surface,
-    gl_api: gl::api::Api,
+    gl_api: gl::Api,
 }
 
 enum GraphicsContext {
@@ -76,9 +76,7 @@ impl GraphicsContext {
         // context.set_swap_interval(&egl, 0)?;
 
         let gl_api = unsafe {
-            gl::api::Api::load_with(|procname| {
-                egl_context.get_proc_address(procname) as *mut c_void
-            })
+            gl::Api::load_with(|procname| egl_context.get_proc_address(procname) as *mut c_void)
         };
 
         *self = Self::Initialized(InitializedGraphicsContext {

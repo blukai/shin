@@ -1,5 +1,5 @@
 use app::AppHandler;
-use gl::api::Apier as _;
+use gl::Apier as _;
 use window::{Event, WindowAttrs};
 
 struct GuiExterns;
@@ -68,7 +68,7 @@ impl AppHandler for App {
         // ----
 
         unsafe { ctx.gl_api.clear_color(0.1, 0.2, 0.4, 1.0) };
-        unsafe { ctx.gl_api.clear(gl::api::COLOR_BUFFER_BIT) };
+        unsafe { ctx.gl_api.clear(gl::COLOR_BUFFER_BIT) };
 
         let logical_size = physical_size / scale_factor;
         let logical_rect = gui::Rect::new(gui::Vec2::ZERO, logical_size);

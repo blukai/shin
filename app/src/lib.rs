@@ -2,7 +2,7 @@ use window::{Event, Window};
 
 pub struct AppContext<'a> {
     pub window: &'a mut dyn Window,
-    pub gl_api: &'a mut gl::api::Api,
+    pub gl_api: &'a mut gl::Api,
 }
 
 pub trait AppHandler {

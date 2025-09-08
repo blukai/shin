@@ -29,6 +29,10 @@ features = [
   "xdg-shell",
 ]
 
+[target.'cfg(target_family = "wasm")'.dependencies]
+# workspace
+js.workspace = true
+
 [features]
 # TODO: rename to backend_winit
 winit = ["dep:winit"]

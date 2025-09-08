@@ -1,14 +1,14 @@
-use std::ffi::CString;
-use std::panic;
+use std::{cell::RefCell, rc::Rc};
 
+use anyhow::{Context as _, anyhow};
 use raw_window_handle as rwh;
 use window::{Event, Window, WindowAttrs, WindowEvent};
 
 use crate::{AppContext, AppHandler};
 
-fn panic_hook(info: &panic::PanicHookInfo) {
-    let msg = CString::new(info.to_string()).expect("invalid panic info");
-    unsafe { window::js_sys::panic(msg.as_ptr()) };
+fn panic_hook(info: &std::panic::PanicHookInfo) {
+    let msg = info.to_string();
+    unsafe { js::throw_str(msg.as_ptr(), msg.len()) };
 }
 
 struct Logger;
@@ -19,7 +19,7 @@ impl log::Log for Logger {
     }
 
     fn log(&self, record: &log::Record) {
-        let msg = CString::new(format!(
+        let msg = format!(
             "{level:<5} {file}:{line} > {text}",
             level = record.level(),
             file = record.file().unwrap_or_else(|| record.target()),
@@ -27,9 +27,12 @@ impl log::Log for Logger {
                 .line()
                 .map_or_else(|| "??".to_string(), |line| line.to_string()),
             text = record.args(),
-        ))
-        .expect("invalid console log message");
-        unsafe { window::js_sys::console_log(msg.as_ptr()) };
+        );
+        js::global()
+            .get("console")
+            .get("log")
+            .call(&[js::Value::from_str(msg.as_str())])
+            .expect("could not log");
     }
 
     fn flush(&self) {}
@@ -43,8 +46,7 @@ impl Logger {
 }
 
 struct InitializedGraphicsContext {
-    web_surface: gl::context_web::Surface,
-    gl_api: gl::api::Api,
+    gl_api: gl::Api,
 }
 
 enum GraphicsContext {
@@ -63,14 +65,18 @@ impl GraphicsContext {
     ) -> anyhow::Result<&mut InitializedGraphicsContext> {
         assert!(matches!(self, Self::Uninit));
 
-        let web_surface = gl::context_web::Surface::new(window_handle);
+        let web_window_handle = match window_handle.as_raw() {
+            rwh::RawWindowHandle::Web(web) => web,
+            _ => {
+                return Err(anyhow!(format!(
+                    "unsupported window system (window handle: {window_handle:?})"
+                )));
+            }
+        };
+        let gl_api =
+            gl::Api::from_web_window_handle(web_window_handle).context("could not load gl api")?;
 
-        let gl_api = gl::api::Api::from_extern_ref(web_surface.as_extern_ref());
-
-        *self = Self::Initialized(InitializedGraphicsContext {
-            web_surface,
-            gl_api,
-        });
+        *self = Self::Initialized(InitializedGraphicsContext { gl_api });
         let Self::Initialized(init) = self else {
             unreachable!();
         };
@@ -78,14 +84,14 @@ impl GraphicsContext {
     }
 }
 
-struct Context<A: AppHandler> {
+struct Context<A: AppHandler + 'static> {
     window: Box<dyn Window>,
     graphics_context: GraphicsContext,
     events: Vec<Event>,
     app_handler: Option<A>,
 }
 
-impl<A: AppHandler> Context<A> {
+impl<A: AppHandler + 'static> Context<A> {
     fn new(window_attrs: WindowAttrs) -> anyhow::Result<Self> {
         let window = window::create_window(window_attrs)?;
         let graphics_context = GraphicsContext::new_uninit();
@@ -147,19 +153,44 @@ impl<A: AppHandler> Context<A> {
     }
 }
 
-pub fn run<A: AppHandler>(window_attrs: WindowAttrs) {
+fn request_animation_frame_loop<A: AppHandler + 'static>(
+    ctx: Rc<RefCell<Context<A>>>,
+) -> anyhow::Result<()> {
+    let cb = Rc::<js::Closure<dyn FnMut()>>::new_uninit();
+    let request_animation_frame = js::global().get("requestAnimationFrame");
+    let closure = js::Closure::new({
+        let cb = unsafe { Rc::clone(&cb).assume_init() };
+        let ctx = Rc::clone(&ctx);
+        let request_animation_frame = request_animation_frame.clone();
+        move || {
+            let mut ctx = ctx.borrow_mut();
+            if let Err(err) = ctx.iterate() {
+                log::error!("could not iterate: {}", err);
+                return;
+            }
+            if let Err(err) = request_animation_frame.call(&[js::Value::from_closure(&cb)]) {
+                log::error!("could not request animation frame: {}", err);
+            }
+        }
+    });
+    let cb = unsafe {
+        let ptr = Rc::as_ptr(&cb) as *mut js::Closure<dyn FnMut()>;
+        ptr.write(closure);
+        cb.assume_init()
+    };
+    if let Err(err) = request_animation_frame.call(&[js::Value::from_closure(cb.as_ref())]) {
+        log::error!("could not request animation frame: {}", err);
+    }
+    Ok(())
+}
+
+pub fn run<A: AppHandler + 'static>(window_attrs: WindowAttrs) {
     std::panic::set_hook(Box::new(panic_hook));
     Logger::init();
 
-    // TODO: figure out wasm-side lifetime of the entire thing
-    let ctx = Box::new(Context::<A>::new(window_attrs).expect("could not create app context"));
-    let mut ctx = std::mem::ManuallyDrop::new(ctx);
+    let ctx = Rc::new(RefCell::new(
+        Context::<A>::new(window_attrs).expect("could not create app context"),
+    ));
 
-    unsafe extern "C" fn iterate<A: AppHandler>(ctx: *mut std::ffi::c_void) -> bool {
-        let ctx = unsafe { &mut *(ctx as *mut Context<A>) };
-        ctx.iterate().expect("iteration failure");
-        return true;
-    }
-    let ctx_ptr = ctx.as_mut() as *mut Context<A> as *mut std::ffi::c_void;
-    unsafe { window::js_sys::request_animation_frame_loop(iterate::<A>, ctx_ptr) };
+    request_animation_frame_loop(ctx).expect("could not start animation loop");
 }

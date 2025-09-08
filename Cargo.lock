@@ -71,6 +71,7 @@ dependencies = [
  "anyhow",
  "gl",
  "input",
+ "js",
  "log",
  "raw-window-handle",
  "window",
@@ -376,6 +377,7 @@ dependencies = [
  "anyhow",
  "dynlib",
  "gl-generator",
+ "js",
  "log",
  "raw-window-handle",
  "wayland",
@@ -465,6 +467,10 @@ checksum = "48d1dbcbbeb6a7fec7e059840aa538bd62aaccf972c7346c4d9d2059312853d0"
 dependencies = [
  "libc",
 ]
+
+[[package]]
+name = "js"
+version = "0.0.0"
 
 [[package]]
 name = "js-sys"
@@ -1428,6 +1434,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "input",
+ "js",
  "libc",
  "log",
  "nohash",

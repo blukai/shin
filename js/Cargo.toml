@@ -1,0 +1,4 @@
+[package]
+name = "js"
+version = "0.0.0"
+edition.workspace = true

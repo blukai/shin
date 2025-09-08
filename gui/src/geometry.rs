@@ -332,7 +332,7 @@ impl Rect {
     }
 
     // ----
-    // suggary stuff
+    // sugary stuff
 
     pub fn top_left(&self) -> Vec2 {
         self.min

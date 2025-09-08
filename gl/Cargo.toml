@@ -13,13 +13,30 @@ raw-window-handle.workspace = true
 dynlib.workspace = true
 wayland.workspace = true
 
+[target.'cfg(target_family = "wasm")'.dependencies]
+js.workspace = true
+
 [build-dependencies]
 anyhow.workspace = true
 # workspace
 gl-generator.workspace = true
 
 [features]
-# NOTE: `debug` will log all function calls (when debug_assertions is on).
+# NOTE: `debug` will log all function calls (debug_assertions has to be also on).
 debug = []
+# NOTE: list of all specs and extensions, you might find this useful -
+# https://registry.khronos.org/EGL
+EGL_EXT_platform_base = []
+EGL_EXT_platform_wayland = []
 EGL_KHR_image = []
+EGL_KHR_platform_wayland = []
 EGL_MESA_image_dma_buf_export = []
+# NOTE: enable all features so that there are types and enums and api; if they
+# are not supported they will not be loaded.
+default = [
+  "EGL_EXT_platform_base",
+  "EGL_EXT_platform_wayland",
+  "EGL_KHR_image",
+  "EGL_KHR_platform_wayland",
+  "EGL_MESA_image_dma_buf_export",
+]

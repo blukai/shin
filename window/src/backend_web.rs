@@ -1,35 +1,16 @@
 use std::collections::VecDeque;
-use std::ffi::CString;
 
-use anyhow::anyhow;
+use anyhow::Context as _;
 use input::CursorShape;
 use raw_window_handle as rwh;
 
 use crate::{ClipboardDataProvider, DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent};
 
-pub mod js_sys {
-    use std::ffi::{c_char, c_void};
-
-    unsafe extern "C" {
-        pub fn panic(msg: *const c_char);
-
-        pub fn console_log(msg: *const c_char);
-
-        pub fn request_animation_frame_loop(
-            f: unsafe extern "C" fn(*mut c_void) -> bool,
-            ctx: *mut c_void,
-        );
-
-        pub(super) fn canvas_get_by_id(id: *const c_char) -> u32;
-        pub(super) fn canvas_get_size(extern_ref: u32, width: *mut i32, height: *mut i32);
-        pub(super) fn canvas_set_size(extern_ref: u32, width: i32, height: i32);
-    }
-}
-
 pub struct WebBackend {
     attrs: WindowAttrs,
 
-    canvas: u32,
+    canvas: js::Value,
+    canvas_raw_handle: u32,
 
     events: VecDeque<Event>,
 }
@@ -38,28 +19,50 @@ impl WebBackend {
     pub fn new_boxed(attrs: WindowAttrs) -> anyhow::Result<Box<Self>> {
         let mut events = VecDeque::new();
 
-        let canvas_id = attrs.canvas_id.as_ref().map_or_else(
-            || CString::new("canvas"),
-            |payload| CString::new(payload.as_ref()),
-        )?;
-        let canvas = unsafe { js_sys::canvas_get_by_id(canvas_id.as_ptr()) };
-        if canvas == 0 {
-            return Err(anyhow!("could not get canvas"));
-        }
+        let document = js::global().get("document");
+        let canvas = match attrs.canvas_id.as_ref() {
+            Some(canvas_id) => document
+                .get("getElementById")
+                .call(&[js::Value::from_str(canvas_id)])
+                .with_context(|| format!("could not get canvas (id {canvas_id})"))?,
+            None => {
+                let canvas = document
+                    .get("createElement")
+                    .call(&[js::Value::from_str("canvas")])
+                    .context("could not create canvas")?;
+                document
+                    .get("body")
+                    .get("append")
+                    .call(&[canvas.clone()])
+                    .context("could not append canvas")?;
+                canvas
+            }
+        };
+
+        let random = js::global().get("Math").get("random");
+        let canvas_raw_handle =
+            (random.call(&[]).context("could not random")?.as_f64() * u32::MAX as f64) as u32;
+
+        let dataset = canvas.get("dataset");
+        dataset.set("rawHandle", &js::Value::from_f64(canvas_raw_handle as f64));
 
         let (width, height) = attrs.logical_size.unwrap_or(DEFAULT_LOGICAL_SIZE);
-        unsafe { js_sys::canvas_set_size(canvas.clone(), width as i32, height as i32) };
-        let (mut width, mut height) = (0_i32, 0_i32);
-        unsafe { js_sys::canvas_get_size(canvas.clone(), &mut width, &mut height) };
+        canvas.set("width", &js::Value::from_f64(width as f64));
+        canvas.set("height", &js::Value::from_f64(height as f64));
+
+        let width = canvas.get("width").as_f64();
+        let height = canvas.get("height").as_f64();
         events.push_back(Event::Window(WindowEvent::Configure {
             logical_size: (width as u32, height as u32),
         }));
+
         // TODO: scale factor (/ pixel ratio)
 
         let boxed = Box::new(Self {
             attrs,
 
             canvas,
+            canvas_raw_handle,
 
             events,
         });
@@ -78,8 +81,7 @@ impl rwh::HasDisplayHandle for WebBackend {
 
 impl rwh::HasWindowHandle for WebBackend {
     fn window_handle(&self) -> Result<rwh::WindowHandle<'_>, rwh::HandleError> {
-        assert!(self.canvas != 0);
-        let web = rwh::WebWindowHandle::new(self.canvas);
+        let web = rwh::WebWindowHandle::new(self.canvas_raw_handle);
         let raw = rwh::RawWindowHandle::Web(web);
         Ok(unsafe { rwh::WindowHandle::borrow_raw(raw) })
     }

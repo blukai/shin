@@ -6,8 +6,18 @@
         <style></style>
     </head>
     <body>
-        <canvas id="canvas"></canvas>
         <script src="/shin.js"></script>
-        <script>shinInit("/target/wasm32-unknown-unknown/debug/examples/first.wasm")</script>
+        <script>
+            const shin = new Shin();
+            WebAssembly.instantiateStreaming(
+                // TODO: don't hardcode? can i list compiled wasm modules? or
+                // maybe display a file select?
+                fetch("/target/wasm32-unknown-unknown/debug/examples/first.wasm"),
+                shin.importObject
+            ).then((result) => {
+                shin.init(result.instance);
+                shin.instance.exports.main();
+            });
+        </script>
     </body>
 </html>

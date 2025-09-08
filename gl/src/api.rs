@@ -1,34 +1,36 @@
 use std::ffi::{CStr, c_void};
-
 #[allow(non_snake_case)]
-pub(crate) mod types {
+mod types {
     include!(concat!(env!("OUT_DIR"), "/gl_types_generated.rs"));
 }
 
 #[allow(non_upper_case_globals)]
-pub(crate) mod enums {
+mod enums {
     use super::types::*;
 
     include!(concat!(env!("OUT_DIR"), "/gl_enums_generated.rs"));
 }
 
 #[cfg(not(target_family = "wasm"))]
-#[path = "api_gl46.rs"]
-mod api_gl46;
+#[path = "gl46.rs"]
+mod gl46;
 
 #[cfg(target_family = "wasm")]
-#[path = "api_webgl2.rs"]
-mod api_webgl2;
+#[path = "webgl2.rs"]
+mod webgl2;
 
-#[cfg(not(target_family = "wasm"))]
-pub use api_gl46::*;
-#[cfg(target_family = "wasm")]
-pub use api_webgl2::*;
 pub use enums::*;
 pub use types::*;
 
-// NOTE: why not just use glow? i do not like that glow depends on web-sys+wasm-bindgen. i am kind
-// of all about wheel re-invention here.
+#[cfg(not(target_family = "wasm"))]
+pub use gl46::*;
+
+#[cfg(target_family = "wasm")]
+pub use webgl2::*;
+
+// NOTE: why not just use glow?
+// i very don't like that its Api trait does not exactly mirror gl spec.
+// i don't like that it abstracts away certain thigs, i don't want that.
 //
 // TODO: make sure that all methods match libgl's methods 1:1 with the exception of things that can
 // be rustified (like strings and stuff).

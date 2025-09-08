@@ -1,5 +1,5 @@
 use app::AppHandler;
-use gl::api::Apier as _;
+use gl::Apier as _;
 use window::{Event, WindowAttrs};
 
 struct GuiExterns;
@@ -272,7 +272,7 @@ impl AppHandler for App {
         // ----
 
         unsafe { ctx.gl_api.clear_color(0.0, 0.0, 0.3, 1.0) };
-        unsafe { ctx.gl_api.clear(gl::api::COLOR_BUFFER_BIT) };
+        unsafe { ctx.gl_api.clear(gl::COLOR_BUFFER_BIT) };
 
         draw(&mut self.gui_context, &mut self.gui_viewport);
 

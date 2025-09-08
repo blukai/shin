@@ -4,7 +4,7 @@ use std::ptr::{null, null_mut};
 use anyhow::{Context as _, anyhow};
 use raw_window_handle as rwh;
 
-use crate::libegl::*;
+use crate::egl::*;
 
 pub fn egl_get_error(egl_lib: &EglApi) -> anyhow::Error {
     match unsafe { egl_lib.GetError() } as EGLenum {

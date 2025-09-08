@@ -1,133 +1,229 @@
-async function shinInit(path) {
-    const textDecoder = new TextDecoder();
-
-    let wasm;
-
+(() => {
     function assert(truth, msg) {
         if (!truth) {
-            throw new Error(`assertion failed${msg ? `: ${msg}` : ""}`);
+            const baseMsg = "assertion failed";
+            throw new Error(msg ? `${baseMsg}: ${msg}` : baseMsg);
         }
     }
 
-    let wasmUint8Array = null;
-    function getWasmUint8Array() {
-        if (!wasmUint8Array || !wasmUint8Array.byteLength) {
-            wasmUint8Array = new Uint8Array(wasm.exports.memory.buffer);
+    function assertEq(left, right, msg) {
+        if (left !== right) {
+            const baseMsg = `assertion left === right failed\n  left: ${left}\n right: ${right}`;
+            throw new Error(msg ? `${baseMsg}: ${msg}` : baseMsg);
         }
-        return wasmUint8Array;
     }
 
-    let wasmDataView = null;
-    function getWasmDataView() {
-        if (!wasmDataView || wasmDataView.buffer !== wasm.exports.memory.buffer) {
-            wasmDataView = new DataView(wasm.exports.memory.buffer);
+    function assertNe(left, right, msg) {
+        if (left === right) {
+            const baseMsg = `assertion left !== right failed\n  left: ${left}\n right: ${right}`;
+            throw new Error(msg ? `${baseMsg}: ${msg}` : baseMsg);
         }
-        return wasmDataView;
     }
 
-    function wasmReadCStr(ptr) {
-        const len = getWasmUint8Array().subarray(ptr).findIndex((b) => !b);
-        return textDecoder.decode(getWasmUint8Array().subarray(ptr, ptr + len));
+    function todo(what) {
+        const baseMsg = "not yet implemented"; 
+        throw new Error(what ? `${baseMsg}: ${msg}` : baseMsg);
     }
 
-    function wasmWriteI32(ptr, value) {
-        getWasmDataView().setInt32(ptr, value, true);
-    }
+    class Shin {
+        constructor() {
+            this.instance = null;
 
-    // NOTE: it does not seem like rust supports exteralref thing. 
-    //
-    // NOTE: i want to treat 0 as null/undefined, thus i'm faking 1-based
-    // indices.
-    const externRefGlue = {
-        table: new WebAssembly.Table({ element: "externref", initial: 0 }),
-        freeIndices: [],
-        grow: (delta) => {
-            const oldLen = externRefGlue.table.length;
-            externRefGlue.table.grow(delta);
-            for (let i = 0; i < delta; i += 1) {
-                externRefGlue.freeIndices.push(oldLen + i);
-            }
-        },
-        alloc: () => {
-            const freeIdx = externRefGlue.freeIndices.pop();
-            if (freeIdx !== undefined) {
-                return freeIdx;
-            }
-            assert(externRefGlue.freeIndices.length === 0);
-            externRefGlue.grow(Math.max(externRefGlue.freeIndices.length * 2, 1));
-            return externRefGlue.freeIndices.pop();
-        },
-        insert: (value) => {
-            const idx = externRefGlue.alloc();
-            externRefGlue.table.set(idx, value);
-            return idx + 1;
-        },
-        get: (idx) => externRefGlue.table.get(idx - 1),
-    };
-
-    const imports = {
-        env: {
-            panic: (ptr) => {
-                // TODO: do something more prominent on panic.
-                throw new Error(wasmReadCStr(ptr));
-            },
-
-            console_log: (ptr) => {
-                console.log(wasmReadCStr(ptr));
-            },
-
-            request_animation_frame_loop: (f, ctx) => {
-                function tick() {
-                    if (wasm.exports.__indirect_function_table.get?.(f)(ctx)) {
-                        requestAnimationFrame(tick);
-                    }
+            this.memoryViews = {};
+            const getMemoryView = (type) => {
+                const maybeMemoryView = this.memoryViews[type];
+                const buffer = this.instance.exports.memory.buffer;
+                if (!maybeMemoryView || maybeMemoryView.buffer !== buffer) {
+                    this.memoryViews[type] = new type(buffer);
                 }
-                requestAnimationFrame(tick);
-            },
+                return this.memoryViews[type];
+            }
 
-            canvas_get_by_id: (idPtr) => {
-                const id = wasmReadCStr(idPtr);
-                const el = document.getElementById(id);
-                return (el && externRefGlue.insert(el)) || 0;
-            },
-            canvas_get_size: (elIdx, widthPtr, heightPtr) => {
-                const el = externRefGlue.get(elIdx);
-                wasmWriteI32(widthPtr, el.width);
-                wasmWriteI32(heightPtr, el.height);
-            },
-            canvas_set_size: (elIdx, width, height) => {
-                const el = externRefGlue.get(elIdx);
-                el.width = width;
-                el.height = height;
-            },
-            canvas_get_context: (elIdx, contextTypePtr) => {
-                const el = externRefGlue.get(elIdx);
-                const contextType = wasmReadCStr(contextTypePtr);
-                const context = el.getContext(contextType);
-                return (context && externRefGlue.insert(context)) || 0;
-            },
+            // NOTE: predefined values. must be kept up to date with consts in
+            // rust.
+            const UNDEFINED = 0;
+            const NULL = 1;
+            const GLOBAL = 2;
+            const GLUE = 3;
+            this.handleTable = new WebAssembly.Table({ element: "externref", initial: 0 });
+            // like Rc. set to 1 on alloc, inc by 1 on clone, dec by 1 on drop.
+            // when reaches 0 the handle is pushed into the free-list.
+            this.handleCounts = [];
+            this.freeHandles = [];
+            // stores value, returns handle.
+            const allocValueUnchecked = (value) => {
+                let maybeHandle = this.freeHandles.pop();
+                if (maybeHandle === undefined) {
+                    assertEq(this.freeHandles.length, 0);
 
-            gl_clear_color: (ctxIdx, r, g, b, a) => {
-                const ctx = externRefGlue.get(ctxIdx);
-                ctx.clearColor(1.0, 0.0, 0.0, 1.0);
-            },
-            gl_clear: (ctxIdx, mask) => {
-                const ctx = externRefGlue.get(ctxIdx);
-                ctx.clear(mask);
-            },
-        },
-    };
+                    const oldLen = this.handleTable.length;
+                    const growDelta = Math.max(1, oldLen);
+                    this.handleTable.grow(growDelta);
+                    // NOTE: iterate in reverse order to push smaller indices to
+                    // the end.
+                    for (let i = growDelta; i > 0; i -= 1) {
+                        this.freeHandles.push(oldLen + i - 1);
+                    }
 
-    const wasmStream = fetch(path);
-    const wasmMod = await WebAssembly.compileStreaming(wasmStream);
+                    assertEq(this.handleTable.length, oldLen + growDelta);
+                    assertEq(this.freeHandles.length, growDelta);
 
-    wasm = await WebAssembly.instantiate(wasmMod, imports);
+                    maybeHandle = this.freeHandles.pop();
+                }
+                assertNe(maybeHandle, undefined);
+                const handle = maybeHandle;
 
-    wasm.exports.main();
+                this.handleTable.set(handle, value);
+                this.handleCounts[handle] = 1;
+                return handle;
+            };
+            // me being pedantic.
+            assertEq(allocValueUnchecked(undefined), UNDEFINED);
+            assertEq(allocValueUnchecked(null), NULL);
+            assertEq(allocValueUnchecked(globalThis), GLOBAL);
+            assertEq(allocValueUnchecked(this), GLUE);
+            const allocValue = (value) => {
+                // NOTE: i kind of want to avoid a need for nil checks
+                // everywhere.
+                if (value === undefined) {
+                    this.handleCounts[UNDEFINED] += 1;
+                    return UNDEFINED;
+                }
+                if (value === null) {
+                    this.handleCounts[NULL] += 1;
+                    return NULL;
+                }
+                // TODO: predefine true and false.
+                
+                return allocValueUnchecked(value);
+            };
+            const getValue = (handle) => {
+                assertEq(typeof handle, "number");
+                return this.handleTable.get(handle);
+            };
 
-    window.__shin = {
-        wasmMod,
-        wasm,
-        externRefGlue,
-    };
-}
+            this.textDecoder = new TextDecoder();
+            const decodeString = (ptr, len) => {
+                const slice = getMemoryView(Uint8Array).subarray(ptr, ptr + len);
+                return this.textDecoder.decode(slice);
+            };
+
+            this.textEncoder = new TextEncoder();
+            const encodeString = (s) => {
+                return this.textEncoder.encode(s);
+            };
+
+            this.importObject = {
+                env: {
+                    throw_str: (ptr, len) => {
+                        const msg = decodeString(ptr, len);
+                        throw new Error(msg);
+                    },
+
+                    string_new: (ptr, len) => {
+                        const string = decodeString(ptr, len);
+                        return allocValue(string);
+                    },
+                    number_new: (value) => {
+                        return allocValue(value);
+                    },
+                    closure_new: (callByPtrIndex, ptr) => {
+                        const callByPtr = this.instance.exports.
+                            __indirect_function_table.get(callByPtrIndex);
+                        const callByPtrWrapped = (...args) => {
+                            // TODO: handle args
+                            // const argHandles = args.map(allocValue);
+                            callByPtr(ptr);
+                        };
+                        return allocValue(callByPtrWrapped);
+                    },
+
+                    increment_strong_count: (handle) => {
+                        this.handleCounts[handle] += 1;
+                    },
+                    decrement_strong_count: (handle) => {
+                        this.handleCounts[handle] -= 1;
+                        const count = this.handleCounts[handle];
+                        assert(count >= 0);
+                        if (count == 0) {
+                            this.freeHandles.push(handle);
+                        }
+                    },
+
+                    is_object: (handle) => {
+                        const value = getValue(handle);
+                        // NOTE: null is an object too kekw, see
+                        // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/typeof#typeof_null
+                        return typeof value === "object" && value !== null;
+                    },
+                    is_function: (handle) => {
+                        return typeof getValue(handle) === "function";
+                    },
+                    is_number: (handle) => {
+                        return typeof getValue(handle) === "number";
+                    },
+                    is_string: (handle) => {
+                        return typeof getValue(handle) === "string";
+                    },
+
+                    get: (handle, propPtr, propLen) => {
+                        const target = getValue(handle);
+                        const prop = decodeString(propPtr, propLen);
+                        let value = Reflect.get(target, prop);
+                        if (value instanceof Function) {
+                            value = value.bind(target);
+                        }
+                        return allocValue(value);
+                    },
+                    set: (handle, propPtr, propLen, valueHandle) => {
+                        const target = getValue(handle);
+                        const prop = decodeString(propPtr, propLen);
+                        const value = getValue(valueHandle);
+                        Reflect.set(target, prop, value);
+                    },
+                    call: (handle, argsPtr, argsLen, retHandlePtr) => {
+                        const mem = getMemoryView(DataView);
+                        try {
+                            const target = getValue(handle);
+                            const args = Array.from({ length: argsLen }, (_, i) => {
+                                return getValue(mem.getUint32(argsPtr + i * 4, true));
+                            });
+                            const result = Reflect.apply(target, undefined, args);
+                            mem.setUint32(retHandlePtr, allocValue(result), true);
+                            return true;
+                        } catch (err) {
+                            mem.setUint32(retHandlePtr, allocValue(err), true);
+                            return false;
+                        }
+                    },
+
+                    number_get: (handle) => {
+                        const value = getValue(handle);
+                        assert(typeof value, "number");
+                        return value;
+                    },
+                    string_get: (handle, ptrPtr, lenPtr) => {
+                        const value = getValue(handle);
+                        assert(typeof value, "string");
+
+                        const buf = encodeString(value);
+                        const ptr = this.instance.exports.malloc(buf.length, 1);
+                        getMemoryView(Uint8Array).subarray(ptr, ptr + buf.length).set(buf);
+
+                        const mem = getMemoryView(DataView);
+                        mem.setUint32(ptrPtr, ptr, true);
+                        mem.setUint32(lenPtr, buf.length, true);
+                    }
+                },
+            };
+        }
+
+        init(instance) {
+            assert(instance instanceof WebAssembly.Instance);
+            assert(!this.instance);
+            this.instance = instance;
+        }
+    }
+
+    globalThis.Shin = Shin;
+})();

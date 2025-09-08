@@ -51,8 +51,14 @@ fn main() -> anyhow::Result<()> {
         gl_generator::Api::Egl,
         gl_generator::Version(1, 5),
         &[
+            #[cfg(feature = "EGL_EXT_platform_base")]
+            "EGL_EXT_platform_base",
+            #[cfg(feature = "EGL_EXT_platform_wayland")]
+            "EGL_EXT_platform_wayland",
             #[cfg(feature = "EGL_KHR_image")]
             "EGL_KHR_image",
+            #[cfg(feature = "EGL_KHR_platform_wayland")]
+            "EGL_KHR_platform_wayland",
             #[cfg(feature = "EGL_MESA_image_dma_buf_export")]
             "EGL_MESA_image_dma_buf_export",
         ],

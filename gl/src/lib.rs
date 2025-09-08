@@ -1,12 +1,11 @@
-#[cfg(unix)]
-pub mod libegl;
+mod api;
 
-// TODO: shit below needs to change.
+pub use api::*;
+
+#[cfg(unix)]
+pub mod egl;
+
+// TODO:
 
 #[cfg(unix)]
 pub mod context_egl;
-
-#[cfg(target_family = "wasm")]
-pub mod context_web;
-
-pub mod api;
