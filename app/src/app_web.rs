@@ -7,8 +7,7 @@ use window::{Event, Window, WindowAttrs, WindowEvent};
 use crate::{AppContext, AppHandler};
 
 fn panic_hook(info: &std::panic::PanicHookInfo) {
-    let msg = info.to_string();
-    unsafe { js::throw_str(msg.as_ptr(), msg.len() as u32) };
+    js::throw_str(&info.to_string());
 }
 
 struct Logger;
@@ -28,7 +27,7 @@ impl log::Log for Logger {
                 .map_or_else(|| "??".to_string(), |line| line.to_string()),
             text = record.args(),
         );
-        js::global()
+        js::GLOBAL
             .get("console")
             .get("log")
             .call(&[js::Value::from_str(msg.as_str())])
@@ -157,7 +156,7 @@ fn request_animation_frame_loop<A: AppHandler + 'static>(
     ctx: Rc<RefCell<Context<A>>>,
 ) -> anyhow::Result<()> {
     let cb = Rc::<js::Closure<dyn FnMut()>>::new_uninit();
-    let request_animation_frame = js::global().get("requestAnimationFrame");
+    let request_animation_frame = js::GLOBAL.get("requestAnimationFrame");
     let closure = js::Closure::new({
         let cb = unsafe { Rc::clone(&cb).assume_init() };
         let ctx = Rc::clone(&ctx);

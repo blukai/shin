@@ -17,7 +17,7 @@ impl Api {
     // TODO: re-evaludate this. might want to not be depending on raw-window-handle thing here.
     pub fn from_web_window_handle(handle: rwh::WebWindowHandle) -> anyhow::Result<Self> {
         let selector = format!("canvas[data-raw-handle=\"{}\"]", handle.id);
-        let canvas = js::global()
+        let canvas = js::GLOBAL
             .get("document")
             .get("querySelector")
             .call(&[js::Value::from_str(selector.as_str())])

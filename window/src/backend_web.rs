@@ -19,7 +19,7 @@ impl WebBackend {
     pub fn new_boxed(attrs: WindowAttrs) -> anyhow::Result<Box<Self>> {
         let mut events = VecDeque::new();
 
-        let document = js::global().get("document");
+        let document = js::GLOBAL.get("document");
         let canvas = match attrs.canvas_id.as_ref() {
             Some(canvas_id) => document
                 .get("getElementById")
@@ -39,7 +39,7 @@ impl WebBackend {
             }
         };
 
-        let random = js::global().get("Math").get("random");
+        let random = js::GLOBAL.get("Math").get("random");
         let canvas_raw_handle =
             (random.call(&[]).context("could not random")?.as_f64() * u32::MAX as f64) as u32;
 

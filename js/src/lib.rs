@@ -1,156 +1,194 @@
 use std::{error, fmt};
 
+// NOTE: this is based on  <https://pkg.go.dev/syscall/js>.
+// it's nothing like wasm-bindgen.
+
 mod sys {
     use std::alloc;
 
-    use super::Handle;
+    // NOTE: this is an alias to u64, and not super::Value because Value does ref counting in its
+    // Copy and Drop.
+    // instead we're operating on Value's underlying value (xd) which is u64;
+    // but it is semantically a bit confusing to refer to it as u64 thus this:
+    type Value = u64;
 
     unsafe extern "C" {
+        // there are cases when Value is treated as a (certainly) ref which means it's not
+        // predefined nor it is a number.
+        //
+        // in cases when Value passed as a pointer - it can be anything;
+        // Value wraps u64, rust's u64 compiles to js BigInt and in js there's no easy way to convert
+        // between bin reprs of f64 (because in js any number is an ieee 754 float 64) and BigInt.
+        //
+        // but it's easy with the DataView thing that operates on byte offsets (wasm's stack and
+        // heap are linear; both exist within the same memory object).
+
         pub fn throw_str(ptr: *const u8, len: u32) -> !;
 
-        pub fn string_new(ptr: *const u8, len: u32) -> Handle;
-        pub fn number_new(value: f64) -> Handle;
-        pub fn closure_new(call_by_ptr: extern "C" fn(ptr: *mut ()), ptr: *mut ()) -> Handle;
+        pub fn string_new(ptr: *const u8, len: u32, out: *mut Value);
+        pub fn closure_new(call_by_ptr: extern "C" fn(ptr: *mut ()), ptr: *mut (), out: *mut Value);
 
-        pub fn increment_strong_count(handle: Handle);
-        pub fn decrement_strong_count(handle: Handle);
+        // TODO: can ref counting be done on rust side to avoid roundtrips when cloning refs?
+        pub fn increment_ref_count(r#ref: Value);
+        pub fn decrement_ref_count(r#ref: Value);
 
-        pub fn is_object(handle: Handle) -> bool;
-        pub fn is_function(handle: Handle) -> bool;
-        pub fn is_number(handle: Handle) -> bool;
-        pub fn is_string(handle: Handle) -> bool;
+        pub fn get(r#ref: Value, prop_ptr: *const u8, prop_len: u32, out: *mut Value);
+        // NOTE: value arg is a pointer because the value itself can be a number or predefined or a
+        // reference.
+        pub fn set(r#ref: Value, prop_ptr: *const u8, prop_len: u32, value: *const Value);
+        pub fn call(r#ref: Value, agrs_ptr: *const Value, args_len: u32, out: *mut Value) -> bool;
 
-        pub fn get(handle: Handle, prop_ptr: *const u8, prop_len: u32) -> Handle;
-        pub fn set(handle: Handle, prop_ptr: *const u8, prop_len: u32, value_handle: Handle);
-        pub fn call(
-            handle: Handle,
-            agrs_ptr: *const Handle,
-            args_len: u32,
-            ret_handle_ptr: *mut Handle,
-        ) -> bool;
-
-        pub fn string_get(handle: Handle, ptr: *mut u32, len: *mut u32);
-        pub fn number_get(handle: Handle) -> f64;
+        pub fn string_get(r#ref: Value, ptr: *mut u32, len: *mut u32);
     }
 
+    // NOTE: this allows js to allocate memory that then can be handed-off to rust.
     #[unsafe(no_mangle)]
     extern "C" fn alloc(size: u32, align: u32) -> *mut u8 {
         let Ok(layout) = alloc::Layout::from_size_align(size as usize, align as usize) else {
             // TODO: should this be handled better somehow?
-            const INVALID_LAYOUT: &str = "invalid layout";
-            unsafe { throw_str(INVALID_LAYOUT.as_ptr(), INVALID_LAYOUT.len() as u32) };
+            super::throw_str("invalid layout");
         };
         unsafe { alloc::alloc(layout) }
     }
 }
 
-pub use sys::throw_str;
-
-// Handle is used to identify a js value, since the value itself can not be passed to wasm.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(transparent)]
-struct Handle(u32);
-
-// Value represents a js value.
-#[derive(Debug)]
-#[repr(transparent)]
-pub struct Value {
-    handle: Handle,
-}
-
-// TODO: Error needs to be better.
-#[derive(Debug, Clone)]
-pub struct Error {
-    value: Value,
-}
-
-pub struct Closure<F: ?Sized> {
-    _f: Box<F>,
-    value: Value,
+pub fn throw_str(s: &str) -> ! {
+    unsafe { sys::throw_str(s.as_ptr(), s.len() as u32) }
 }
 
 // ----
 // value
 
+// Value is a nan-tagged thingie. it can represent ieee 754 float 64; it can be predefined; it can
+// carry a reference to something that js owns.
+#[derive(Debug, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct Value(u64);
+
 impl Clone for Value {
     fn clone(&self) -> Self {
-        unsafe { sys::increment_strong_count(self.handle) };
-        Self {
-            handle: self.handle,
+        if self.is_ref() {
+            unsafe { sys::increment_ref_count(self.0) };
         }
+        Self(self.0)
     }
 }
 
 impl Drop for Value {
     fn drop(&mut self) {
-        unsafe { sys::decrement_strong_count(self.handle) };
+        if self.is_ref() {
+            unsafe { sys::decrement_ref_count(self.0) };
+        }
     }
 }
 
+// nan-tagging
+//
+// https://craftinginterpreters.com/optimization.html#nan-boxing
+// https://anniecherkaev.com/the-secret-life-of-nan
+// https://wingolog.org/archives/2011/05/18/value-representation-in-javascript-implementations
+
+const QUIET_NAN: u64 = 0x7ff8_0000_0000_0000;
+const _: () = assert!(f64::NAN.to_bits() == QUIET_NAN);
+const TY_MASK: u64 = (1 << 8) - 1;
+const ID_MASK: u64 = (1 << 32) - 1;
+
+// NOTE: TY_NUMBER does not exist because the whole thing is either a number or anything else.
+const TY_DONT_CARE: u64 = 0;
+const TY_OBJECT: u64 = 1;
+const TY_FUNCTION: u64 = 2;
+const TY_STRING: u64 = 3;
+
+// TODO: add bools.
+//
+// NOTE: ids can't start at 0 because when encoded into tagged/boxed nan there would be no
+// distinction between id 0 and nan.
+const ID_UNDEFINED: u64 = 1;
+const ID_NULL: u64 = 2;
+const ID_NAN: u64 = 3;
+const ID_GLOBAL: u64 = 4;
+const ID_MAX: u64 = 5;
+
+pub const UNDEFINED: Value = Value::from_ty_id(TY_DONT_CARE, ID_UNDEFINED);
+pub const NULL: Value = Value::from_ty_id(TY_DONT_CARE, ID_NULL);
+pub const NAN: Value = Value::from_ty_id(TY_DONT_CARE, ID_NAN);
+pub const GLOBAL: Value = Value::from_ty_id(TY_OBJECT, ID_GLOBAL);
+
 impl Value {
-    /// NOTE: the string is copied to the js heap and will be owned by the js garbage collector.
-    pub fn from_str(value: &str) -> Self {
-        let handle = unsafe { sys::string_new(value.as_ptr(), value.len() as u32) };
-        Self { handle }
+    const fn from_ty_id(ty: u64, id: u64) -> Self {
+        Self(QUIET_NAN | (ty << 32) | id)
     }
 
-    /// NOTE: js number is a 64-bit ieee 754 value.
-    pub fn from_f64(value: f64) -> Self {
-        let handle = unsafe { sys::number_new(value) };
-        Self { handle }
+    /// js number is a 64-bit ieee 754 value.
+    pub const fn from_f64(f: f64) -> Self {
+        if f.is_nan() {
+            Self::from_ty_id(TY_DONT_CARE, ID_NAN)
+        } else {
+            Self(f.to_bits())
+        }
     }
 
-    /// NOTE: the closure needs to be kept alive. be careful when using it as a callback with
-    /// things like requestAnimationFrame, etc.
-    pub fn from_closure<F: ?Sized>(closure: &Closure<F>) -> Self {
-        closure.value.clone()
+    /// the string is copied to the js heap and will be owned by the js garbage collector.
+    pub fn from_str(s: &str) -> Self {
+        let mut ret = UNDEFINED;
+        unsafe { sys::string_new(s.as_ptr(), s.len() as u32, &mut ret.0) };
+        ret
     }
 
-    // ----
-
-    pub fn is_object(&self) -> bool {
-        unsafe { sys::is_object(self.handle) }
+    /// the closure needs to be kept alive.
+    /// be careful when using it as a callback with things like requestAnimationFrame, etc.
+    pub fn from_closure<F: ?Sized>(c: &Closure<F>) -> Self {
+        c.value.clone()
     }
 
-    pub fn is_function(&self) -> bool {
-        unsafe { sys::is_function(self.handle) }
+    const fn ty(&self) -> u64 {
+        (self.0 >> 32) & TY_MASK
+    }
+
+    const fn id(&self) -> u64 {
+        self.0 & ID_MASK
+    }
+
+    fn is_predefined(&self) -> bool {
+        self.id() < ID_MAX
     }
 
     pub fn is_number(&self) -> bool {
-        unsafe { sys::is_number(self.handle) }
+        self.0 == NAN.0 || self.0 & QUIET_NAN != QUIET_NAN
+    }
+
+    pub fn is_object(&self) -> bool {
+        self.ty() == TY_OBJECT
+    }
+
+    pub fn is_function(&self) -> bool {
+        self.ty() == TY_FUNCTION
     }
 
     pub fn is_string(&self) -> bool {
-        unsafe { sys::is_string(self.handle) }
+        self.ty() == TY_STRING
     }
 
-    // ----
+    fn is_ref(&self) -> bool {
+        !(self.is_predefined() || self.is_number())
+    }
 
     pub fn get(&self, p: &str) -> Value {
         debug_assert!(self.is_object());
-        let handle = unsafe { sys::get(self.handle, p.as_ptr(), p.len() as u32) };
-        Self { handle }
+        let mut ret = UNDEFINED;
+        unsafe { sys::get(self.0, p.as_ptr(), p.len() as u32, &mut ret.0) };
+        ret
     }
 
     pub fn set(&self, p: &str, value: &Self) {
         debug_assert!(self.is_object());
-        unsafe { sys::set(self.handle, p.as_ptr(), p.len() as u32, value.handle) }
+        unsafe { sys::set(self.0, p.as_ptr(), p.len() as u32, &value.0) }
     }
 
     pub fn call(&self, args: &[Self]) -> Result<Value, Error> {
         debug_assert!(self.is_function());
-        let mut ret = Value {
-            handle: Handle(u32::MAX),
-        };
-        let ok = unsafe {
-            sys::call(
-                self.handle,
-                // NOTE: ok to cast; Value wraps Handle and nothing else.
-                args.as_ptr().cast(),
-                args.len() as u32,
-                &mut ret.handle,
-            )
-        };
+        let mut ret = UNDEFINED;
+        let ok = unsafe { sys::call(self.0, args.as_ptr().cast(), args.len() as u32, &mut ret.0) };
         if ok {
             Ok(ret)
         } else {
@@ -158,25 +196,26 @@ impl Value {
         }
     }
 
-    // ----
-
     pub fn try_as_f64(&self) -> Option<f64> {
-        if self.is_number() {
-            Some(unsafe { sys::number_get(self.handle) })
+        if self.0 == NAN.0 {
+            // NOTE: we don't really want to return nan bits that contain id.
+            Some(f64::NAN)
+        } else if self.0 & QUIET_NAN != QUIET_NAN {
+            Some(f64::from_bits(self.0))
         } else {
             None
         }
     }
 
     pub fn as_f64(&self) -> f64 {
-        self.try_as_f64().expect("value is number")
+        self.try_as_f64().expect("not a number")
     }
 
     pub fn try_as_string(&self) -> Option<String> {
         if self.is_string() {
             let mut ptr: u32 = u32::MAX;
             let mut len: u32 = u32::MAX;
-            unsafe { sys::string_get(self.handle, &mut ptr, &mut len) };
+            unsafe { sys::string_get(self.0, &mut ptr, &mut len) };
             debug_assert!(ptr != u32::MAX && len != u32::MAX);
             let buf = unsafe { Vec::from_raw_parts(ptr as *mut u8, len as usize, len as usize) };
             String::from_utf8(buf).ok()
@@ -186,12 +225,17 @@ impl Value {
     }
 
     pub fn as_string(&self) -> String {
-        self.try_as_string().expect("value is string")
+        self.try_as_string().expect("not a string")
     }
 }
 
 // ----
 // error
+
+#[derive(Debug, Clone)]
+pub struct Error {
+    value: Value,
+}
 
 impl error::Error for Error {}
 
@@ -209,6 +253,11 @@ impl fmt::Display for Error {
 // ----
 // closure
 
+pub struct Closure<F: ?Sized> {
+    _f: Box<F>,
+    value: Value,
+}
+
 impl Closure<dyn FnMut()> {
     pub fn new<F>(f: F) -> Self
     where
@@ -225,41 +274,9 @@ impl Closure<dyn FnMut()> {
         }
 
         let mut f = Box::new(f);
-        let handle = unsafe { sys::closure_new(call_by_ptr::<F>, &raw mut *f as *mut ()) };
+        let mut value = UNDEFINED;
+        unsafe { sys::closure_new(call_by_ptr::<F>, &raw mut *f as *mut (), &mut value.0) };
 
-        Self {
-            _f: f,
-            value: Value { handle },
-        }
+        Self { _f: f, value }
     }
-}
-
-// ----
-// predefines
-
-// NOTE: handles must much predefined handles in js glue code.
-const UNDEFINED: Handle = Handle(0);
-const NULL: Handle = Handle(1);
-const GLOBAL: Handle = Handle(2);
-const GLUE: Handle = Handle(3);
-
-fn predefine(handle: Handle) -> Value {
-    unsafe { sys::increment_strong_count(handle) };
-    Value { handle }
-}
-
-pub fn undefined() -> Value {
-    predefine(UNDEFINED)
-}
-
-pub fn null() -> Value {
-    predefine(NULL)
-}
-
-pub fn global() -> Value {
-    predefine(GLOBAL)
-}
-
-pub fn glue() -> Value {
-    predefine(GLUE)
 }

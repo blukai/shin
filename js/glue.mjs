@@ -1,3 +1,5 @@
+// TODO: consider introducing some kind of debug mode with setDebug method?
+
 function assert(truth, msg) {
     if (!truth) {
         const baseMsg = "assertion failed";
@@ -24,6 +26,61 @@ function todo(what) {
     throw new Error(what ? `${baseMsg}: ${msg}` : baseMsg);
 }
 
+// NOTE: consts below must be kept in sync with rust.
+
+const QUIET_NAN = 0x7ff8_0000_0000_0000n;
+const TY_MASK = (1n << 8n) - 1n;
+const ID_MASK = (1n << 32n) - 1n;
+
+const TY_DONT_CARE = 0;
+const TY_OBJECT = 1;
+const TY_FUNCTION = 2;
+const TY_STRING = 3;
+
+const ID_UNDEFINED = 1;
+const ID_NULL = 2;
+const ID_NAN = 3;
+const ID_GLOBAL = 4;
+const ID_MAX = 5;
+
+function rsValueFromTyId(ty, id) {
+    assertEq(typeof ty, "number");
+    assertEq(typeof id, "number");
+    return (QUIET_NAN | (BigInt(ty) << 32n) | BigInt(id));
+}
+
+function rsValueTy(value) {
+    assertEq(typeof value, "bigint");
+    return (value >> 32n) & TY_MASK;
+}
+
+function rsValueId(value) {
+    assertEq(typeof value, "bigint");
+    return value & ID_MASK;
+}
+
+function rsValueIsPredefined(value) {
+    assertEq(typeof value, "bigint");
+    return rsValueId(value) < ID_MAX;
+}
+
+const UNDEFINED = rsValueFromTyId(TY_DONT_CARE, ID_UNDEFINED);
+const NULL = rsValueFromTyId(TY_DONT_CARE, ID_NULL);
+const NAN = rsValueFromTyId(TY_DONT_CARE, ID_NAN);
+const GLOBAL = rsValueFromTyId(TY_OBJECT, ID_GLOBAL);
+
+function rsValueIdx(value) {
+    assertEq(typeof value, "bigint");
+    assert(!rsValueIsPredefined(value));
+    return Number(rsValueId(value)) - ID_MAX;
+}
+
+function rsValueFromTyIdx(ty, idx) {
+    assertEq(typeof ty, "number");
+    assertEq(typeof idx, "number");
+    return rsValueFromTyId(ty, idx + ID_MAX);
+}
+
 export class Glue {
     constructor() {
         this.instance = null;
@@ -38,67 +95,91 @@ export class Glue {
             return this.memoryViews[type];
         }
 
-        // NOTE: predefined values. must be kept up to date with consts in
-        // rust.
-        const UNDEFINED = 0;
-        const NULL = 1;
-        const GLOBAL = 2;
-        const GLUE = 3;
-        this.handleTable = new WebAssembly.Table({ element: "externref", initial: 0 });
-        // like Rc. set to 1 on alloc, inc by 1 on clone, dec by 1 on drop.
-        // when reaches 0 the handle is pushed into the free-list.
-        this.handleCounts = [];
-        this.freeHandles = [];
-        // stores value, returns handle.
-        const allocValueUnchecked = (value) => {
-            let maybeHandle = this.freeHandles.pop();
-            if (maybeHandle === undefined) {
-                assertEq(this.freeHandles.length, 0);
-
-                const oldLen = this.handleTable.length;
-                const growDelta = Math.max(1, oldLen);
-                this.handleTable.grow(growDelta);
-                // NOTE: iterate in reverse order to push smaller indices to
-                // the end.
-                for (let i = growDelta; i > 0; i -= 1) {
-                    this.freeHandles.push(oldLen + i - 1);
-                }
-
-                assertEq(this.handleTable.length, oldLen + growDelta);
-                assertEq(this.freeHandles.length, growDelta);
-
-                maybeHandle = this.freeHandles.pop();
-            }
-            assertNe(maybeHandle, undefined);
-            const handle = maybeHandle;
-
-            this.handleTable.set(handle, value);
-            this.handleCounts[handle] = 1;
-            return handle;
-        };
-        // me being pedantic.
-        assertEq(allocValueUnchecked(undefined), UNDEFINED);
-        assertEq(allocValueUnchecked(null), NULL);
-        assertEq(allocValueUnchecked(globalThis), GLOBAL);
-        assertEq(allocValueUnchecked(this), GLUE);
+        this.values = new WebAssembly.Table({ element: "externref", initial: 0 });
+        // set ref count to 1 on alloc, inc by 1 on clone, dec by 1 on drop.
+        // when count reaches 0 the handle is pushed into the free-list and
+        // value must be set to undefined.
+        this.refCounts = [];
+        this.freeIndices = [];
+        // allocValue returns index.
         const allocValue = (value) => {
-            // NOTE: i kind of want to avoid a need for nil checks
-            // everywhere.
-            if (value === undefined) {
-                this.handleCounts[UNDEFINED] += 1;
-                return UNDEFINED;
+            let maybeIdx = this.freeIndices.pop();
+            if (maybeIdx === undefined) {
+                assertEq(this.freeIndices.length, 0);
+                const oldLen = this.values.length;
+                const delta = Math.max(1, oldLen);
+                this.values.grow(delta);
+                for (let i = 0; i < delta; i += 1) {
+                    this.freeIndices.push(oldLen + i);
+                }
+                assertEq(this.values.length, oldLen + delta);
+                assertEq(this.freeIndices.length, delta);
+                maybeIdx = this.freeIndices.pop();
             }
-            if (value === null) {
-                this.handleCounts[NULL] += 1;
-                return NULL;
-            }
-            // TODO: predefine true and false.
-            
-            return allocValueUnchecked(value);
+            assertNe(maybeIdx, undefined);
+            const idx = maybeIdx;
+            this.values.set(idx, value);
+            this.refCounts[idx] = 1;
+            return idx;
         };
-        const getValue = (handle) => {
-            assertEq(typeof handle, "number");
-            return this.handleTable.get(handle);
+        const storeJsValueIntoRsValuePtr = (jsValue, rsValuePtr) => {
+            assertEq(typeof rsValuePtr, "number");
+            const mem = getMemoryView(DataView);
+            switch (jsValue) {
+                case undefined: return mem.setBigUint64(rsValuePtr, UNDEFINED, true);
+                case null: return mem.setBigUint64(rsValuePtr, NULL, true);
+                case globalThis: return assert(false);
+            }
+            if (typeof jsValue === "number") {
+                // NOTE: nan is a special case that cannot be covered by the switch
+                // statement above as NaN !== NaN.
+                // also note that isNan and Number.isNaN behave differently.
+                if (Number.isNaN(jsValue)) {
+                    mem.setBigUint64(rsValuePtr, NAN, true);
+                    return;
+                }
+                mem.setFloat64(rsValuePtr, jsValue, true);
+                return;
+            }
+            let ty = TY_DONT_CARE;
+            switch (typeof jsValue) {
+                case "object":
+                    // NOTE: typeof null === "object"; but that doesn't affect
+                    // us here because null is covered above ^.
+                    assertNe(jsValue, null);
+                    ty = TY_OBJECT;
+                    break;
+                case "function":
+                    ty = TY_FUNCTION;
+                    break;
+                case "string":
+                    ty = TY_STRING;
+                    break;
+            }
+            const idx = allocValue(jsValue);
+            const rsValue = rsValueFromTyIdx(ty, idx);
+            mem.setBigUint64(rsValuePtr, rsValue, true);
+        };
+        const resolveJsValueFromRsValue = (rsValue) => {
+            assertEq(typeof rsValue, "bigint");
+            switch (rsValue) {
+                case UNDEFINED: return undefined;
+                case NULL: return null;
+                case NAN: return NaN;
+                case GLOBAL: return globalThis;
+            }
+            const idx = rsValueIdx(rsValue);
+            return this.values.get(idx);
+        };
+        const resolveJsValueFromRsValuePtr = (rsValuePtr) => {
+            assertEq(typeof rsValuePtr, "number");
+            const mem = getMemoryView(DataView);
+            const f = mem.getFloat64(rsValuePtr, true);
+            if (!Number.isNaN(f)) {
+                return f;
+            }
+            const rsValue = mem.getBigUint64(rsValuePtr, true);
+            return resolveJsValueFromRsValue(rsValue);
         };
 
         this.textDecoder = new TextDecoder();
@@ -119,90 +200,74 @@ export class Glue {
                     throw new Error(msg);
                 },
 
-                string_new: (ptr, len) => {
-                    const string = decodeString(ptr, len);
-                    return allocValue(string);
+                string_new: (ptr, len, outPtr) => {
+                    const value = decodeString(ptr, len);
+                    storeJsValueIntoRsValuePtr(value, outPtr);
                 },
-                number_new: (value) => {
-                    return allocValue(value);
-                },
-                closure_new: (callByPtrIndex, ptr) => {
+                closure_new: (callByPtrIdx, ptr, outPtr) => {
                     const callByPtr = this.instance.exports.
-                        __indirect_function_table.get(callByPtrIndex);
+                        __indirect_function_table.get(callByPtrIdx);
+                    // TODO: is wrapper really needed? can this be avoided?
                     const callByPtrWrapped = (...args) => {
-                        // TODO: handle args
-                        // const argHandles = args.map(allocValue);
+                        // TODO: args
                         callByPtr(ptr);
                     };
-                    return allocValue(callByPtrWrapped);
+                    storeJsValueIntoRsValuePtr(callByPtrWrapped, outPtr);
                 },
 
-                increment_strong_count: (handle) => {
-                    this.handleCounts[handle] += 1;
+                increment_ref_count: (ref) => {
+                    const idx = rsValueIdx(ref);
+                    this.refCounts[idx] += 1;
                 },
-                decrement_strong_count: (handle) => {
-                    this.handleCounts[handle] -= 1;
-                    const count = this.handleCounts[handle];
+                decrement_ref_count: (ref) => {
+                    const idx = rsValueIdx(ref);
+                    this.refCounts[idx] -= 1;
+                    const count = this.refCounts[idx];
                     assert(count >= 0);
-                    if (count == 0) {
-                        this.freeHandles.push(handle);
+                    if (count === 0) {
+                        this.freeIndices.push(idx);
+                        // to sort of let js know that it can be gc'd.
+                        this.values.set(idx, undefined);
                     }
                 },
 
-                is_object: (handle) => {
-                    const value = getValue(handle);
-                    // NOTE: null is an object too kekw, see
-                    // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/typeof#typeof_null
-                    return typeof value === "object" && value !== null;
-                },
-                is_function: (handle) => {
-                    return typeof getValue(handle) === "function";
-                },
-                is_number: (handle) => {
-                    return typeof getValue(handle) === "number";
-                },
-                is_string: (handle) => {
-                    return typeof getValue(handle) === "string";
-                },
-
-                get: (handle, propPtr, propLen) => {
-                    const target = getValue(handle);
+                get: (ref, propPtr, propLen, outPtr) => {
+                    const target = resolveJsValueFromRsValue(ref);
                     const prop = decodeString(propPtr, propLen);
                     let value = Reflect.get(target, prop);
+                    // NOTE: if this is a function we want to be able to call it
+                    // without having to also pass around the object that owns
+                    // the method or whatever is the correct terminology for
+                    // this.
                     if (value instanceof Function) {
                         value = value.bind(target);
                     }
-                    return allocValue(value);
+                    storeJsValueIntoRsValuePtr(value, outPtr);
                 },
-                set: (handle, propPtr, propLen, valueHandle) => {
-                    const target = getValue(handle);
+                set: (ref, propPtr, propLen, valuePtr) => {
+                    const target = resolveJsValueFromRsValue(ref);
                     const prop = decodeString(propPtr, propLen);
-                    const value = getValue(valueHandle);
+                    const value = resolveJsValueFromRsValuePtr(valuePtr);
                     Reflect.set(target, prop, value);
                 },
-                call: (handle, argsPtr, argsLen, retHandlePtr) => {
+                call: (ref, argsPtr, argsLen, outPtr) => {
                     const mem = getMemoryView(DataView);
                     try {
-                        const target = getValue(handle);
+                        const target = resolveJsValueFromRsValue(ref);
                         const args = Array.from({ length: argsLen }, (_, i) => {
-                            return getValue(mem.getUint32(argsPtr + i * 4, true));
+                            return resolveJsValueFromRsValuePtr(argsPtr + i * 8);
                         });
-                        const result = Reflect.apply(target, undefined, args);
-                        mem.setUint32(retHandlePtr, allocValue(result), true);
+                        const ok = Reflect.apply(target, undefined, args);
+                        storeJsValueIntoRsValuePtr(ok, outPtr);
                         return true;
                     } catch (err) {
-                        mem.setUint32(retHandlePtr, allocValue(err), true);
+                        storeJsValueIntoRsValuePtr(err, outPtr);
                         return false;
                     }
                 },
 
-                number_get: (handle) => {
-                    const value = getValue(handle);
-                    assert(typeof value, "number");
-                    return value;
-                },
-                string_get: (handle, ptrPtr, lenPtr) => {
-                    const value = getValue(handle);
+                string_get: (ref, ptrPtr, lenPtr) => {
+                    const value = resolveJsValueFromRsValue(ref);
                     assert(typeof value, "string");
 
                     const buf = encodeString(value);
@@ -215,9 +280,23 @@ export class Glue {
                 }
             },
         };
+
+        // NOTE: uncomment code below to log all calls that rust makes.
+        //
+        // Object.keys(this.importObject.env).forEach((key) => {
+        //     const value = this.importObject.env[key];
+        //     if (typeof value !== "function") {
+        //         return;
+        //     }
+        //     this.importObject.env[key] = (...args) => {
+        //         const ret = value(...args);
+        //         console.log(`${key.padEnd(32)} (${args.join(", ").padEnd(32)}) -> ${ret}`);
+        //         return ret;
+        //     };
+        // });
     }
 
-    init(instance) {
+    init = (instance) => {
         assert(instance instanceof WebAssembly.Instance);
         assert(!this.instance);
         this.instance = instance;

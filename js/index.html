@@ -16,6 +16,7 @@
                 glue.importObject
             ).then((result) => {
                 glue.init(result.instance);
+                // NOTE: after `init` you can start calling your rust functions.
                 glue.instance.exports.main();
             });
         </script>
