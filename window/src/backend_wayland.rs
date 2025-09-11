@@ -15,9 +15,11 @@ use input::{
 };
 use nohash::{NoHash, NoHashMap};
 use raw_window_handle as rwh;
+use scopeguard::ScopeGuard;
 
 use crate::{
-    ClipboardDataProvider, DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent, xkb,
+    ClipboardDataProvider, DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent,
+    xkbcommonwrap,
 };
 
 // TODO: (xd) consider checking return of wl_proxy_add_listener (xd).
@@ -567,7 +569,8 @@ pub struct WaylandBackend {
     // TODO: do i need to care about handling surface change with pointer_leave? is this situation
     // in any way similar to pointer frames?
     keyboard_enter_surface: Option<*mut wayland::wl_surface>,
-    xkb_context: Option<xkb::Context>,
+    xkb_api_context: Option<xkbcommonwrap::ApiContextPair>,
+    xkb_keymap_state: Option<xkbcommonwrap::KeymapStatePair>,
     key_repeat_timerfd: TimerFD,
     key_repeat_info: Option<KeyRepeatInfo>,
     key_repeat: Option<(Scancode, Keycode)>,
@@ -1242,20 +1245,39 @@ unsafe extern "C" fn handle_wl_keyboard_keymap(
     size: u32,
 ) {
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
-    match format {
-        wayland::WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1 => {
-            // TODO: this need to be more robust. panics on sway reload (mod+shift+c).
-            assert!(this.xkb_context.is_none());
-            let xkb_context =
-                unsafe { xkb::Context::from_fd(fd, size) }.expect("could not create xkb context");
-            this.xkb_context = Some(xkb_context);
-            log::info!("created xkb context");
-        }
-        other => {
-            panic!("unknown keymap format: {other}");
+
+    let _fd_guard = ScopeGuard::new(|| {
+        unsafe { libc::close(fd) };
+    });
+
+    // dispose of previous keymap and state. makes sense to do this before proceeding with anything
+    // else, right?
+    if let Some(ksp) = this.xkb_keymap_state.take() {
+        ksp.deinit(this.xkb_api_context.as_ref().expect("xkb api context"));
+    };
+
+    if format != wayland::WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1 {
+        log::warn!("unknown keymap format: {format}");
+        return;
+    }
+
+    let acp = match this.xkb_api_context.as_ref() {
+        Some(acp) => acp,
+        None => match xkbcommonwrap::ApiContextPair::new() {
+            Ok(acp) => this.xkb_api_context.insert(acp),
+            Err(err) => {
+                log::warn!("could not create xkbcommon api and context: {err}");
+                return;
+            }
+        },
+    };
+
+    match xkbcommonwrap::KeymapStatePair::from_fd(fd, size, acp) {
+        Ok(ksp) => this.xkb_keymap_state = Some(ksp),
+        Err(err) => {
+            log::warn!("could not create xkbcommon keymap and state: {err}");
         }
     }
-    unsafe { libc::close(fd) };
 }
 
 unsafe extern "C" fn handle_wl_keyboard_enter(
@@ -1294,19 +1316,21 @@ unsafe extern "C" fn handle_wl_keyboard_key(
 ) {
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
 
-    let xkb_context = this
-        .xkb_context
-        .as_ref()
-        .expect("xkb contex has not been created");
+    let (Some(acp), Some(ksp)) = (
+        this.xkb_api_context.as_ref(),
+        this.xkb_keymap_state.as_ref(),
+    ) else {
+        log::warn!("received keyboard key event, but xkb was not inited");
+        return;
+    };
 
     let surface_id = this.get_keyboard_enter_surface_id();
     let scancode = map_keyboard_key(key);
 
     // NOTE: convert to xkb. for more info see comment above EVDEV_OFFSET.
     let xkb_key = key + EVDEV_OFFSET;
-    let xkb_sym =
-        unsafe { (xkb_context.libxkbcommon.xkb_state_key_get_one_sym)(xkb_context.state, xkb_key) };
-    let utf32 = unsafe { (xkb_context.libxkbcommon.xkb_keysym_to_utf32)(xkb_sym) };
+    let xkb_sym = unsafe { (acp.api.xkb_state_key_get_one_sym)(ksp.state, xkb_key) };
+    let utf32 = unsafe { (acp.api.xkb_keysym_to_utf32)(xkb_sym) };
     let keycode = char::from_u32(utf32)
         .map_or_else(|| Keycode::Unidentified(RawKey::Unix(key)), Keycode::Char);
 
@@ -1322,11 +1346,8 @@ unsafe extern "C" fn handle_wl_keyboard_key(
                 },
             }));
             if let Some(KeyRepeatInfo { rate, delay }) = this.key_repeat_info {
-                assert!(!xkb_context.keymap.is_null());
-                if unsafe {
-                    (xkb_context.libxkbcommon.xkb_keymap_key_repeats)(xkb_context.keymap, xkb_key)
-                } == 1
-                {
+                assert!(!ksp.keymap.is_null());
+                if unsafe { (acp.api.xkb_keymap_key_repeats)(ksp.keymap, xkb_key) } == 1 {
                     this.key_repeat = Some((scancode, keycode));
                     if let Err(err) = unsafe { this.key_repeat_timerfd.arm(rate, delay) } {
                         log::error!("could not arm key repeat: {err}");
@@ -1370,13 +1391,18 @@ unsafe extern "C" fn handle_wl_keyboard_modifiers(
     group: u32,
 ) {
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
-    let xkb_context = this
-        .xkb_context
-        .as_ref()
-        .expect("xkb contex has not been created");
+
+    let (Some(acp), Some(ksp)) = (
+        this.xkb_api_context.as_ref(),
+        this.xkb_keymap_state.as_ref(),
+    ) else {
+        log::warn!("received keyboard key event, but xkb was not inited");
+        return;
+    };
+
     unsafe {
-        (xkb_context.libxkbcommon.xkb_state_update_mask)(
-            xkb_context.state,
+        (acp.api.xkb_state_update_mask)(
+            ksp.state,
             mods_depressed,
             mods_latched,
             mods_locked,
@@ -1560,7 +1586,8 @@ impl WaylandBackend {
 
             wl_keyboard: null_mut(),
             keyboard_enter_surface: None,
-            xkb_context: None,
+            xkb_api_context: None,
+            xkb_keymap_state: None,
             key_repeat_timerfd,
             key_repeat_info: None,
             key_repeat: None,

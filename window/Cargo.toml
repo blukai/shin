@@ -10,6 +10,7 @@ raw-window-handle.workspace = true
 winit = { workspace = true, optional = true }
 # workspace
 input.workspace = true
+scopeguard.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 libc.workspace = true

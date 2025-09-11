@@ -4,7 +4,7 @@ use anyhow::{Context as _, anyhow};
 use raw_window_handle as rwh;
 
 #[cfg(unix)]
-pub mod xkb;
+pub mod xkbcommonwrap;
 
 #[cfg(unix)]
 mod backend_wayland;
