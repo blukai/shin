@@ -10,14 +10,14 @@ use super::types::*;
 #[allow(dead_code)]
 #[allow(non_camel_case_types)]
 #[allow(non_snake_case)]
-mod sys {
+mod api {
     use crate::api::types::*;
 
     include!(concat!(env!("OUT_DIR"), "/gl_api_generated.rs"));
 }
 
 pub struct Api {
-    api: sys::Api,
+    api: api::Api,
 }
 
 impl Api {
@@ -26,7 +26,7 @@ impl Api {
         F: FnMut(*const std::ffi::c_char) -> *mut std::ffi::c_void,
     {
         Self {
-            api: unsafe { sys::Api::load_with(get_proc_address) },
+            api: unsafe { api::Api::load_with(get_proc_address) },
         }
     }
 }

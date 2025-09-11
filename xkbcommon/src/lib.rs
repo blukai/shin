@@ -1,3 +1,3 @@
-mod xkbcommon;
+mod libxkbcommon;
 
-pub use xkbcommon::*;
+pub use libxkbcommon::*;

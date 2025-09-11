@@ -3,7 +3,7 @@ mod api;
 pub use api::*;
 
 #[cfg(unix)]
-pub mod egl;
+pub mod libegl;
 
 // TODO:
 

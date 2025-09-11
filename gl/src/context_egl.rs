@@ -4,9 +4,9 @@ use std::ptr::{null, null_mut};
 use anyhow::{Context as _, anyhow};
 use raw_window_handle as rwh;
 
-use crate::egl::*;
+use crate::libegl::*;
 
-pub fn egl_get_error(egl_lib: &EglApi) -> anyhow::Error {
+pub fn egl_get_error(egl_lib: &Api) -> anyhow::Error {
     match unsafe { egl_lib.GetError() } as EGLenum {
         SUCCESS => unreachable!(),
         code => anyhow!(format!("egl error 0x{:x}", code)),
@@ -24,17 +24,17 @@ pub struct Context {
     context: EGLContext,
     display: EGLDisplay,
 
-    libegl: EglApi,
+    api: Api,
 }
 
 impl Context {
     pub fn new(display_handle: rwh::DisplayHandle, config: Config) -> anyhow::Result<Self> {
-        let libegl = EglApi::load()?;
+        let api = Api::load()?;
 
         unsafe {
             // TODO: make api configurable
-            if libegl.BindAPI(OPENGL_API) == FALSE {
-                return Err(egl_get_error(&libegl)).context("could not bind api");
+            if api.BindAPI(OPENGL_API) == FALSE {
+                return Err(egl_get_error(&api)).context("could not bind api");
             }
 
             let display_handle_ptr = match display_handle.as_raw() {
@@ -45,14 +45,14 @@ impl Context {
                     )));
                 }
             };
-            let display = libegl.GetDisplay(display_handle_ptr);
+            let display = api.GetDisplay(display_handle_ptr);
             if display == NO_DISPLAY {
-                return Err(egl_get_error(&libegl)).context("could not get display");
+                return Err(egl_get_error(&api)).context("could not get display");
             }
 
             let (mut major, mut minor) = (0, 0);
-            if libegl.Initialize(display, &mut major, &mut minor) == FALSE {
-                return Err(egl_get_error(&libegl)).context("could not initialize");
+            if api.Initialize(display, &mut major, &mut minor) == FALSE {
+                return Err(egl_get_error(&api)).context("could not initialize");
             }
             log::info!("initialized egl version {major}.{minor}");
 
@@ -83,12 +83,11 @@ impl Context {
             }
 
             let mut num_configs = 0;
-            if libegl.GetConfigs(display, null_mut(), 0, &mut num_configs) == FALSE {
-                return Err(egl_get_error(&libegl))
-                    .context("could not get num of available configs");
+            if api.GetConfigs(display, null_mut(), 0, &mut num_configs) == FALSE {
+                return Err(egl_get_error(&api)).context("could not get num of available configs");
             }
             let mut configs = vec![std::mem::zeroed(); num_configs as usize];
-            if libegl.ChooseConfig(
+            if api.ChooseConfig(
                 display,
                 config_attrs.as_ptr() as _,
                 configs.as_mut_ptr(),
@@ -96,7 +95,7 @@ impl Context {
                 &mut num_configs,
             ) == FALSE
             {
-                return Err(egl_get_error(&libegl)).context("could not choose config");
+                return Err(egl_get_error(&api)).context("could not choose config");
             }
             configs.set_len(num_configs as usize);
             if configs.is_empty() {
@@ -106,9 +105,9 @@ impl Context {
 
             let context_attrs = &[CONTEXT_MAJOR_VERSION, 3, NONE];
             let context =
-                libegl.CreateContext(display, config, NO_CONTEXT, context_attrs.as_ptr() as _);
+                api.CreateContext(display, config, NO_CONTEXT, context_attrs.as_ptr() as _);
             if context == NO_CONTEXT {
-                return Err(egl_get_error(&libegl)).context("could not create context");
+                return Err(egl_get_error(&api)).context("could not create context");
             }
 
             Ok(Context {
@@ -116,7 +115,7 @@ impl Context {
                 config,
                 context,
 
-                libegl,
+                api,
             })
         }
     }
@@ -126,17 +125,17 @@ impl Context {
         &self,
         procname: *const c_char,
     ) -> __eglMustCastToProperFunctionPointerType {
-        unsafe { self.libegl.GetProcAddress(procname) }
+        unsafe { self.api.GetProcAddress(procname) }
     }
 
     pub fn make_current(&self, surface: EGLSurface) -> anyhow::Result<()> {
         unsafe {
             if self
-                .libegl
+                .api
                 .MakeCurrent(self.display, surface, surface, self.context)
                 == FALSE
             {
-                Err(egl_get_error(&self.libegl)).context("could not make current")
+                Err(egl_get_error(&self.api)).context("could not make current")
             } else {
                 Ok(())
             }
@@ -149,8 +148,8 @@ impl Context {
 
     pub fn set_swap_interval(&self, interval: EGLint) -> anyhow::Result<()> {
         unsafe {
-            if self.libegl.SwapInterval(self.display, interval) == FALSE {
-                Err(egl_get_error(&self.libegl)).context("could not set swap interval")
+            if self.api.SwapInterval(self.display, interval) == FALSE {
+                Err(egl_get_error(&self.api)).context("could not set swap interval")
             } else {
                 Ok(())
             }
@@ -159,8 +158,8 @@ impl Context {
 
     pub fn swap_buffers(&self, surface: EGLSurface) -> anyhow::Result<()> {
         unsafe {
-            if self.libegl.SwapBuffers(self.display, surface) == FALSE {
-                Err(egl_get_error(&self.libegl)).context("could not swap buffers")
+            if self.api.SwapBuffers(self.display, surface) == FALSE {
+                Err(egl_get_error(&self.api)).context("could not swap buffers")
             } else {
                 Ok(())
             }
@@ -238,7 +237,7 @@ impl Surface {
 
         let wsi = Wsi::new(window_handle, width, height)?;
         let surface = unsafe {
-            context.libegl.CreateWindowSurface(
+            context.api.CreateWindowSurface(
                 context.display,
                 context.config,
                 wsi.as_ptr() as EGLNativeWindowType,

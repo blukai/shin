@@ -5,28 +5,45 @@ use dynlib::DynLib;
 #[allow(non_camel_case_types)]
 #[allow(non_snake_case)]
 #[allow(non_upper_case_globals)]
-mod generated {
+mod types {
     include!(concat!(env!("OUT_DIR"), "/egl_types_generated.rs"));
+}
+
+#[allow(non_camel_case_types)]
+#[allow(non_snake_case)]
+#[allow(non_upper_case_globals)]
+mod enums {
+    use super::types::*;
+
     include!(concat!(env!("OUT_DIR"), "/egl_enums_generated.rs"));
+}
+
+#[allow(non_camel_case_types)]
+#[allow(non_snake_case)]
+#[allow(non_upper_case_globals)]
+mod api {
+    use super::types::*;
+
     include!(concat!(env!("OUT_DIR"), "/egl_api_generated.rs"));
 }
 
-pub use generated::*;
+pub use enums::*;
+pub use types::*;
 
-pub struct EglApi {
-    api: Api,
+pub struct Api {
+    api: api::Api,
     _dynlib: DynLib,
 }
 
-impl Deref for EglApi {
-    type Target = Api;
+impl Deref for Api {
+    type Target = api::Api;
 
     fn deref(&self) -> &Self::Target {
         &self.api
     }
 }
 
-impl EglApi {
+impl Api {
     pub fn load() -> Result<Self, dynlib::Error> {
         let dynlib = DynLib::load(c"libEGL.so").or_else(|_| DynLib::load(c"libEGL.so.1"))?;
 
@@ -39,7 +56,7 @@ impl EglApi {
                 c"eglGetProcAddress"
             )?;
 
-        let api = unsafe { Api::load_with(|name| get_proc_address(name) as _) };
+        let api = unsafe { api::Api::load_with(|name| get_proc_address(name) as _) };
 
         Ok(Self {
             api,
