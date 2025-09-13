@@ -825,16 +825,16 @@ fn emit_api_impl<W: io::Write>(w: &mut W, registry: &Registry, api: &Api) -> any
             write!(w, ", {name}: ")?;
             emit_command_type_parts(w, &param.type_parts)?;
         }
-        write!(w, ") ")?;
+        write!(w, ")")?;
 
         if will_emit_command_type_parts(&cmd.proto.type_parts) {
-            write!(w, "-> ")?;
+            write!(w, " -> ")?;
             emit_command_type_parts(w, &cmd.proto.type_parts)?;
         }
 
         // body
 
-        write!(w, "{{\n")?;
+        write!(w, " {{\n")?;
 
         // log
         write!(
