@@ -123,7 +123,6 @@ impl fmt::Display for CreateContextError {
     }
 }
 
-#[derive(Clone)]
 pub struct Context {
     index: u8,
     pub context: EGLContext,
