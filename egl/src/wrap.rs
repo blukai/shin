@@ -4,6 +4,31 @@ use std::{array, error, fmt, mem, ops};
 
 use crate::libegl::*;
 
+/// contains code from `eglGetError`.
+pub struct RawError(EGLint);
+
+impl error::Error for RawError {}
+
+impl fmt::Display for RawError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("{:#x}", self.0))
+    }
+}
+
+// NOTE: Debug trait is not derived, but implemented manually because i specifically want to show
+// error codes formatted in hex.
+impl fmt::Debug for RawError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("{:#x}", self.0))
+    }
+}
+
+impl RawError {
+    pub fn code(&self) -> EGLint {
+        self.0
+    }
+}
+
 // NOTE: the idea here is that Connection will hand-out handles to resources that it creates that
 // need cleanup/deinitialization and you'll operate on those handles; and Connection will be
 // responsible for performing cleanup.
@@ -104,8 +129,8 @@ impl Display {
 
 #[derive(Debug)]
 pub enum CreateContextError {
-    CouldNotBindApi(EGLint),
-    CouldNotCreateContext(EGLint),
+    CouldNotBindApi(RawError),
+    CouldNotCreateContext(RawError),
 }
 
 impl error::Error for CreateContextError {}
@@ -113,11 +138,9 @@ impl error::Error for CreateContextError {}
 impl fmt::Display for CreateContextError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::CouldNotBindApi(code) => {
-                f.write_fmt(format_args!("could not bind api: {code:#x}"))
-            }
-            Self::CouldNotCreateContext(code) => {
-                f.write_fmt(format_args!("could not create context: {code:#x}"))
+            Self::CouldNotBindApi(re) => f.write_fmt(format_args!("could not bind api: {re}")),
+            Self::CouldNotCreateContext(re) => {
+                f.write_fmt(format_args!("could not create context: {re}"))
             }
         }
     }
@@ -227,7 +250,7 @@ impl Wsi {
 #[derive(Debug)]
 pub enum CreateSurfaceError {
     CouldNotCreateWaylandWsi(CreateWaylandWsiError),
-    CouldNotCreateSurface(EGLint),
+    CouldNotCreateSurface(RawError),
 }
 
 impl error::Error for CreateSurfaceError {}
@@ -238,8 +261,8 @@ impl fmt::Display for CreateSurfaceError {
             Self::CouldNotCreateWaylandWsi(err) => {
                 f.write_fmt(format_args!("could not create wayland wsi: {err}"))
             }
-            Self::CouldNotCreateSurface(code) => {
-                f.write_fmt(format_args!("could not create surface: {code:#x}"))
+            Self::CouldNotCreateSurface(re) => {
+                f.write_fmt(format_args!("could not create surface: {re}"))
             }
         }
     }
@@ -266,7 +289,7 @@ impl Surface {
 pub enum CreateConnectionError {
     CouldNotLoadEgl(dynlib::Error),
     CouldNotGetDisplay,
-    CouldNotInitializeDisplay(EGLint),
+    CouldNotInitializeDisplay(RawError),
 }
 
 impl error::Error for CreateConnectionError {}
@@ -276,8 +299,8 @@ impl fmt::Display for CreateConnectionError {
         match self {
             Self::CouldNotLoadEgl(err) => f.write_fmt(format_args!("could not load egl: {err}")),
             Self::CouldNotGetDisplay => f.write_str("could not get display"),
-            Self::CouldNotInitializeDisplay(code) => {
-                f.write_fmt(format_args!("could not initialize display: {code:#x}"))
+            Self::CouldNotInitializeDisplay(re) => {
+                f.write_fmt(format_args!("could not initialize display: {re}"))
             }
         }
     }
@@ -317,22 +340,27 @@ impl Connection {
         attribs: Option<&[EGLAttrib]>,
     ) -> Result<Self, CreateConnectionError> {
         let api = Api::load().map_err(CreateConnectionError::CouldNotLoadEgl)?;
-
         let display = Display::from_wayland_display(&api, wl_display, attribs)
             .ok_or(CreateConnectionError::CouldNotGetDisplay)?;
-
-        let mut version = (0, 0);
-        if unsafe { api.Initialize(*display, &mut version.0, &mut version.0) } == FALSE {
-            let code = unsafe { api.GetError() };
-            return Err(CreateConnectionError::CouldNotInitializeDisplay(code));
-        }
-
-        Ok(Self {
+        let this = Self {
             api,
             display,
             contexts: array::from_fn(|_| None),
             surfaces: array::from_fn(|_| None),
-        })
+        };
+
+        let mut version = (0, 0);
+        if unsafe {
+            this.api
+                .Initialize(*this.display, &mut version.0, &mut version.0)
+        } == FALSE
+        {
+            return Err(CreateConnectionError::CouldNotInitializeDisplay(
+                this.unwrap_err(),
+            ));
+        }
+
+        Ok(this)
     }
 
     /// NOTE: i don't care how you create your EGLConfig. EGLConfig does not need clean up.
@@ -346,8 +374,7 @@ impl Connection {
         attribs.inspect(|attribs| assert!(attribs.contains(&(NONE as EGLint))));
 
         if unsafe { self.api.BindAPI(api) } == FALSE {
-            let code = unsafe { self.api.GetError() };
-            return Err(CreateContextError::CouldNotBindApi(code));
+            return Err(CreateContextError::CouldNotBindApi(self.unwrap_err()));
         }
 
         let context = unsafe {
@@ -359,8 +386,7 @@ impl Connection {
             )
         };
         if context == NO_CONTEXT {
-            let code = unsafe { self.api.GetError() };
-            return Err(CreateContextError::CouldNotCreateContext(code));
+            return Err(CreateContextError::CouldNotCreateContext(self.unwrap_err()));
         }
 
         let index = self
@@ -429,8 +455,7 @@ impl Connection {
             },
         };
         if surface == NO_SURFACE {
-            let code = unsafe { self.api.GetError() };
-            return Err(CreateSurfaceError::CouldNotCreateSurface(code));
+            return Err(CreateSurfaceError::CouldNotCreateSurface(self.unwrap_err()));
         }
 
         let index = self
@@ -453,5 +478,18 @@ impl Connection {
             .take()
             .expect("invalid surface handle");
         unsafe { self.api.DestroySurface(*self.display, surface) };
+    }
+
+    /// panics if the last function succeeded without error.
+    ///
+    /// if you're using anyhow - you can provide context by wrapping RawError into Err like so:
+    /// `Err(connection.unwrap_err()).context("bla bla ..")`
+    pub fn unwrap_err(&self) -> RawError {
+        let code = unsafe { self.api.GetError() };
+        if code == SUCCESS as EGLint {
+            panic!("attempt to unwrap error, but the last function succeeded");
+        } else {
+            RawError(code)
+        }
     }
 }

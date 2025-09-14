@@ -102,8 +102,7 @@ impl GraphicsContext {
                 )
             } == FALSE
             {
-                let code = unsafe { egl_connection.api.GetError() };
-                return Err(anyhow!("could not get num configs: {code:#x}",));
+                return Err(egl_connection.unwrap_err()).context("could not get num configs");
             }
 
             let mut configs = vec![unsafe { mem::zeroed() }; num_configs as usize];
@@ -117,8 +116,7 @@ impl GraphicsContext {
                 )
             } == FALSE
             {
-                let code = unsafe { egl_connection.api.GetError() };
-                return Err(anyhow!("could not choose config: {code:#x}"));
+                return Err(egl_connection.unwrap_err()).context("could not choose config");
             }
             unsafe { configs.set_len(num_configs as usize) };
             configs
@@ -158,8 +156,7 @@ impl GraphicsContext {
             )
         } == egl::FALSE
         {
-            let code = unsafe { egl_connection.api.GetError() };
-            return Err(anyhow!("could not make current: {code:#x}"));
+            return Err(egl_connection.unwrap_err()).context("could not make current");
         }
 
         // TODO: figure out an okay way to include vsync toggle.
@@ -252,7 +249,7 @@ impl<A: AppHandler> Context<A> {
         let (
             Some(app_handler),
             GraphicsContext::Initialized(InitializedGraphicsContext {
-                egl_connection: egl_connnection,
+                egl_connection,
                 egl_context,
                 egl_surface,
                 gl_api,
@@ -263,16 +260,15 @@ impl<A: AppHandler> Context<A> {
         };
 
         if unsafe {
-            egl_connnection.api.MakeCurrent(
-                *egl_connnection.display,
+            egl_connection.api.MakeCurrent(
+                *egl_connection.display,
                 egl_surface.surface,
                 egl_surface.surface,
                 egl_context.context,
             )
         } == egl::FALSE
         {
-            let code = unsafe { egl_connnection.api.GetError() };
-            return Err(anyhow!("could not make current: {code:#x}"));
+            return Err(egl_connection.unwrap_err()).context("could not make current");
         }
 
         app_handler.iterate(
@@ -284,13 +280,12 @@ impl<A: AppHandler> Context<A> {
         );
 
         if unsafe {
-            egl_connnection
+            egl_connection
                 .api
-                .SwapBuffers(*egl_connnection.display, egl_surface.surface)
+                .SwapBuffers(*egl_connection.display, egl_surface.surface)
         } == egl::FALSE
         {
-            let code = unsafe { egl_connnection.api.GetError() };
-            return Err(anyhow!("could not set swap buffers: {code:#x}"));
+            return Err(egl_connection.unwrap_err()).context("could not swap buffers");
         }
 
         Ok(())

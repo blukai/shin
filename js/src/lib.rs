@@ -273,6 +273,9 @@ impl Closure<dyn FnMut()> {
             f();
         }
 
+        // TODO: do not hide this allocation from outside. force outside caller to box f. yes it
+        // would probably be less ergonimic, but i prefer the idea of being explocit about
+        // allocations.
         let mut f = Box::new(f);
         let mut value = UNDEFINED;
         unsafe { sys::closure_new(call_by_ptr::<F>, &raw mut *f as *mut (), &mut value.0) };
