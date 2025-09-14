@@ -1,5 +1,6 @@
-use std::ffi::c_void;
+use std::{ffi::c_void, mem, ptr::null_mut};
 
+use anyhow::{Context as _, anyhow};
 use raw_window_handle as rwh;
 use window::{Event, Window, WindowAttrs, WindowEvent};
 
@@ -35,8 +36,9 @@ impl Logger {
 }
 
 struct InitializedGraphicsContext {
-    egl_context: gl::context_egl::Context,
-    egl_surface: gl::context_egl::Surface,
+    egl_connection: egl::wrap::Connection,
+    egl_context: egl::wrap::Context,
+    egl_surface: egl::wrap::Surface,
     gl_api: gl::Api,
 }
 
@@ -59,27 +61,118 @@ impl GraphicsContext {
     ) -> anyhow::Result<&mut InitializedGraphicsContext> {
         assert!(matches!(self, Self::Uninit));
 
-        let egl_context = gl::context_egl::Context::new(
-            display_handle,
-            gl::context_egl::Config {
-                min_swap_interval: Some(0),
-                ..gl::context_egl::Config::default()
-            },
-        )?;
-        let egl_surface =
-            gl::context_egl::Surface::new(&egl_context, window_handle, width, height)?;
+        let mut egl_connection = match display_handle.as_raw() {
+            rwh::RawDisplayHandle::Wayland(rdh) => {
+                egl::wrap::Connection::from_wayland_display(rdh.display.as_ptr().cast(), None)
+                    .context("could not create egl connection")?
+            }
+            _ => return Err(anyhow!(format!("unsupported display: {display_handle:?}"))),
+        };
 
-        // TODO: shouldn't need surface here.
-        egl_context.make_current(egl_surface.as_ptr())?;
+        let egl_config = {
+            use egl::*;
+
+            // 64 seems enough?
+            let mut config_attrs = [NONE as EGLint; 64];
+            let mut num_config_attrs = 0;
+            let mut push_config_attr = |attr: EGLenum, value: EGLint| {
+                config_attrs[num_config_attrs] = attr as EGLint;
+                num_config_attrs += 1;
+                config_attrs[num_config_attrs] = value;
+                num_config_attrs += 1;
+            };
+            push_config_attr(RED_SIZE, 8);
+            push_config_attr(GREEN_SIZE, 8);
+            push_config_attr(BLUE_SIZE, 8);
+            // NOTE: it is important to set EGL_ALPHA_SIZE, it enables transparency
+            push_config_attr(ALPHA_SIZE, 8);
+            push_config_attr(CONFORMANT, OPENGL_BIT);
+            push_config_attr(RENDERABLE_TYPE, OPENGL_BIT);
+            // NOTE: EGL_SAMPLE_BUFFERS + EGL_SAMPLES enable some kind of don't care anti aliasing
+            push_config_attr(SAMPLE_BUFFERS, 1);
+            push_config_attr(SAMPLES, 4);
+            // TODO: might need/want MIN_SWAP_INTERVAL and MAX_SWAP_INTERVAL these to disable vsync?
+            let mut num_configs = 0;
+            if unsafe {
+                egl_connection.api.GetConfigs(
+                    *egl_connection.display,
+                    null_mut(),
+                    0,
+                    &mut num_configs,
+                )
+            } == FALSE
+            {
+                let code = unsafe { egl_connection.api.GetError() };
+                return Err(anyhow!("could not get num configs: {code:#x}",));
+            }
+
+            let mut configs = vec![unsafe { mem::zeroed() }; num_configs as usize];
+            if unsafe {
+                egl_connection.api.ChooseConfig(
+                    *egl_connection.display,
+                    config_attrs.as_ptr() as _,
+                    configs.as_mut_ptr(),
+                    num_configs,
+                    &mut num_configs,
+                )
+            } == FALSE
+            {
+                let code = unsafe { egl_connection.api.GetError() };
+                return Err(anyhow!("could not choose config: {code:#x}"));
+            }
+            unsafe { configs.set_len(num_configs as usize) };
+            configs
+                .first()
+                .copied()
+                .context("could not choose config (no compatible ones probably)")?
+        };
+
+        let egl_context = egl_connection.create_context(
+            egl::OPENGL_API,
+            egl_config,
+            None,
+            Some(&[
+                egl::CONTEXT_MAJOR_VERSION as egl::EGLint,
+                3,
+                egl::NONE as egl::EGLint,
+            ]),
+        )?;
+
+        let egl_surface = match window_handle.as_raw() {
+            rwh::RawWindowHandle::Wayland(rwh) => egl_connection.create_wayland_surface(
+                egl_context.config,
+                rwh.surface.as_ptr().cast(),
+                width,
+                height,
+                None,
+            )?,
+            other => return Err(anyhow!("unsupported window system: {other:?}")),
+        };
+
+        if unsafe {
+            egl_connection.api.MakeCurrent(
+                *egl_connection.display,
+                egl::NO_SURFACE,
+                egl::NO_SURFACE,
+                egl_context.context,
+            )
+        } == egl::FALSE
+        {
+            let code = unsafe { egl_connection.api.GetError() };
+            return Err(anyhow!("could not make current: {code:#x}"));
+        }
 
         // TODO: figure out an okay way to include vsync toggle.
         // context.set_swap_interval(&egl, 0)?;
 
         let gl_api = unsafe {
-            gl::Api::load_with(|procname| egl_context.get_proc_address(procname) as *mut c_void)
+            gl::Api::load_with(|procname| {
+                egl_connection.api.GetProcAddress(procname) as *mut c_void
+            })
         };
 
         *self = Self::Initialized(InitializedGraphicsContext {
+            egl_connection,
             egl_context,
             egl_surface,
             gl_api,
@@ -139,7 +232,7 @@ impl<A: AppHandler> Context<A> {
                 }
                 Event::Window(WindowEvent::Resized { physical_size }) => {
                     if let GraphicsContext::Initialized(ref mut igc) = self.graphics_context {
-                        igc.egl_surface.resize(physical_size.0, physical_size.1)?;
+                        igc.egl_surface.resize(physical_size.0, physical_size.1);
                     }
                 }
                 Event::Window(WindowEvent::CloseRequested) => {
@@ -159,6 +252,7 @@ impl<A: AppHandler> Context<A> {
         let (
             Some(app_handler),
             GraphicsContext::Initialized(InitializedGraphicsContext {
+                egl_connection: egl_connnection,
                 egl_context,
                 egl_surface,
                 gl_api,
@@ -168,7 +262,18 @@ impl<A: AppHandler> Context<A> {
             return Ok(());
         };
 
-        egl_context.make_current(egl_surface.as_ptr())?;
+        if unsafe {
+            egl_connnection.api.MakeCurrent(
+                *egl_connnection.display,
+                egl_surface.surface,
+                egl_surface.surface,
+                egl_context.context,
+            )
+        } == egl::FALSE
+        {
+            let code = unsafe { egl_connnection.api.GetError() };
+            return Err(anyhow!("could not make current: {code:#x}"));
+        }
 
         app_handler.iterate(
             AppContext {
@@ -178,7 +283,15 @@ impl<A: AppHandler> Context<A> {
             events,
         );
 
-        egl_context.swap_buffers(egl_surface.as_ptr())?;
+        if unsafe {
+            egl_connnection
+                .api
+                .SwapBuffers(*egl_connnection.display, egl_surface.surface)
+        } == egl::FALSE
+        {
+            let code = unsafe { egl_connnection.api.GetError() };
+            return Err(anyhow!("could not set swap buffers: {code:#x}"));
+        }
 
         Ok(())
     }

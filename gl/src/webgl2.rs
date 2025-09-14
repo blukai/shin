@@ -1,7 +1,6 @@
 use std::ffi::{CStr, c_void};
 
 use anyhow::Context as _;
-use raw_window_handle as rwh;
 
 use super::Apier;
 use super::types::*;
@@ -10,17 +9,15 @@ pub struct Api {
     clear: js::Value,
     clear_color: js::Value,
 
-    context: js::Value,
+    _context: js::Value,
 }
 
 impl Api {
-    // TODO: re-evaludate this. might want to not be depending on raw-window-handle thing here.
-    pub fn from_web_window_handle(handle: rwh::WebWindowHandle) -> anyhow::Result<Self> {
-        let selector = format!("canvas[data-raw-handle=\"{}\"]", handle.id);
+    pub fn from_selector(selector: &str) -> anyhow::Result<Self> {
         let canvas = js::GLOBAL
             .get("document")
             .get("querySelector")
-            .call(&[js::Value::from_str(selector.as_str())])
+            .call(&[js::Value::from_str(selector)])
             .context("could not find canvas")?;
         let context = canvas
             .get("getContext")
@@ -31,7 +28,7 @@ impl Api {
             clear: context.get("clear"),
             clear_color: context.get("clearColor"),
 
-            context,
+            _context: context,
         })
     }
 }

@@ -4,39 +4,17 @@ version = "0.0.0"
 edition.workspace = true
 
 [dependencies]
+# TODO: don't use anyhow in gl lib, be specific.
 anyhow.workspace = true
-log.workspace = true
-raw-window-handle.workspace = true
-
-[target.'cfg(not(target_family = "wasm"))'.dependencies]
-# workspace
-dynlib.workspace = true
-wayland.workspace = true
+log = { workspace = true, optional = true }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 js.workspace = true
 
 [build-dependencies]
-anyhow.workspace = true
 # workspace
-gl-generator.workspace = true
+khronos-generator.workspace = true
 
 [features]
 # NOTE: `debug` will log all function calls (debug_assertions has to be also on).
-debug = []
-# NOTE: list of all specs and extensions, you might find this useful -
-# https://registry.khronos.org/EGL
-EGL_EXT_platform_base = []
-EGL_EXT_platform_wayland = []
-EGL_KHR_image = []
-EGL_KHR_platform_wayland = []
-EGL_MESA_image_dma_buf_export = []
-# NOTE: enable all features so that there are types and enums and api; if they
-# are not supported they will not be loaded.
-default = [
-  "EGL_EXT_platform_base",
-  "EGL_EXT_platform_wayland",
-  "EGL_KHR_image",
-  "EGL_KHR_platform_wayland",
-  "EGL_MESA_image_dma_buf_export",
-]
+debug = ["dep:log"]

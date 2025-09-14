@@ -3,11 +3,12 @@ resolver = "2"
 members = [
   "app",
   "dynlib",
+  "egl",
   "gl",
-  "gl-generator",
   "gui",
   "input",
   "js",
+  "khronos-generator",
   "wayland",
   "wayland-scanner",
   "window",
@@ -30,13 +31,14 @@ nohash = { git = "https://github.com/blukai/dungers.git", rev = "057eb14", packa
 rangealloc = { git = "https://github.com/blukai/dungers.git", rev = "057eb14", package = "rangealloc" }
 scopeguard = { git = "https://github.com/blukai/dungers.git", rev = "057eb14", package = "scopeguard" }
 # workspace
-app = { path = "app" } # TODO: make the app thing non-serious prototype-only oriented thing.
+app = { path = "app" } # TODO: make the app thing non-serious example-only thing.
 dynlib = { path = "dynlib" }
+egl = { path = "egl" }
 gl = { path = "gl" }
-gl-generator = { path = "gl-generator" }
 gui = { path = "gui" }
 input = { path = "input" }
 js = { path = "js" }
+khronos-generator = { path = "khronos-generator" }
 wayland = { path = "wayland" }
 wayland-scanner = { path = "wayland-scanner" }
 window = { path = "window" }

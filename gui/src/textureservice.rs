@@ -155,8 +155,6 @@ impl<E: Externs> TextureService<E> {
     /// NOTE: returned buffer points into uninitialized or dirty memory (non-zeroed). you need to
     /// write each and every byte.
     pub fn enque_update(&mut self, handle: TextureHandle, region: TextureRegion) -> &mut [u8] {
-        log::debug!("TextureService::enque_update: ({handle:?}: {region:?})");
-
         let tex_format = self
             .materializations
             .get(&handle)

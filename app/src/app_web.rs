@@ -72,8 +72,8 @@ impl GraphicsContext {
                 )));
             }
         };
-        let gl_api =
-            gl::Api::from_web_window_handle(web_window_handle).context("could not load gl api")?;
+        let selector = format!("canvas[data-raw-handle=\"{}\"]", web_window_handle.id);
+        let gl_api = gl::Api::from_selector(selector.as_str()).context("could not load gl api")?;
 
         *self = Self::Initialized(InitializedGraphicsContext { gl_api });
         let Self::Initialized(init) = self else {

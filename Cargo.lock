@@ -69,6 +69,7 @@ name = "app"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "egl",
  "gl",
  "input",
  "js",
@@ -307,6 +308,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "egl"
+version = "0.0.0"
+dependencies = [
+ "dynlib",
+ "khronos-generator",
+ "log",
+ "wayland",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -375,20 +386,9 @@ name = "gl"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "dynlib",
- "gl-generator",
  "js",
+ "khronos-generator",
  "log",
- "raw-window-handle",
- "wayland",
-]
-
-[[package]]
-name = "gl-generator"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "xml",
 ]
 
 [[package]]
@@ -480,6 +480,14 @@ checksum = "6717b6b5b077764fb5966237269cb3c64edddde4b14ce42647430a78ced9e7b7"
 dependencies = [
  "once_cell",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "khronos-generator"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "xml",
 ]
 
 [[package]]
@@ -1439,7 +1447,6 @@ dependencies = [
  "log",
  "nohash",
  "raw-window-handle",
- "scopeguard",
  "wayland",
  "winit",
  "xkbcommon",
@@ -1754,6 +1761,7 @@ name = "xkbcommon"
 version = "0.0.0"
 dependencies = [
  "dynlib",
+ "libc",
 ]
 
 [[package]]

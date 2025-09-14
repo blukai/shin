@@ -12,6 +12,10 @@ gl.workspace = true
 input.workspace = true
 window.workspace = true
 
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+# workspace
+egl.workspace = true
+
 [target.'cfg(target_family = "wasm")'.dependencies]
 # workspace
 js.workspace = true

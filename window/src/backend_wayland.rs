@@ -15,7 +15,6 @@ use input::{
 };
 use nohash::{NoHash, NoHashMap};
 use raw_window_handle as rwh;
-use scopeguard::ScopeGuard;
 
 use crate::{ClipboardDataProvider, DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent};
 
@@ -1243,10 +1242,6 @@ unsafe extern "C" fn handle_wl_keyboard_keymap(
 ) {
     let this = unsafe { &mut *(data as *mut WaylandBackend) };
 
-    let _fd_guard = ScopeGuard::new(|| {
-        unsafe { libc::close(fd) };
-    });
-
     // dispose of previous keymap and state. makes sense to do this before proceeding with anything
     // else, right?
     if let Some(ks_handle) = this.xkb_keymap_state_handle.take() {
@@ -1258,6 +1253,7 @@ unsafe extern "C" fn handle_wl_keyboard_keymap(
 
     if format != wayland::WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1 {
         log::warn!("unknown keymap format: {format}");
+        unsafe { libc::close(fd) };
         return;
     }
 
@@ -1267,6 +1263,7 @@ unsafe extern "C" fn handle_wl_keyboard_keymap(
             Ok(ac) => this.xkb_api_context.insert(ac),
             Err(err) => {
                 log::warn!("could not create xkbcommon api and context: {err}");
+                unsafe { libc::close(fd) };
                 return;
             }
         },
@@ -1278,6 +1275,7 @@ unsafe extern "C" fn handle_wl_keyboard_keymap(
             log::warn!("could not create xkbcommon keymap and state: {err}");
         }
     }
+    unsafe { libc::close(fd) };
 }
 
 unsafe extern "C" fn handle_wl_keyboard_enter(

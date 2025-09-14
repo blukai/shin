@@ -11,7 +11,7 @@ fn main() {
 
     let out_dir = PathBuf::from(&env::var("OUT_DIR").expect("out dir is missing"));
 
-    let api = khronos_generator::Api::Gl;
+    let api = khronos_generator::Api::Egl;
     let api_str = api.as_str();
 
     let spec = fs::read_to_string(format!("../khronos-registry/{api_str}.xml"))
@@ -19,8 +19,19 @@ fn main() {
     let registry = khronos_generator::filter_registry(
         khronos_generator::parse_registry(spec.as_str()).expect("could not parse registry"),
         &api,
-        &khronos_generator::Version(4, 6),
-        &[],
+        &khronos_generator::Version(1, 5),
+        &[
+            #[cfg(feature = "EGL_EXT_platform_base")]
+            "EGL_EXT_platform_base",
+            #[cfg(feature = "EGL_EXT_platform_wayland")]
+            "EGL_EXT_platform_wayland",
+            #[cfg(feature = "EGL_KHR_image")]
+            "EGL_KHR_image",
+            #[cfg(feature = "EGL_KHR_platform_wayland")]
+            "EGL_KHR_platform_wayland",
+            #[cfg(feature = "EGL_MESA_image_dma_buf_export")]
+            "EGL_MESA_image_dma_buf_export",
+        ],
     )
     .expect("could not filter registry");
 

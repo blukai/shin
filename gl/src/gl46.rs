@@ -11,7 +11,7 @@ use super::types::*;
 #[allow(non_camel_case_types)]
 #[allow(non_snake_case)]
 mod api {
-    use crate::api::types::*;
+    use crate::types::*;
 
     include!(concat!(env!("OUT_DIR"), "/gl_api_generated.rs"));
 }
