@@ -38,7 +38,7 @@ impl Logger {
 struct InitializedGraphicsContext {
     egl_connection: egl::wrap::Connection,
     egl_context: egl::wrap::Context,
-    egl_surface: egl::wrap::Surface,
+    egl_surface: egl::wrap::WindowSurface,
     gl_api: gl::Api,
 }
 

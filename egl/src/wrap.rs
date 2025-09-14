@@ -153,7 +153,7 @@ pub struct Context {
 }
 
 // ----
-// surface
+// window surface
 
 // NOTE: wsi stands for window system integration; it is somewhat modelled after
 // https://registry.khronos.org/vulkan/specs/latest/html/vkspec.html#wsi
@@ -248,14 +248,14 @@ impl Wsi {
 }
 
 #[derive(Debug)]
-pub enum CreateSurfaceError {
+pub enum CreateWindowSurfaceError {
     CouldNotCreateWaylandWsi(CreateWaylandWsiError),
     CouldNotCreateSurface(RawError),
 }
 
-impl error::Error for CreateSurfaceError {}
+impl error::Error for CreateWindowSurfaceError {}
 
-impl fmt::Display for CreateSurfaceError {
+impl fmt::Display for CreateWindowSurfaceError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::CouldNotCreateWaylandWsi(err) => {
@@ -268,7 +268,7 @@ impl fmt::Display for CreateSurfaceError {
     }
 }
 
-pub struct Surface {
+pub struct WindowSurface {
     index: u8,
     wsi: Wsi,
     // TODO: would it make sense to make a SurfaceKind { Khr, Ext, Old } enum (same as Display)?
@@ -276,7 +276,7 @@ pub struct Surface {
     pub config: EGLConfig,
 }
 
-impl Surface {
+impl WindowSurface {
     pub fn resize(&self, width: u32, height: u32) {
         self.wsi.resize(width, height);
     }
@@ -418,11 +418,11 @@ impl Connection {
         width: u32,
         height: u32,
         attribs: Option<&[EGLAttrib]>,
-    ) -> Result<Surface, CreateSurfaceError> {
+    ) -> Result<WindowSurface, CreateWindowSurfaceError> {
         attribs.inspect(|attribs| assert!(attribs.contains(&(NONE as EGLAttrib))));
 
         let wsi = Wsi::from_wayland_surface(wl_surface, width, height)
-            .map_err(CreateSurfaceError::CouldNotCreateWaylandWsi)?;
+            .map_err(CreateWindowSurfaceError::CouldNotCreateWaylandWsi)?;
 
         let surface = match self.display {
             Display::Khr(dpy) => unsafe {
@@ -455,7 +455,9 @@ impl Connection {
             },
         };
         if surface == NO_SURFACE {
-            return Err(CreateSurfaceError::CouldNotCreateSurface(self.unwrap_err()));
+            return Err(CreateWindowSurfaceError::CouldNotCreateSurface(
+                self.unwrap_err(),
+            ));
         }
 
         let index = self
@@ -464,7 +466,7 @@ impl Connection {
             .position(|it| it.is_none())
             .expect("exhausted surface capacity");
         self.surfaces[index] = Some(surface);
-        Ok(Surface {
+        Ok(WindowSurface {
             index: index as u8,
             wsi,
             surface,
@@ -473,7 +475,7 @@ impl Connection {
     }
 
     /// panics if handle is invalid.
-    pub fn destroy_surface(&mut self, s: Surface) {
+    pub fn destroy_window_surface(&mut self, s: WindowSurface) {
         let surface = self.surfaces[s.index as usize]
             .take()
             .expect("invalid surface handle");
