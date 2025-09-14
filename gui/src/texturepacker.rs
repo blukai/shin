@@ -1,3 +1,13 @@
+// NOTE: this texture packer doesn't let you remove or replace textures. it packs things as tightly
+// as possible which results in high degree of fragmentation.
+//
+// during removal you'll need to merge splits and possibly re-arrange them, this will require
+// potentially full re-build and re-upload.
+// it is easier to create a new "pack" instead of micro-managing.
+//
+// if you want texture packer with support for removal you must look elsewhere; this one probably
+// cannot be adapted to those needs.
+
 // NOTE: Node is marked as non_exhaustive because i want to be able to expose it and its fields for
 // debuging purposes, but i do not want it to be constructable from outside.
 #[non_exhaustive]
@@ -6,8 +16,6 @@ pub struct Node<T> {
     pub value: T,
     pub parent: Option<usize>,
     pub first_child: Option<usize>,
-    // NOTE: having prev_sibling enables cheap unlink/remove.
-    pub prev_sibling: Option<usize>,
     pub next_sibling: Option<usize>,
 }
 
@@ -17,7 +25,6 @@ impl<T> Node<T> {
             value: value,
             parent: None,
             first_child: None,
-            prev_sibling: None,
             next_sibling: None,
         }
     }
@@ -79,7 +86,6 @@ impl<T> Tree<T> {
         let mut child_node = Node::new(child_value);
 
         child_node.parent = Some(parent_index);
-        child_node.prev_sibling = maybe_after_index;
 
         if let Some(after_node) = maybe_after_index.map(|i| self.get_mut(i)) {
             child_node.next_sibling = after_node.next_sibling;
@@ -90,36 +96,8 @@ impl<T> Tree<T> {
             parent_node.first_child = Some(child_index);
         }
 
-        if let Some(next_sibling_node) = child_node.next_sibling.map(|i| self.get_mut(i)) {
-            next_sibling_node.prev_sibling = Some(child_index);
-        }
-
         self.nodes[child_index] = Some(child_node);
         child_index
-    }
-
-    fn remove(&mut self, index: usize) {
-        let node = self.nodes[index].take().expect("invalid index");
-        self.free_indices.push(index);
-
-        // if we're the first guy, reset the head otherwise, make our previous node's next pointer
-        // = our next
-        if let Some(prev_sibling_node) = node.prev_sibling.map(|i| self.get_mut(i)) {
-            prev_sibling_node.next_sibling = node.next_sibling;
-        } else {
-            if let Some(parent_node) = node.parent.map(|i| self.get_mut(i)) {
-                parent_node.first_child = node.next_sibling;
-            } else if self.root_index == index {
-                // NOTE: the tree is required to have a root.
-                self.root_index = node.next_sibling.expect("next sibling");
-            }
-        }
-
-        // if we're the last guy, reset the tail otherwise, make our next node's prev pointer = our
-        // prev
-        if let Some(next_sibling_node) = node.next_sibling.map(|i| self.get_mut(i)) {
-            next_sibling_node.prev_sibling = node.prev_sibling;
-        }
     }
 }
 
@@ -135,41 +113,13 @@ fn test_insert_child_maybe_after() {
     // insert second child after first
     let child2 = tree.insert_child_maybe_after(tree.root_index, Some(child1), 2);
     assert_eq!(tree.get(child2).parent, Some(tree.root_index));
-    assert_eq!(tree.get(child2).prev_sibling, Some(child1));
     assert_eq!(tree.get(child1).next_sibling, Some(child2));
 
     // insert third child after second
     let child3 = tree.insert_child_maybe_after(tree.root_index, Some(child2), 3);
     assert_eq!(tree.get(child3).parent, Some(tree.root_index));
-    assert_eq!(tree.get(child3).prev_sibling, Some(child2));
     assert_eq!(tree.get(child2).next_sibling, Some(child3));
     assert_eq!(tree.get(child3).next_sibling, None);
-}
-
-#[test]
-fn test_remove() {
-    let mut tree = Tree::new(0);
-
-    let child1 = tree.insert_child_maybe_after(tree.root_index, None, 1);
-    let child2 = tree.insert_child_maybe_after(tree.root_index, Some(child1), 2);
-    let child3 = tree.insert_child_maybe_after(tree.root_index, Some(child2), 3);
-
-    tree.remove(child2);
-    assert!(tree.try_get(child2).is_none());
-    // check that child1 now points to child3
-    assert_eq!(tree.get(child1).next_sibling, Some(child3));
-    assert_eq!(tree.get(child3).prev_sibling, Some(child1));
-
-    tree.remove(child1);
-    assert!(tree.try_get(child1).is_none());
-    // check that root now points to child3 as first child
-    assert_eq!(tree.get(tree.root_index).first_child, Some(child3));
-    assert_eq!(tree.get(child3).prev_sibling, None);
-
-    tree.remove(child3);
-    assert!(tree.try_get(child3).is_none());
-    // check that root has no children
-    assert_eq!(tree.get(tree.root_index).first_child, None);
 }
 
 const DEFAULT_TEXTURE_WIDTH: u32 = 1024;
@@ -339,59 +289,6 @@ impl TexturePacker {
         self.insert_at(width, height, self.tree.root_index)
     }
 
-    // NOTE: removing from texture packer where texture sizes are too-distinct is a bad idea.
-    // if you want to improve removal:
-    // - try to start by looking into how to reduce amount of splits at insertion;
-    // - or how to merge as much nodes as possible during removal, but for that you may need to
-    // re-arrange nodes (?) and for that you may need to hand-out stable handles.
-    pub fn remove(&mut self, index: usize) {
-        // NOTE: shouldn't be able nor try to remove root.
-        assert_ne!(index, self.tree.root_index);
-
-        self.tree.get_mut(index).value.in_use = false;
-
-        if !self.is_leaf(index) {
-            return;
-        }
-
-        // NOTE: if its a leaf, see if its peer is empty, if it is the split can go away.
-
-        let node = self.tree.get(index);
-        let parent_index = node.parent.expect("parent index");
-        let peer_index = match () {
-            _ if self.is_left_child(parent_index, index) => {
-                if let Some(peer_index) = node.next_sibling {
-                    assert!(self.is_right_child(index, peer_index));
-                    peer_index
-                } else {
-                    return;
-                }
-            }
-            _ if self.is_right_child(parent_index, index) => {
-                if let Some(peer_index) = node.first_child {
-                    assert!(self.is_left_child(parent_index, peer_index));
-                    assert_eq!(Some(index), self.tree.get(peer_index).next_sibling);
-                    peer_index
-                } else {
-                    return;
-                }
-            }
-            _ => unreachable!(),
-        };
-
-        let peer_node = self.tree.get(peer_index);
-        if self.is_leaf(peer_index) && !peer_node.value.in_use {
-            // both children are leaves and neither is in use, remove the split here.
-            self.tree.remove(index);
-            self.tree.remove(peer_index);
-        }
-
-        // maybe parent (that is not a root) is now empty.
-        if self.is_leaf(parent_index) && parent_index != self.tree.root_index {
-            self.remove(parent_index);
-        }
-    }
-
     pub fn try_get_entry(&self, index: usize) -> Option<&TexturePackerEntry> {
         self.tree.try_get(index).map(|node| &node.value)
     }
@@ -475,17 +372,4 @@ fn test_insert_vertical_split() {
     assert!(maybe_index2.is_some());
 
     assert!(maybe_index1 != maybe_index2);
-}
-
-#[test]
-fn test_remove_leaf_node() {
-    let mut packer = TexturePacker::default();
-
-    let index = packer.insert(400, 400).expect("failed to insert");
-    assert!(packer.tree.get(index).value.in_use);
-    assert!(packer.is_leaf(index));
-
-    packer.remove(index);
-    assert!(packer.try_get_entry(index).is_none());
-    assert!(packer.is_leaf(packer.tree.root_index));
 }
