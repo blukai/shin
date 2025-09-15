@@ -148,7 +148,9 @@ impl fmt::Display for CreateContextError {
 
 pub struct Context {
     index: u8,
+    // TODO: don't expose context as is? but instead expose an `as_raw` method?
     pub context: EGLContext,
+    // TODO: do i need config here?
     pub config: EGLConfig,
 }
 
@@ -272,7 +274,9 @@ pub struct WindowSurface {
     index: u8,
     wsi: Wsi,
     // TODO: would it make sense to make a SurfaceKind { Khr, Ext, Old } enum (same as Display)?
+    // TODO: don't expose surface as is? but instead expose an `as_raw` method?
     pub surface: EGLSurface,
+    // TODO: do i need config here?
     pub config: EGLConfig,
 }
 

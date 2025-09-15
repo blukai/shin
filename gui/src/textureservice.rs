@@ -1,19 +1,29 @@
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::ops::Range;
 
+use nohash::{NoHash, NoHashMap, NoHashSet};
 use rangealloc::RangeAlloc;
 
 use crate::Externs;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TextureHandle {
     id: u32,
 }
 
+impl Hash for TextureHandle {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_u32(self.id);
+    }
+}
+
+impl NoHash for TextureHandle {}
+
 #[derive(Debug, Clone)]
 pub enum TextureKind<E: Externs> {
     Internal(TextureHandle),
-    External(E::TextureHandle),
+    Extern(E::TextureHandle),
 }
 
 // NOTE: TextureFormat is modeled after webgpu, see:
@@ -56,6 +66,24 @@ pub struct TextureCreateTicket {
     handle: TextureHandle,
 }
 
+#[derive(Clone, PartialEq, Eq)]
+struct TexturePendingUpdateKey {
+    handle: TextureHandle,
+    region: TextureRegion,
+}
+
+impl Hash for TexturePendingUpdateKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_u32(self.handle.id);
+        state.write_u32(self.region.x);
+        state.write_u32(self.region.y);
+        state.write_u32(self.region.w);
+        state.write_u32(self.region.h);
+    }
+}
+
+impl NoHash for TexturePendingUpdateKey {}
+
 pub struct TexturePendingUpdate<'a, E: Externs> {
     pub region: TextureRegion,
     pub texture: &'a E::TextureHandle,
@@ -68,10 +96,8 @@ struct Materialization<E: Externs> {
     desc: TextureDesc,
 }
 
-// TODO: impl NoHash for TextureHandle and store stuff in NoHashMap instead of HashMap.
-//
-// allows to defer texture creation and uploads; provides handles that allow to map to committed (/
-// materialized) textures.
+// NOTE: TextureService allows to defer texture creation and uploads; provides handles that allow
+// to map to committed (/ materialized) textures.
 //
 // NOTE: this may seem like an shitty stupid extra unnecessary layer of abstraction because in shin
 // were dealing only with opengl/webgl which allows to do stuff in immediate-mode. but i want to be
@@ -82,9 +108,9 @@ pub struct TextureService<E: Externs> {
     buf: Vec<u8>,
     range_alloc: RangeAlloc<usize>,
 
-    pending_creates: HashMap<TextureHandle, TextureDesc>,
-    pending_updates: HashMap<(TextureHandle, TextureRegion), Range<usize>>,
-    pending_destroys: HashSet<TextureHandle>,
+    pending_creates: NoHashMap<TextureHandle, TextureDesc>,
+    pending_updates: NoHashMap<TexturePendingUpdateKey, Range<usize>>,
+    pending_destroys: NoHashSet<TextureHandle>,
 
     // TODO: consider tracking access and doing something (yelling at the developer?) if texture
     // was not used last frame or for n frames?
@@ -122,8 +148,7 @@ impl<E: Externs> TextureService<E> {
         handle
     }
 
-    // TODO: consider renaming next_pending_create to pop_create.
-    pub fn next_pending_create(&self) -> Option<(TextureCreateTicket, &TextureDesc)> {
+    pub fn pop_create(&self) -> Option<(TextureCreateTicket, &TextureDesc)> {
         self.pending_creates
             .iter()
             .next()
@@ -152,8 +177,7 @@ impl<E: Externs> TextureService<E> {
             .unwrap_or_else(|| panic!("dangling handle ({handle:?})"))
     }
 
-    /// NOTE: returned buffer points into uninitialized or dirty memory (non-zeroed). you need to
-    /// write each and every byte.
+    /// NOTE: returned buffer points into dirty memory. you need to write each and every byte.
     pub fn enque_update(&mut self, handle: TextureHandle, region: TextureRegion) -> &mut [u8] {
         let tex_format = self
             .materializations
@@ -181,23 +205,25 @@ impl<E: Externs> TextureService<E> {
             });
         let dst = &mut self.buf[range.clone()];
 
-        self.pending_updates.insert((handle, region), range);
+        self.pending_updates
+            .insert(TexturePendingUpdateKey { handle, region }, range);
 
         dst
     }
 
-    // TODO: consider renaming next_pending_update to pop_update.
-    pub fn next_pending_update(&mut self) -> Option<TexturePendingUpdate<'_, E>> {
+    pub fn pop_update(&mut self) -> Option<TexturePendingUpdate<'_, E>> {
         let Some(key) = self.pending_updates.iter().next().map(|(k, _)| k.clone()) else {
             return None;
         };
         let range = self.pending_updates.remove(&key).unwrap();
-        let (handle, region) = key;
 
-        let materialization = self.materializations.get(&handle).expect("dangling handle");
+        let materialization = self
+            .materializations
+            .get(&key.handle)
+            .expect("dangling handle");
 
         Some(TexturePendingUpdate {
-            region,
+            region: key.region,
             texture: &materialization.texture,
             desc: &materialization.desc,
             data: &self.buf[range],
@@ -210,13 +236,12 @@ impl<E: Externs> TextureService<E> {
         self.pending_destroys.insert(handle);
     }
 
-    // TODO: consider renaming next_pending_destroy to pop_destroy.
-    pub fn next_pending_destroy(&mut self) -> Option<E::TextureHandle> {
+    pub fn pop_destroy(&mut self) -> Option<E::TextureHandle> {
         while let Some(handle) = self.pending_destroys.iter().next().copied() {
             self.pending_destroys.remove(&handle);
 
-            self.pending_updates.retain(|(h, _), range| {
-                let ok = *h != handle;
+            self.pending_updates.retain(|key, range| {
+                let ok = key.handle != handle;
                 if !ok {
                     self.range_alloc.deallocate(range.clone());
                 }

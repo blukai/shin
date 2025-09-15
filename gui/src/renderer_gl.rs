@@ -182,7 +182,7 @@ impl GlRenderer {
         }
     }
 
-    fn handle_textures<E>(
+    fn update_textures<E>(
         &self,
         gl_api: &gl::Api,
         texture_service: &mut TextureService<E>,
@@ -190,11 +190,11 @@ impl GlRenderer {
     where
         E: Externs<TextureHandle = <Self as Renderer>::TextureHandle>,
     {
-        while let Some(texture) = texture_service.next_pending_destroy() {
+        while let Some(texture) = texture_service.pop_destroy() {
             unsafe { gl_api.delete_texture(texture) };
         }
 
-        while let Some((ticket, desc)) = texture_service.next_pending_create() {
+        while let Some((ticket, desc)) = texture_service.pop_create() {
             let texture = unsafe {
                 let texture = gl_api
                     .create_texture()
@@ -247,7 +247,7 @@ impl GlRenderer {
             texture_service.commit_create(ticket, texture);
         }
 
-        while let Some(update) = texture_service.next_pending_update() {
+        while let Some(update) = texture_service.pop_update() {
             unsafe {
                 gl_api.bind_texture(gl::TEXTURE_2D, Some(*update.texture));
                 // TODO: describe_texture_format thing
@@ -278,7 +278,7 @@ impl GlRenderer {
         E: Externs<TextureHandle = <Self as Renderer>::TextureHandle>,
     {
         self.setup_state(gl_api);
-        self.handle_textures(gl_api, &mut ctx.texture_service)?;
+        self.update_textures(gl_api, &mut ctx.texture_service)?;
 
         unsafe {
             gl_api.viewport(
@@ -335,7 +335,7 @@ impl GlRenderer {
                                 TextureKind::Internal(internal) => {
                                     *ctx.texture_service.get(*internal)
                                 }
-                                TextureKind::External(external) => *external,
+                                TextureKind::Extern(external) => *external,
                             },
                         )),
                     );
