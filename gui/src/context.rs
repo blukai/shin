@@ -379,18 +379,18 @@ impl<E: Externs> Viewport<E> {
     }
 }
 
-pub struct Context<E: Externs> {
+pub struct Context {
     iteration_num: u64,
 
     pub interaction_state: InteractionState,
     pub clipboard_state: ClipboardState,
     pub appearance: Appearance,
 
-    pub texture_service: TextureService<E>,
+    pub texture_service: TextureService,
     pub font_service: FontService,
 }
 
-impl<E: Externs> Default for Context<E> {
+impl Default for Context {
     fn default() -> Self {
         // NOTE: am i okay with paniching here because the panic may only be caused by an invalid
         // font file; you can guarantee valitidy of by not putting an invalid default font into
@@ -400,7 +400,7 @@ impl<E: Externs> Default for Context<E> {
     }
 }
 
-impl<E: Externs> Context<E> {
+impl Context {
     pub fn new_with_default_font_slice(default_font_data: &'static [u8]) -> anyhow::Result<Self> {
         let mut font_service = FontService::default();
         let default_font_handle = font_service

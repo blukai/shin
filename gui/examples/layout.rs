@@ -8,7 +8,7 @@ impl gui::Externs for GuiExterns {
     type TextureHandle = <gui::GlRenderer as gui::Renderer>::TextureHandle;
 }
 
-fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, vpt: &mut gui::Viewport<E>) {
+fn draw<E: gui::Externs>(ctx: &mut gui::Context, vpt: &mut gui::Viewport<E>) {
     use gui::*;
 
     // Tableau I, by Piet Mondriaan
@@ -238,7 +238,7 @@ fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, vpt: &mut gui::Viewport<E>) 
 }
 
 struct App {
-    gui_context: gui::Context<GuiExterns>,
+    gui_context: gui::Context,
     gui_viewport: gui::Viewport<GuiExterns>,
     gui_renderer: gui::GlRenderer,
 

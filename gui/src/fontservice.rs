@@ -4,8 +4,8 @@ use ab_glyph::{Font as _, FontArc, PxScale, ScaleFont as _};
 use nohash::NoHashMap;
 
 use crate::{
-    Externs, Rect, TextureDesc, TextureFormat, TextureHandle, TexturePacker, TextureRegion,
-    TextureService, Vec2,
+    Rect, TextureDesc, TextureFormat, TextureHandle, TexturePacker, TextureRegion, TextureService,
+    Vec2,
 };
 
 // TODO: maybe do not depend on texture service. instead produce output?
@@ -30,13 +30,13 @@ struct Glyph {
     advance_width: f32,
 }
 
-fn rasterize_glyph<E: Externs>(
+fn rasterize_glyph(
     ch: char,
     font: FontArc,
     px_scale: PxScale,
     scale_factor: f32,
     texture_pages: &mut Vec<TexturePage>,
-    texture_service: &mut TextureService<E>,
+    texture_service: &mut TextureService,
 ) -> Glyph {
     let glyph_id = font.glyph_id(ch);
     let glyph = glyph_id.with_scale(px_scale);
@@ -79,7 +79,7 @@ fn rasterize_glyph<E: Externs>(
                 let page_idx = texture_pages.len();
                 texture_pages.push(TexturePage {
                     texture_packer,
-                    texture_handle: texture_service.enque_create(TextureDesc {
+                    texture_handle: texture_service.create(TextureDesc {
                         format: TextureFormat::R8Unorm,
                         w: TEXTURE_WIDTH,
                         h: TEXTURE_HEIGHT,
@@ -96,7 +96,7 @@ fn rasterize_glyph<E: Externs>(
         .get_entry(texture_packer_entry_idx);
 
     if let Some(og) = &outlined_glyph {
-        let buf = texture_service.enque_update(
+        let upload_buffer = texture_service.get_upload_buf_mut(
             texture_page.texture_handle,
             TextureRegion {
                 x: texture_packer_entry.x,
@@ -109,7 +109,7 @@ fn rasterize_glyph<E: Externs>(
             assert!(x <= texture_packer_entry.w);
             assert!(y <= texture_packer_entry.h);
             let pixel = y * texture_packer_entry.w + x;
-            buf[pixel as usize] = ((u8::MAX as f32) * c.clamp(0.0, 1.0)) as u8;
+            upload_buffer[pixel as usize] = ((u8::MAX as f32) * c.clamp(0.0, 1.0)) as u8;
         });
     } else {
         // NOTE: should be true if char is empty
@@ -266,10 +266,10 @@ impl<'a> FontInstanceRefMut<'a> {
 
     /// gets a glyph for a given character, rasterizing and caching it if not already cached.
     /// glyphs are cached per font instance (font + size combination) for subsequent lookups.
-    pub fn get_or_rasterize_glyph<E: Externs>(
+    pub fn get_or_rasterize_glyph(
         &mut self,
         ch: char,
-        texture_service: &mut TextureService<E>,
+        texture_service: &mut TextureService,
     ) -> GlyphRef<'_> {
         let glyph = self
             .font_instance
@@ -292,11 +292,7 @@ impl<'a> FontInstanceRefMut<'a> {
         }
     }
 
-    pub fn compute_text_width<E: Externs>(
-        &mut self,
-        text: &str,
-        texture_service: &mut TextureService<E>,
-    ) -> f32 {
+    pub fn compute_text_width(&mut self, text: &str, texture_service: &mut TextureService) -> f32 {
         let mut width: f32 = 0.0;
         for ch in text.chars() {
             let glyph = self.get_or_rasterize_glyph(ch, texture_service);
@@ -343,7 +339,7 @@ impl FontService {
         });
     }
 
-    pub fn end_iteration<E: Externs>(&mut self, texture_service: &mut TextureService<E>) {
+    pub fn end_iteration(&mut self, texture_service: &mut TextureService) {
         let mut num_font_instances_evicted: usize = 0;
 
         self.font_instances.retain(|_, font_instance| {
@@ -352,7 +348,7 @@ impl FontService {
             }
 
             font_instance.texture_pages.iter().for_each(|texture_page| {
-                texture_service.enque_destroy(texture_page.texture_handle);
+                texture_service.delete(texture_page.texture_handle);
             });
             num_font_instances_evicted += 1;
             false

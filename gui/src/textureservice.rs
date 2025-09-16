@@ -1,13 +1,16 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
 
-use nohash::{NoHash, NoHashMap, NoHashSet};
+use nohash::{NoHash, NoHashMap};
 use rangealloc::RangeAlloc;
 
 use crate::Externs;
 
-// TODO: either texture packer or font service's texture page must own simplified version of this.
+// TODO: consider using word "image" instead of "texture"
+//   but that makes naming of a thing like TexturePacker not so simple, idk.
+//   the word texture doesn't make a lot of sense to me in context of images or graphics really.
+//   texture is something physical, something that you can sense; or imagine how it would feel.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TextureHandle {
@@ -25,13 +28,14 @@ impl NoHash for TextureHandle {}
 #[derive(Debug, Clone)]
 pub enum TextureKind<E: Externs> {
     Internal(TextureHandle),
-    Extern(E::TextureHandle),
+    External(E::TextureHandle),
 }
 
-// NOTE: TextureFormat is modeled after webgpu, see:
-// - https://github.com/webgpu-native/webgpu-headers/blob/449359147fae26c07efe4fece25013df396287db/webgpu.h
-// - https://www.w3.org/TR/webgpu/#texture-formats
-#[derive(Debug)]
+// NOTE: TextureFormat is modeled after webgpu
+//   see:
+//   - https://github.com/webgpu-native/webgpu-headers/blob/449359147fae26c07efe4fece25013df396287db/webgpu.h
+//   - https://www.w3.org/TR/webgpu/#texture-formats
+#[derive(Debug, Clone)]
 pub enum TextureFormat {
     Rgba8Unorm,
     R8Unorm,
@@ -46,16 +50,14 @@ impl TextureFormat {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TextureDesc {
     pub format: TextureFormat,
     pub w: u32,
     pub h: u32,
 }
 
-// NOTE: all the non-Debug stuff is derived because TextureRegion needs to be used as part of a
-// hash map key.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct TextureRegion {
     pub x: u32,
     pub y: u32,
@@ -64,197 +66,115 @@ pub struct TextureRegion {
 }
 
 #[derive(Debug)]
-pub struct TextureCreateTicket {
-    handle: TextureHandle,
+pub enum TextureCommandKind {
+    Create,
+    Upload {
+        region: TextureRegion,
+        buf_range: Range<usize>,
+    },
+    Delete,
 }
 
-#[derive(Clone, PartialEq, Eq)]
-struct TexturePendingUpdateKey {
-    handle: TextureHandle,
-    region: TextureRegion,
+#[derive(Debug)]
+pub struct TextureCommand {
+    pub handle: TextureHandle,
+    pub kind: TextureCommandKind,
 }
 
-impl Hash for TexturePendingUpdateKey {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        state.write_u32(self.handle.id);
-        state.write_u32(self.region.x);
-        state.write_u32(self.region.y);
-        state.write_u32(self.region.w);
-        state.write_u32(self.region.h);
-    }
-}
-
-impl NoHash for TexturePendingUpdateKey {}
-
-pub struct TexturePendingUpdate<'a, E: Externs> {
-    pub region: TextureRegion,
-    pub texture: &'a E::TextureHandle,
-    pub desc: &'a TextureDesc,
-    pub data: &'a [u8],
-}
-
-struct Materialization<E: Externs> {
-    texture: E::TextureHandle,
-    desc: TextureDesc,
-}
-
-// NOTE: TextureService allows to defer texture creation and uploads; provides handles that allow
-// to map to committed (/ materialized) textures.
-//
-// NOTE: this may seem like an shitty stupid extra unnecessary layer of abstraction because in shin
-// were dealing only with opengl/webgl which allows to do stuff in immediate-mode. but i want to be
-// able to use gui in other projects that use other graphics apis.
-pub struct TextureService<E: Externs> {
-    handle_id_acc: u32,
+#[derive(Default)]
+pub struct TextureService {
+    next_id: u32,
 
     buf: Vec<u8>,
     range_alloc: RangeAlloc<usize>,
 
-    pending_creates: NoHashMap<TextureHandle, TextureDesc>,
-    pending_updates: NoHashMap<TexturePendingUpdateKey, Range<usize>>,
-    pending_destroys: NoHashSet<TextureHandle>,
-
-    // TODO: consider tracking access and doing something (yelling at the developer?) if texture
-    // was not used last frame or for n frames?
-    materializations: HashMap<TextureHandle, Materialization<E>>,
+    descs: NoHashMap<TextureHandle, TextureDesc>,
+    commands: VecDeque<TextureCommand>,
 }
 
-// @BlindDerive
-impl<E: Externs> Default for TextureService<E> {
-    fn default() -> Self {
-        Self {
-            handle_id_acc: 0,
+impl TextureService {
+    pub fn create(&mut self, desc: TextureDesc) -> TextureHandle {
+        let handle = TextureHandle { id: self.next_id };
+        self.next_id += 1;
 
-            buf: Vec::default(),
-            range_alloc: RangeAlloc::new(0..0),
+        log::debug!("TextureService::create: ({handle:?}: {desc:?})");
 
-            pending_creates: HashMap::default(),
-            pending_updates: HashMap::default(),
-            pending_destroys: HashSet::default(),
-
-            materializations: HashMap::default(),
-        }
-    }
-}
-
-impl<E: Externs> TextureService<E> {
-    pub fn enque_create(&mut self, desc: TextureDesc) -> TextureHandle {
-        let handle = TextureHandle {
-            id: self.handle_id_acc,
-        };
-        self.handle_id_acc += 1;
-
-        log::debug!("TextureService::enque_create: ({handle:?}: {desc:?})");
-
-        self.pending_creates.insert(handle, desc);
+        self.descs.insert(handle, desc);
+        self.commands.push_back(TextureCommand {
+            handle,
+            kind: TextureCommandKind::Create,
+        });
         handle
     }
 
-    pub fn pop_create(&self) -> Option<(TextureCreateTicket, &TextureDesc)> {
-        self.pending_creates
-            .iter()
-            .next()
-            .map(|(handle, desc)| (TextureCreateTicket { handle: *handle }, desc))
-    }
-
-    pub fn commit_create(&mut self, ticket: TextureCreateTicket, texture: E::TextureHandle) {
-        log::debug!("TextureService::commit_create: ({:?})", &ticket.handle);
-
-        let TextureCreateTicket { handle } = ticket;
-        let desc = self
-            .pending_creates
-            .remove(&handle)
-            .expect("pending create");
-        let old_materialization = self
-            .materializations
-            .insert(handle, Materialization { texture, desc });
-        assert!(old_materialization.is_none());
-    }
-
-    /// NOTE: this will panic if texture was not yet created.
-    pub fn get(&self, handle: TextureHandle) -> &E::TextureHandle {
-        self.materializations
-            .get(&handle)
-            .map(|m| &m.texture)
-            .unwrap_or_else(|| panic!("dangling handle ({handle:?})"))
-    }
-
     /// NOTE: returned buffer points into dirty memory. you need to write each and every byte.
-    pub fn enque_update(&mut self, handle: TextureHandle, region: TextureRegion) -> &mut [u8] {
-        let tex_format = self
-            .materializations
+    pub fn get_upload_buf_mut(
+        &mut self,
+        handle: TextureHandle,
+        region: TextureRegion,
+    ) -> &mut [u8] {
+        let block_size = self
+            .descs
             .get(&handle)
-            .map(|m| &m.desc.format)
-            .or_else(|| self.pending_creates.get(&handle).map(|desc| &desc.format))
-            .expect("materialized or pending-create texture");
-        let region_size = (region.w * region.h * tex_format.block_size() as u32) as usize;
+            .map(|desc| desc.format.block_size())
+            .expect("invalid handle");
+        let buffer_size = (region.w * region.h * block_size as u32) as usize;
 
-        let range = self
+        let buf_range = self
             .range_alloc
-            .allocate(region_size)
+            .allocate(buffer_size)
             // buf can't fit region, grow it.
             .unwrap_or_else(|_| {
                 let full_range = self.range_alloc.full_range();
-                let additional = full_range.len().max(region_size);
-                let new_end = full_range.end + additional;
+                let delta = full_range.len().max(buffer_size);
+                let new_end = full_range.end + delta;
 
-                self.buf.reserve_exact(additional);
+                self.buf.reserve_exact(delta);
                 assert!(self.buf.capacity() == new_end);
                 unsafe { self.buf.set_len(new_end) };
 
                 self.range_alloc.grow(new_end);
-                self.range_alloc.allocate(region_size).unwrap()
+                self.range_alloc.allocate(buffer_size).unwrap()
             });
-        let dst = &mut self.buf[range.clone()];
 
-        self.pending_updates
-            .insert(TexturePendingUpdateKey { handle, region }, range);
+        self.commands.push_back(TextureCommand {
+            handle,
+            kind: TextureCommandKind::Upload {
+                region,
+                buf_range: buf_range.clone(),
+            },
+        });
 
-        dst
+        &mut self.buf[buf_range]
     }
 
-    pub fn pop_update(&mut self) -> Option<TexturePendingUpdate<'_, E>> {
-        let Some(key) = self.pending_updates.iter().next().map(|(k, _)| k.clone()) else {
-            return None;
-        };
-        let range = self.pending_updates.remove(&key).unwrap();
+    pub fn delete(&mut self, handle: TextureHandle) {
+        log::debug!("TextureService::delete: ({handle:?})");
 
-        let materialization = self
-            .materializations
-            .get(&key.handle)
-            .expect("dangling handle");
-
-        Some(TexturePendingUpdate {
-            region: key.region,
-            texture: &materialization.texture,
-            desc: &materialization.desc,
-            data: &self.buf[range],
-        })
+        let desc = self.descs.remove(&handle);
+        assert!(desc.is_some());
+        self.commands.push_back(TextureCommand {
+            handle,
+            kind: TextureCommandKind::Delete,
+        });
     }
 
-    pub fn enque_destroy(&mut self, handle: TextureHandle) {
-        log::debug!("TextureService::enque_destroy: ({handle:?})");
-
-        self.pending_destroys.insert(handle);
-    }
-
-    pub fn pop_destroy(&mut self) -> Option<E::TextureHandle> {
-        while let Some(handle) = self.pending_destroys.iter().next().copied() {
-            self.pending_destroys.remove(&handle);
-
-            self.pending_updates.retain(|key, range| {
-                let ok = key.handle != handle;
-                if !ok {
-                    self.range_alloc.deallocate(range.clone());
-                }
-                ok
-            });
-            self.pending_creates.remove(&handle);
-
-            if let Some(materialization) = self.materializations.remove(&handle) {
-                return Some(materialization.texture);
-            }
+    /// NOTE: when poping upload command you must pull data from the buffer immediately because pop
+    /// frees the range meaning that becomes available for reuse.
+    pub fn pop_command(&mut self) -> Option<TextureCommand> {
+        let command = self.commands.pop_front()?;
+        if let TextureCommandKind::Upload { buf_range, .. } = &command.kind {
+            self.range_alloc.deallocate(buf_range.clone());
         }
-        return None;
+        Some(command)
+    }
+
+    pub fn get_desc(&self, handle: TextureHandle) -> &TextureDesc {
+        self.descs.get(&handle).expect("invalid handle")
+    }
+
+    /// NOTE: you must only use this with a range that you got from `pop_command`.
+    pub fn get_upload_data(&self, range: Range<usize>) -> &[u8] {
+        &self.buf[range]
     }
 }

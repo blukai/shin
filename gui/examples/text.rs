@@ -10,7 +10,7 @@ impl gui::Externs for GuiExterns {
 }
 
 struct App {
-    gui_context: gui::Context<GuiExterns>,
+    gui_context: gui::Context,
     gui_viewport: gui::Viewport<GuiExterns>,
     gui_renderer: gui::GlRenderer,
 

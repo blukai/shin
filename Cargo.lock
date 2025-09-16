@@ -577,7 +577,7 @@ dependencies = [
 [[package]]
 name = "nohash"
 version = "0.0.0"
-source = "git+https://github.com/blukai/dungers.git?rev=057eb14#057eb14f54bb38d35d305958aa3bfd28a301af84"
+source = "git+https://github.com/blukai/dungers.git?rev=8b97aac#8b97aac204c724d07fe489fb329489840dd04ba4"
 
 [[package]]
 name = "num_enum"
@@ -919,7 +919,7 @@ dependencies = [
 [[package]]
 name = "rangealloc"
 version = "0.0.0"
-source = "git+https://github.com/blukai/dungers.git?rev=057eb14#057eb14f54bb38d35d305958aa3bfd28a301af84"
+source = "git+https://github.com/blukai/dungers.git?rev=8b97aac#8b97aac204c724d07fe489fb329489840dd04ba4"
 
 [[package]]
 name = "raw-window-handle"
@@ -976,7 +976,7 @@ checksum = "e1cf6437eb19a8f4a6cc0f7dca544973b0b78843adbfeb3683d1a94a0024a294"
 [[package]]
 name = "scopeguard"
 version = "0.0.0"
-source = "git+https://github.com/blukai/dungers.git?rev=057eb14#057eb14f54bb38d35d305958aa3bfd28a301af84"
+source = "git+https://github.com/blukai/dungers.git?rev=8b97aac#8b97aac204c724d07fe489fb329489840dd04ba4"
 
 [[package]]
 name = "sctk-adwaita"

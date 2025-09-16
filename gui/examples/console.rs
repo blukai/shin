@@ -111,7 +111,7 @@ impl Console {
     fn update_history<E: gui::Externs>(
         &mut self,
         rect: gui::Rect,
-        ctx: &mut gui::Context<E>,
+        ctx: &mut gui::Context,
         vpt: &mut gui::Viewport<E>,
         input: &input::State,
     ) {
@@ -129,7 +129,7 @@ impl Console {
     fn update_command_editor<E: gui::Externs>(
         &mut self,
         rect: gui::Rect,
-        ctx: &mut gui::Context<E>,
+        ctx: &mut gui::Context,
         vpt: &mut gui::Viewport<E>,
         input: &input::State,
     ) {
@@ -217,7 +217,7 @@ impl Console {
     fn update<E: gui::Externs>(
         &mut self,
         rect: gui::Rect,
-        ctx: &mut gui::Context<E>,
+        ctx: &mut gui::Context,
         vpt: &mut gui::Viewport<E>,
         input: &input::State,
     ) {
@@ -259,7 +259,7 @@ impl Console {
 }
 
 struct App {
-    gui_context: gui::Context<GuiExterns>,
+    gui_context: gui::Context,
     gui_viewport: gui::Viewport<GuiExterns>,
     gui_renderer: gui::GlRenderer,
 

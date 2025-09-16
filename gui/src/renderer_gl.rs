@@ -4,9 +4,13 @@ use std::ptr::null;
 
 use anyhow::{Context as _, anyhow};
 use gl::Apier as _;
+use nohash::NoHashMap;
 
 use super::Renderer;
-use crate::{Context, DrawCommand, Externs, TextureKind, TextureService, Vertex, Viewport};
+use crate::{
+    Context, DrawCommand, Externs, TextureCommandKind, TextureHandle, TextureKind, TextureService,
+    Vertex, Viewport,
+};
 
 const SHADER_SOURCE: &str = include_str!("shader.glsl");
 
@@ -96,6 +100,7 @@ pub struct GlRenderer {
     ebo: gl::Buffer,
 
     default_white_tex: gl::Texture,
+    textures: NoHashMap<TextureHandle, gl::Texture>,
 }
 
 impl GlRenderer {
@@ -130,6 +135,7 @@ impl GlRenderer {
 
                 default_white_tex: create_default_white_tex(gl_api)
                     .context("could not create default white tex")?,
+                textures: NoHashMap::default(),
             })
         }
     }
@@ -182,95 +188,113 @@ impl GlRenderer {
         }
     }
 
-    fn update_textures<E>(
-        &self,
+    fn get_texture(&self, handle: TextureHandle) -> gl::Texture {
+        *self
+            .textures
+            .get(&handle)
+            .unwrap_or_else(|| panic!("invalid handle: {handle:?}"))
+    }
+
+    fn update_textures(
+        &mut self,
         gl_api: &gl::Api,
-        texture_service: &mut TextureService<E>,
-    ) -> anyhow::Result<()>
-    where
-        E: Externs<TextureHandle = <Self as Renderer>::TextureHandle>,
-    {
-        while let Some(texture) = texture_service.pop_destroy() {
-            unsafe { gl_api.delete_texture(texture) };
-        }
+        texture_service: &mut TextureService,
+    ) -> anyhow::Result<()> {
+        while let Some(command) = texture_service.pop_command() {
+            match command.kind {
+                TextureCommandKind::Create => {
+                    assert!(!self.textures.contains_key(&command.handle));
+                    let desc = texture_service.get_desc(command.handle);
+                    let texture = unsafe {
+                        let texture = gl_api
+                            .create_texture()
+                            .context("could not create texture")?;
 
-        while let Some((ticket, desc)) = texture_service.pop_create() {
-            let texture = unsafe {
-                let texture = gl_api
-                    .create_texture()
-                    .context("could not create ftc page tex")?;
+                        gl_api.bind_texture(gl::TEXTURE_2D, Some(texture));
 
-                gl_api.bind_texture(gl::TEXTURE_2D, Some(texture));
+                        // NOTE: without those params you can't see shit in this mist
+                        //
+                        // NOTE: to deal with min and mag filters, etc. - you might want to
+                        // consider introducing SamplerDescriptor and TextureViewDescriptor
+                        gl_api.tex_parameteri(
+                            gl::TEXTURE_2D,
+                            gl::TEXTURE_MIN_FILTER,
+                            gl::NEAREST as _,
+                        );
+                        gl_api.tex_parameteri(
+                            gl::TEXTURE_2D,
+                            gl::TEXTURE_MAG_FILTER,
+                            gl::NEAREST as _,
+                        );
 
-                // NOTE: without those params you can't see shit in this mist
-                //
-                // NOTE: to deal with min and mag filters, etc. - you might want to
-                // consider introducing SamplerDescriptor and TextureViewDescriptor
-                gl_api.tex_parameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as _);
-                gl_api.tex_parameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as _);
+                        // NOTE: this fixes tilting when rendering bitmaps. see
+                        // https://stackoverflow.com/questions/15983607/opengl-texture-tilted.
+                        gl_api.pixel_storei(gl::UNPACK_ALIGNMENT, 1);
 
-                // NOTE: this fixes tilting when rendering bitmaps. see
-                // https://stackoverflow.com/questions/15983607/opengl-texture-tilted.
-                gl_api.pixel_storei(gl::UNPACK_ALIGNMENT, 1);
+                        // TODO: describe_texture_format thing
 
-                // TODO: describe_texture_format thing
+                        // NOTE: this makes so that in the shader colors look like rgba 0 0 0 red,
+                        // instead of just red. see
+                        // https://www.khronos.org/opengl/wiki/Texture#Swizzle_mask
+                        gl_api.tex_parameteriv(
+                            gl::TEXTURE_2D,
+                            gl::TEXTURE_SWIZZLE_RGBA,
+                            [
+                                gl::ONE as gl::GLint,
+                                gl::ONE as gl::GLint,
+                                gl::ONE as gl::GLint,
+                                gl::RED as gl::GLint,
+                            ]
+                            .as_ptr(),
+                        );
 
-                // NOTE: this makes so that in the shader colors look like rgba 0 0 0 red,
-                // instead of just red. see
-                // https://www.khronos.org/opengl/wiki/Texture#Swizzle_mask
-                gl_api.tex_parameteriv(
-                    gl::TEXTURE_2D,
-                    gl::TEXTURE_SWIZZLE_RGBA,
-                    [
-                        gl::ONE as gl::GLint,
-                        gl::ONE as gl::GLint,
-                        gl::ONE as gl::GLint,
-                        gl::RED as gl::GLint,
-                    ]
-                    .as_ptr(),
-                );
+                        gl_api.tex_image_2d(
+                            gl::TEXTURE_2D,
+                            0,
+                            gl::R8 as gl::GLint,
+                            desc.w as gl::GLint,
+                            desc.h as gl::GLint,
+                            0,
+                            gl::RED,
+                            gl::UNSIGNED_BYTE,
+                            null(),
+                        );
 
-                gl_api.tex_image_2d(
-                    gl::TEXTURE_2D,
-                    0,
-                    gl::R8 as gl::GLint,
-                    desc.w as gl::GLint,
-                    desc.h as gl::GLint,
-                    0,
-                    gl::RED,
-                    gl::UNSIGNED_BYTE,
-                    null(),
-                );
-
-                texture
-            };
-            texture_service.commit_create(ticket, texture);
-        }
-
-        while let Some(update) = texture_service.pop_update() {
-            unsafe {
-                gl_api.bind_texture(gl::TEXTURE_2D, Some(*update.texture));
-                // TODO: describe_texture_format thing
-                gl_api.tex_sub_image_2d(
-                    gl::TEXTURE_2D,
-                    0,
-                    update.region.x as gl::GLint,
-                    update.region.y as gl::GLint,
-                    update.region.w as gl::GLsizei,
-                    update.region.h as gl::GLsizei,
-                    gl::RED,
-                    gl::UNSIGNED_BYTE,
-                    update.data.as_ptr() as *const c_void,
-                );
+                        texture
+                    };
+                    self.textures.insert(command.handle, texture);
+                }
+                TextureCommandKind::Upload { region, buf_range } => {
+                    let texture = self.get_texture(command.handle);
+                    let data = texture_service.get_upload_data(buf_range);
+                    unsafe {
+                        gl_api.bind_texture(gl::TEXTURE_2D, Some(texture));
+                        // TODO: describe_texture_format thing
+                        gl_api.tex_sub_image_2d(
+                            gl::TEXTURE_2D,
+                            0,
+                            region.x as gl::GLint,
+                            region.y as gl::GLint,
+                            region.w as gl::GLsizei,
+                            region.h as gl::GLsizei,
+                            gl::RED,
+                            gl::UNSIGNED_BYTE,
+                            data.as_ptr() as *const c_void,
+                        );
+                    }
+                }
+                TextureCommandKind::Delete => {
+                    let texture = self.get_texture(command.handle);
+                    unsafe { gl_api.delete_texture(texture) };
+                }
             }
         }
-
         Ok(())
     }
 
     pub fn render<E>(
-        &self,
-        ctx: &mut Context<E>,
+        &mut self,
+        ctx: &mut Context,
         vpt: &mut Viewport<E>,
         gl_api: &gl::Api,
     ) -> anyhow::Result<()>
@@ -332,10 +356,8 @@ impl GlRenderer {
                         Some(texture.as_ref().map_or_else(
                             || self.default_white_tex,
                             |tex_kind| match tex_kind {
-                                TextureKind::Internal(internal) => {
-                                    *ctx.texture_service.get(*internal)
-                                }
-                                TextureKind::Extern(external) => *external,
+                                TextureKind::Internal(handle) => self.get_texture(*handle),
+                                TextureKind::External(texture) => *texture,
                             },
                         )),
                     );

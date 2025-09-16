@@ -54,12 +54,12 @@ use crate::{
 
 #[cfg(test)]
 mod tests {
-    use crate::{Externs, FontInstanceRefMut, TextureService};
+    use crate::{FontInstanceRefMut, TextureService};
 
-    pub fn assert_all_glyphs_have_equal_advance_width<E: Externs>(
+    pub fn assert_all_glyphs_have_equal_advance_width(
         str: &str,
         mut font_instance: FontInstanceRefMut,
-        texture_service: &mut TextureService<E>,
+        texture_service: &mut TextureService,
     ) {
         let mut prev_advance_width: Option<f32> = None;
         for ch in str.chars() {
@@ -308,12 +308,12 @@ fn should_consume_post_line_break_char(ch: char) -> bool {
     ch.is_whitespace()
 }
 
-fn layout_row<E: Externs>(
+fn layout_row(
     str: &str,
     start_byte: usize,
     container_rect: Rect,
     mut font_instance: FontInstanceRefMut,
-    texture_service: &mut TextureService<E>,
+    texture_service: &mut TextureService,
 ) -> Range<usize> {
     let mut current_x: f32 = container_rect.min.x;
     let mut end_byte: usize = start_byte;
@@ -342,12 +342,10 @@ fn test_layout_row() {
     // dealing with monospace font. it will not be correct with non-monospace font (although it
     // might pass).
 
-    use crate::UnitExterns;
-
     const CHARS_PER_ROW: usize = 16;
     const SCALE_FACTOR: f32 = 1.0;
 
-    let mut context = Context::<UnitExterns>::default();
+    let mut context = Context::default();
 
     let mut font_instance = context.font_service.get_or_create_font_instance(
         context.appearance.font_handle,
@@ -380,11 +378,11 @@ fn test_layout_row() {
     }
 }
 
-fn count_rows<E: Externs>(
+fn count_rows(
     str: &str,
     container_rect: Rect,
     mut font_instance: FontInstanceRefMut,
-    texture_service: &mut TextureService<E>,
+    texture_service: &mut TextureService,
 ) -> usize {
     let mut line_count = 0;
     let mut last_row_range = 0..0;
@@ -401,11 +399,11 @@ fn count_rows<E: Externs>(
     line_count
 }
 
-fn compute_singleline_interaction_rect<E: Externs>(
+fn compute_singleline_interaction_rect(
     str: &str,
     container_rect: Rect,
     mut font_instance: FontInstanceRefMut,
-    texture_service: &mut TextureService<E>,
+    texture_service: &mut TextureService,
 ) -> Rect {
     let height = font_instance.height();
     let width = if str.is_empty() {
@@ -424,11 +422,11 @@ fn compute_singleline_interaction_rect<E: Externs>(
     Rect::new(container_rect.min, container_rect.min + size)
 }
 
-fn compute_multiline_interaction_rect<E: Externs>(
+fn compute_multiline_interaction_rect(
     str: &str,
     container_rect: Rect,
     font_instance: FontInstanceRefMut,
-    texture_service: &mut TextureService<E>,
+    texture_service: &mut TextureService,
 ) -> Rect {
     let font_height = font_instance.height();
     let row_count = count_rows(str, container_rect, font_instance, texture_service);
@@ -438,13 +436,13 @@ fn compute_multiline_interaction_rect<E: Externs>(
 }
 
 // returns byte offset(not char index)
-fn locate_singleline_coord<E: Externs>(
+fn locate_singleline_coord(
     str: &str,
     container_rect: Rect,
     scroll: TextScroll,
     coord: Vec2,
     mut font_instance: FontInstanceRefMut,
-    texture_service: &mut TextureService<E>,
+    texture_service: &mut TextureService,
 ) -> usize {
     let left = container_rect.min.x - scroll.offset.x;
     if coord.x < left {
@@ -479,13 +477,13 @@ fn locate_singleline_coord<E: Externs>(
 }
 
 // returns byte offset(not char index)
-fn locate_multiline_coord<E: Externs>(
+fn locate_multiline_coord(
     str: &str,
     container_rect: Rect,
     scroll: TextScroll,
     coord: Vec2,
     mut font_instance: FontInstanceRefMut,
-    texture_service: &mut TextureService<E>,
+    texture_service: &mut TextureService,
 ) -> usize {
     let top = container_rect.min.y - scroll.offset.y;
     if coord.y < top {
@@ -534,13 +532,13 @@ fn locate_multiline_coord<E: Externs>(
 // ----
 // scrolling
 
-fn scroll_into_singleline_cursor<E: Externs>(
+fn scroll_into_singleline_cursor(
     str: &str,
     selection: TextSelection,
     container_rect: Rect,
     scroll: TextScroll,
     mut font_instance: FontInstanceRefMut,
-    texture_service: &mut TextureService<E>,
+    texture_service: &mut TextureService,
 ) -> Vec2 {
     let container_width = container_rect.width();
     let cursor_width = font_instance.typical_advance_width();
@@ -578,13 +576,13 @@ fn scroll_into_singleline_cursor<E: Externs>(
 }
 
 // TODO: scroll_into_multiline_cursor need to support different row wrapping modes.
-fn scroll_into_multiline_cursor<E: Externs>(
+fn scroll_into_multiline_cursor(
     str: &str,
     selection: TextSelection,
     container_rect: Rect,
     scroll: TextScroll,
     font_instance: FontInstanceRefMut,
-    texture_service: &mut TextureService<E>,
+    texture_service: &mut TextureService,
 ) -> Vec2 {
     let container_height = container_rect.height();
     let font_height = font_instance.height();
@@ -626,7 +624,7 @@ fn draw_singleline_text<E: Externs>(
     should_draw_cursor: bool,
     appearance: &TextAppearance,
     mut font_instance: FontInstanceRefMut,
-    texture_service: &mut TextureService<E>,
+    texture_service: &mut TextureService,
     draw_buffer: &mut DrawBuffer<E>,
 ) {
     let font_ascent = font_instance.ascent();
@@ -726,7 +724,7 @@ fn draw_multiline_text<E: Externs>(
     _should_draw_cursor: bool,
     appearance: &TextAppearance,
     mut font_instance: FontInstanceRefMut,
-    texture_service: &mut TextureService<E>,
+    texture_service: &mut TextureService,
     draw_buffer: &mut DrawBuffer<E>,
 ) {
     let font_ascent = font_instance.ascent();
@@ -877,7 +875,7 @@ impl<Str, State, Line, Interact> Text<Str, State, Line, Interact> {
         self
     }
 
-    fn resolved_appearance<E: Externs>(&mut self, ctx: &Context<E>) -> TextAppearance {
+    fn resolved_appearance(&mut self, ctx: &Context) -> TextAppearance {
         self.appearance
             .take()
             .unwrap_or_else(|| TextAppearance::from_appearance(&ctx.appearance))
@@ -964,7 +962,7 @@ impl<Str, State, Interact> Text<Str, State, TextLineNone, Interact> {
 // singleline
 
 impl<'a> TextNonInteractiveSingle<'a> {
-    pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>, vpt: &mut Viewport<E>) {
+    pub fn draw<E: Externs>(mut self, ctx: &mut Context, vpt: &mut Viewport<E>) {
         let appearance = self.resolved_appearance(ctx);
         let font_instance = ctx.font_service.get_or_create_font_instance(
             appearance.font_handle,
@@ -990,10 +988,10 @@ impl<'a> TextNonInteractiveSingle<'a> {
 }
 
 impl<'a> TextSelectableSingle<'a> {
-    fn update<E: Externs>(
+    fn update(
         &mut self,
         mut font_instance: FontInstanceRefMut,
-        texture_service: &mut TextureService<E>,
+        texture_service: &mut TextureService,
         interaction_state: &mut InteractionState,
         clipboard_state: &mut ClipboardState,
         input: &input::State,
@@ -1069,7 +1067,7 @@ impl<'a> TextSelectableSingle<'a> {
 
     pub fn draw<E: Externs>(
         mut self,
-        ctx: &mut Context<E>,
+        ctx: &mut Context,
         vpt: &mut Viewport<E>,
         input: &input::State,
     ) {
@@ -1106,11 +1104,11 @@ impl<'a> TextSelectableSingle<'a> {
 }
 
 impl<'a> TextEditableSingle<'a> {
-    fn update<E: Externs>(
+    fn update(
         &mut self,
         appearance: &TextAppearance,
         mut font_instance: FontInstanceRefMut,
-        texture_service: &mut TextureService<E>,
+        texture_service: &mut TextureService,
         interaction_state: &mut InteractionState,
         clipboard_state: &mut ClipboardState,
         input: &input::State,
@@ -1260,7 +1258,7 @@ impl<'a> TextEditableSingle<'a> {
 
     pub fn draw<E: Externs>(
         mut self,
-        ctx: &mut Context<E>,
+        ctx: &mut Context,
         vpt: &mut Viewport<E>,
         input: &input::State,
     ) {
@@ -1301,7 +1299,7 @@ impl<'a> TextEditableSingle<'a> {
 // multiline
 
 impl<'a> TextNonInteractiveMulti<'a> {
-    pub fn draw<E: Externs>(mut self, ctx: &mut Context<E>, vpt: &mut Viewport<E>) {
+    pub fn draw<E: Externs>(mut self, ctx: &mut Context, vpt: &mut Viewport<E>) {
         let appearance = self.resolved_appearance(ctx);
         let font_instance = ctx.font_service.get_or_create_font_instance(
             appearance.font_handle,
@@ -1327,11 +1325,11 @@ impl<'a> TextNonInteractiveMulti<'a> {
 }
 
 impl<'a> TextSelectableMulti<'a> {
-    fn update<E: Externs>(
+    fn update(
         &mut self,
         appearance: &TextAppearance,
         mut font_instance: FontInstanceRefMut,
-        texture_service: &mut TextureService<E>,
+        texture_service: &mut TextureService,
         interaction_state: &mut InteractionState,
         clipboard_state: &mut ClipboardState,
         input: &input::State,
@@ -1431,7 +1429,7 @@ impl<'a> TextSelectableMulti<'a> {
 
     pub fn draw<E: Externs>(
         mut self,
-        ctx: &mut Context<E>,
+        ctx: &mut Context,
         vpt: &mut Viewport<E>,
         input: &input::State,
     ) {

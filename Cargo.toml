@@ -27,9 +27,9 @@ log = "0.4"
 raw-window-handle = { version = "0.6", features = ["std"] } # TODO: get rid of rwh
 winit = "0.30"
 # my other repos
-nohash = { git = "https://github.com/blukai/dungers.git", rev = "057eb14", package = "nohash" }
-rangealloc = { git = "https://github.com/blukai/dungers.git", rev = "057eb14", package = "rangealloc" }
-scopeguard = { git = "https://github.com/blukai/dungers.git", rev = "057eb14", package = "scopeguard" }
+nohash = { git = "https://github.com/blukai/dungers.git", rev = "8b97aac", package = "nohash" }
+rangealloc = { git = "https://github.com/blukai/dungers.git", rev = "8b97aac", package = "rangealloc" }
+scopeguard = { git = "https://github.com/blukai/dungers.git", rev = "8b97aac", package = "scopeguard" }
 # workspace
 app = { path = "app" } # TODO: make the app thing non-serious example-only thing.
 dynlib = { path = "dynlib" }
