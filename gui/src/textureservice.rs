@@ -7,6 +7,8 @@ use rangealloc::RangeAlloc;
 
 use crate::Externs;
 
+// TODO: either texture packer or font service's texture page must own simplified version of this.
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TextureHandle {
     id: u32,

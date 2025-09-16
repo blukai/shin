@@ -68,7 +68,7 @@ impl AppHandler for App {
         let caption_text_appearance =
             gui::TextAppearance::from_appearance(&self.gui_context.appearance)
                 .with_font_size(primary_text_appearance.font_size * 0.8)
-                .with_fg(gui::Rgba8::GRAY);
+                .with_fg(gui::Rgba::GRAY);
 
         // TODO: automatic layout or something
         let font_height_factor = self
@@ -201,7 +201,7 @@ impl AppHandler for App {
                         .push_rect(gui::RectShape::new_with_fill(
                             gui::Rect::new(rect.min, rect.min + size),
                             gui::Fill::new(
-                                gui::Rgba8::WHITE,
+                                gui::Rgba::WHITE,
                                 gui::FillTexture {
                                     kind: gui::TextureKind::Internal(texture_page.texture_handle),
                                     coords: gui::Rect::from_center_half_size(

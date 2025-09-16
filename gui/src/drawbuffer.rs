@@ -12,14 +12,14 @@ use crate::{Externs, Rect, TextureKind, Vec2};
 // NOTE: Copy is derived simply because it's cheap. size of u32.
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct Rgba8 {
+pub struct Rgba {
     pub r: u8,
     pub g: u8,
     pub b: u8,
     pub a: u8,
 }
 
-impl Rgba8 {
+impl Rgba {
     // https://en.wikipedia.org/wiki/Web_colors#Basic_colors
     pub const WHITE: Self = Self::new(255, 255, 255, 255);
     pub const SILVER: Self = Self::new(192, 192, 192, 255);
@@ -65,19 +65,19 @@ pub struct FillTexture<E: Externs> {
 
 #[derive(Debug, Clone)]
 pub struct Fill<E: Externs> {
-    pub color: Rgba8,
+    pub color: Rgba,
     pub texture: Option<FillTexture<E>>,
 }
 
 impl<E: Externs> Fill<E> {
-    pub fn new(color: Rgba8, texture: FillTexture<E>) -> Self {
+    pub fn new(color: Rgba, texture: FillTexture<E>) -> Self {
         Self {
             color,
             texture: Some(texture),
         }
     }
 
-    pub fn new_with_color(color: Rgba8) -> Self {
+    pub fn new_with_color(color: Rgba) -> Self {
         Self {
             color,
             texture: None,
@@ -95,7 +95,7 @@ pub enum StrokeAlignment {
 #[derive(Debug, Clone)]
 pub struct Stroke {
     pub width: f32,
-    pub color: Rgba8,
+    pub color: Rgba,
     pub alignment: StrokeAlignment,
 }
 
@@ -216,7 +216,7 @@ pub struct Vertex {
     /// 0, 0 is the top left corner of the texture.
     /// 1, 1 is the bottom right corner of the texture.
     pub tex_coord: Vec2,
-    pub color: Rgba8,
+    pub color: Rgba,
 }
 
 #[derive(Debug)]

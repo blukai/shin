@@ -181,13 +181,13 @@ impl Console {
         // background
         vpt.draw_buffer.push_rect(gui::RectShape::new(
             rect,
-            gui::Fill::new_with_color(gui::Rgba8::from_u32(0xffffff0c)),
+            gui::Fill::new_with_color(gui::Rgba::from_u32(0xffffff0c)),
             gui::Stroke {
                 width: 1.0,
                 color: if active {
-                    gui::Rgba8::from_u32(0x4393e7ff)
+                    gui::Rgba::from_u32(0x4393e7ff)
                 } else {
-                    gui::Rgba8::from_u32(0xcccccc33)
+                    gui::Rgba::from_u32(0xcccccc33)
                 },
                 alignment: gui::StrokeAlignment::Inside,
             },
@@ -243,7 +243,7 @@ impl Console {
         };
         vpt.draw_buffer.push_rect(gui::RectShape::new_with_fill(
             container_rect,
-            gui::Fill::new_with_color(gui::Rgba8::from_u32(0x1f1f1fff)),
+            gui::Fill::new_with_color(gui::Rgba::from_u32(0x1f1f1fff)),
         ));
 
         let [history_container_rect, _gap, command_editor_container_rect] = gui::vstack([

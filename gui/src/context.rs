@@ -7,7 +7,7 @@ use input::{Button, CursorShape};
 use nohash::NoHash;
 
 use crate::{
-    DrawBuffer, Externs, F64Vec2, FontHandle, FontService, Rect, Rgba8, TextureService, Vec2,
+    DrawBuffer, Externs, F64Vec2, FontHandle, FontService, Rect, Rgba, TextureService, Vec2,
 };
 
 const DEFAULT_FONT_DATA: &[u8] = include_bytes!("../fixtures/JetBrainsMono-Regular.ttf");
@@ -280,10 +280,10 @@ pub struct Appearance {
     pub font_handle: FontHandle,
     pub font_size: f32,
 
-    pub fg: Rgba8,
-    pub selection_active_bg: Rgba8,
-    pub selection_inactive_bg: Rgba8,
-    pub cursor_bg: Rgba8,
+    pub fg: Rgba,
+    pub selection_active_bg: Rgba,
+    pub selection_inactive_bg: Rgba,
+    pub cursor_bg: Rgba,
 
     pub scroll_delta_factor: Vec2,
 }
@@ -294,10 +294,10 @@ impl Appearance {
             font_handle,
             font_size: 16.0,
 
-            fg: Rgba8::WHITE,
-            selection_active_bg: Rgba8::from_u32(0x304a3dff),
-            selection_inactive_bg: Rgba8::from_u32(0x484848ff),
-            cursor_bg: Rgba8::from_u32(0x8faf9fff),
+            fg: Rgba::WHITE,
+            selection_active_bg: Rgba::from_u32(0x304a3dff),
+            selection_inactive_bg: Rgba::from_u32(0x484848ff),
+            cursor_bg: Rgba::from_u32(0x8faf9fff),
 
             // NOTE: this is the same as in firefox (in about:config look for
             // mousewheel.default.delta_multiplier_*).

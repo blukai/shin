@@ -80,7 +80,7 @@ impl AppHandler for App {
             .draw_buffer
             .push_rect(gui::RectShape::new_with_fill(
                 rect,
-                gui::Fill::new_with_color(gui::Rgba8::ORANGE),
+                gui::Fill::new_with_color(gui::Rgba::ORANGE),
             ));
 
         gui::Text::new_non_interactive(

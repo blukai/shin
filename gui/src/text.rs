@@ -9,7 +9,7 @@ use input::{
 use crate::{
     Appearance, ClipboardState, Context, DrawBuffer, Externs, F64Vec2, Fill, FillTexture,
     FontHandle, FontInstanceRefMut, InteractionRequest, InteractionState, Key, Rect, RectShape,
-    Rgba8, TextureKind, TextureService, Vec2, Viewport,
+    Rgba, TextureKind, TextureService, Vec2, Viewport,
 };
 
 // TODO: per-char layout styling
@@ -79,10 +79,10 @@ pub struct TextAppearance {
     pub font_handle: FontHandle,
     pub font_size: f32,
 
-    pub fg: Rgba8,
-    pub selection_active_bg: Rgba8,
-    pub selection_inactive_bg: Rgba8,
-    pub cursor_bg: Rgba8,
+    pub fg: Rgba,
+    pub selection_active_bg: Rgba,
+    pub selection_inactive_bg: Rgba,
+    pub cursor_bg: Rgba,
 
     pub scroll_delta_factor: Vec2,
 }
@@ -107,12 +107,12 @@ impl TextAppearance {
         self
     }
 
-    pub fn with_fg(mut self, value: Rgba8) -> Self {
+    pub fn with_fg(mut self, value: Rgba) -> Self {
         self.fg = value;
         self
     }
 
-    pub fn selection_bg(&self, active: bool) -> Rgba8 {
+    pub fn selection_bg(&self, active: bool) -> Rgba {
         if active {
             self.selection_active_bg
         } else {

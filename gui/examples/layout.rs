@@ -37,7 +37,7 @@ fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, vpt: &mut gui::Viewport<E>) 
     {
         vpt.draw_buffer.push_rect(RectShape::new_with_fill(
             top,
-            Fill::new_with_color(Rgba8::WHITE),
+            Fill::new_with_color(Rgba::WHITE),
         ));
 
         {
@@ -59,29 +59,29 @@ fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, vpt: &mut gui::Viewport<E>) 
                 .split(left);
                 vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                     top,
-                    Fill::new_with_color(Rgba8::RED),
+                    Fill::new_with_color(Rgba::RED),
                 ));
                 vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                     gap,
-                    Fill::new_with_color(Rgba8::BLACK),
+                    Fill::new_with_color(Rgba::BLACK),
                 ));
                 vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                     bottom,
-                    Fill::new_with_color(Rgba8::WHITE),
+                    Fill::new_with_color(Rgba::WHITE),
                 ));
             }
 
             vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                 lgap,
-                Fill::new_with_color(Rgba8::BLACK),
+                Fill::new_with_color(Rgba::BLACK),
             ));
             vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                 mid,
-                Fill::new_with_color(Rgba8::WHITE),
+                Fill::new_with_color(Rgba::WHITE),
             ));
             vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                 rgap,
-                Fill::new_with_color(Rgba8::BLACK),
+                Fill::new_with_color(Rgba::BLACK),
             ));
 
             {
@@ -95,23 +95,23 @@ fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, vpt: &mut gui::Viewport<E>) 
                 .split(right);
                 vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                     top,
-                    Fill::new_with_color(Rgba8::BLACK),
+                    Fill::new_with_color(Rgba::BLACK),
                 ));
                 vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                     tgap,
-                    Fill::new_with_color(Rgba8::BLACK),
+                    Fill::new_with_color(Rgba::BLACK),
                 ));
                 vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                     mid,
-                    Fill::new_with_color(Rgba8::WHITE),
+                    Fill::new_with_color(Rgba::WHITE),
                 ));
                 vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                     bgap,
-                    Fill::new_with_color(Rgba8::BLACK),
+                    Fill::new_with_color(Rgba::BLACK),
                 ));
                 vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                     bottom,
-                    Fill::new_with_color(Rgba8::WHITE),
+                    Fill::new_with_color(Rgba::WHITE),
                 ));
             }
         }
@@ -119,14 +119,14 @@ fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, vpt: &mut gui::Viewport<E>) 
 
     vpt.draw_buffer.push_rect(RectShape::new_with_fill(
         gap,
-        Fill::new_with_color(Rgba8::BLACK),
+        Fill::new_with_color(Rgba::BLACK),
     ));
 
     // bottom
     {
         vpt.draw_buffer.push_rect(RectShape::new_with_fill(
             bottom,
-            Fill::new_with_color(Rgba8::WHITE),
+            Fill::new_with_color(Rgba::WHITE),
         ));
 
         {
@@ -150,7 +150,7 @@ fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, vpt: &mut gui::Viewport<E>) 
                 lmgap = gap;
                 vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                     gap,
-                    Fill::new_with_color(Rgba8::BLACK),
+                    Fill::new_with_color(Rgba::BLACK),
                 ));
 
                 {
@@ -162,26 +162,26 @@ fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, vpt: &mut gui::Viewport<E>) 
                     .split(right);
                     vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                         top,
-                        Fill::new_with_color(Rgba8::BLUE),
+                        Fill::new_with_color(Rgba::BLUE),
                     ));
                     vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                         gap,
-                        Fill::new_with_color(Rgba8::BLACK),
+                        Fill::new_with_color(Rgba::BLACK),
                     ));
                 }
             }
 
             vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                 lgap,
-                Fill::new_with_color(Rgba8::BLACK),
+                Fill::new_with_color(Rgba::BLACK),
             ));
             vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                 rgap,
-                Fill::new_with_color(Rgba8::BLACK),
+                Fill::new_with_color(Rgba::BLACK),
             ));
             vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                 right,
-                Fill::new_with_color(Rgba8::ORANGE),
+                Fill::new_with_color(Rgba::ORANGE),
             ));
 
             // bottom-mid section [white .......... black ..]
@@ -199,7 +199,7 @@ fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, vpt: &mut gui::Viewport<E>) 
                 ));
                 vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                     gap,
-                    Fill::new_with_color(Rgba8::BLACK),
+                    Fill::new_with_color(Rgba::BLACK),
                 ));
 
                 {
@@ -211,15 +211,15 @@ fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, vpt: &mut gui::Viewport<E>) 
                     .split(bottom);
                     vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                         left,
-                        Fill::new_with_color(Rgba8::WHITE),
+                        Fill::new_with_color(Rgba::WHITE),
                     ));
                     vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                         gap,
-                        Fill::new_with_color(Rgba8::BLACK),
+                        Fill::new_with_color(Rgba::BLACK),
                     ));
                     vpt.draw_buffer.push_rect(RectShape::new_with_fill(
                         right,
-                        Fill::new_with_color(Rgba8::BLACK),
+                        Fill::new_with_color(Rgba::BLACK),
                     ));
                 }
             }
@@ -231,7 +231,7 @@ fn draw<E: gui::Externs>(ctx: &mut gui::Context<E>, vpt: &mut gui::Viewport<E>) 
         viewport_area.inflate(-Vec2::splat(24.0)),
     )
     .with_appearance(
-        gui::TextAppearance::from_appearance(&ctx.appearance).with_fg(gui::Rgba8::FUCHSIA),
+        gui::TextAppearance::from_appearance(&ctx.appearance).with_fg(gui::Rgba::FUCHSIA),
     )
     .singleline()
     .draw(ctx, vpt);
