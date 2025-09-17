@@ -70,13 +70,15 @@ impl Handler for App {
     }
 
     fn iterate(&mut self, ctx: Context, events: impl Iterator<Item = Event>) {
+        self.draw_buffer.clear();
+        self.font_service
+            .remove_unused_font_instances(&mut self.texture_service);
         self.input
-            .begin_iteration(events.filter_map(|event| match event {
+            .handle_events(events.filter_map(|event| match event {
                 Event::Window(_) => None,
                 Event::Pointer(pointer_event) => Some(input::Event::Pointer(pointer_event)),
                 Event::Keyboard(keyboard_event) => Some(input::Event::Keyboard(keyboard_event)),
             }));
-        self.font_service.begin_iteration();
 
         // ----
 
@@ -113,12 +115,6 @@ impl Handler for App {
             )
             // TODO: proper error handling
             .expect("renderer fucky wucky");
-        self.draw_buffer.clear();
-
-        // ----
-
-        self.font_service.end_iteration(&mut self.texture_service);
-        self.input.end_iteration();
     }
 }
 

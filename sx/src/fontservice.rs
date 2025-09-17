@@ -200,7 +200,7 @@ pub struct FontInstance {
 
     // NOTE: touched_this_iteration is a flag that determines whether this font instance needs to
     // be evicted or not.
-    touched_this_iteration: bool,
+    in_use: bool,
 }
 
 impl FontInstance {
@@ -230,7 +230,7 @@ impl FontInstance {
             ascent,
             typical_advance_width,
 
-            touched_this_iteration: false,
+            in_use: false,
         }
     }
 
@@ -327,35 +327,25 @@ pub struct FontService {
 }
 
 impl FontService {
-    // TODO: begin_iteration and end_iteration need to go away. instead expose a way to inspect and
-    // evict font instances per decision of the owner of FontService.
-
-    pub fn begin_iteration(&mut self) {
-        // TODO: should i just reset this at the end of the frame?
-        self.font_instances.values_mut().for_each(|font_instance| {
-            font_instance.touched_this_iteration = false;
-        });
-    }
-
-    pub fn end_iteration(&mut self, texture_service: &mut TextureService) {
-        let mut num_font_instances_evicted: usize = 0;
+    pub fn remove_unused_font_instances(&mut self, texture_service: &mut TextureService) {
+        let mut num_removed: usize = 0;
 
         self.font_instances.retain(|_, font_instance| {
-            if font_instance.touched_this_iteration {
+            if font_instance.in_use {
+                // NOTE: we want to reset this to start a new round of tracking.
+                font_instance.in_use = false;
                 return true;
             }
 
             font_instance.texture_pages.iter().for_each(|texture_page| {
                 texture_service.delete(texture_page.texture_handle);
             });
-            num_font_instances_evicted += 1;
+            num_removed += 1;
             false
         });
 
-        if num_font_instances_evicted > 0 {
-            log::debug!(
-                "FontService::end_frame: evicted {num_font_instances_evicted} unused font instances"
-            );
+        if num_removed > 0 {
+            log::debug!("removed {num_removed} unused font instances");
         }
     }
 
@@ -384,7 +374,7 @@ impl FontService {
             .font_instances
             .entry(make_font_instance_key(font_handle, pt_size, scale_factor))
             .or_insert_with(|| FontInstance::new(FontArc::clone(font), pt_size, scale_factor));
-        font_instance.touched_this_iteration = true;
+        font_instance.in_use = true;
 
         FontInstanceRefMut {
             font: FontArc::clone(font),

@@ -6,9 +6,6 @@ use nohash::{NoHash, NoHashMap};
 // (on device id) maybe you want to let people play split screen with with different controllers
 // (event though i am absolutely clueless and never did own one).
 
-// TODO: what's currently in end_iteration probably must be in begin_iteration. unfuck AppHandler
-// thing first. or maybe get rid of it?
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SurfaceId(pub u64);
 
@@ -426,9 +423,7 @@ impl<B> StateTracker<B>
 where
     B: Copy + Eq + NoHash,
 {
-    pub fn begin_iteration(&mut self) {}
-
-    pub fn end_iteration(&mut self) {
+    pub fn clear_transient_flags(&mut self) {
         self.map.values_mut().for_each(|state| {
             state.0 &= !StateFlags::JUST_PRESSED;
             state.0 &= !StateFlags::JUST_RELEASED;
@@ -560,18 +555,16 @@ pub struct PointerState {
 
 impl PointerState {
     #[inline]
-    pub fn begin_iteration(&mut self) {
-        self.buttons.begin_iteration();
-    }
-
-    #[inline]
-    pub fn end_iteration(&mut self) {
+    pub fn reset_deltas(&mut self) {
         self.prev_position = self.position;
         self.position_delta = (0.0, 0.0);
 
         self.scroll_delta = (0.0, 0.0);
+    }
 
-        self.buttons.end_iteration();
+    #[inline]
+    pub fn clear_transient_flags(&mut self) {
+        self.buttons.clear_transient_flags();
     }
 
     #[inline]
@@ -663,15 +656,9 @@ pub struct KeyboardState {
 
 impl KeyboardState {
     #[inline]
-    pub fn begin_iteration(&mut self) {
-        self.scancodes.begin_iteration();
-        self.keycodes.begin_iteration();
-    }
-
-    #[inline]
-    pub fn end_iteration(&mut self) {
-        self.scancodes.end_iteration();
-        self.keycodes.end_iteration();
+    pub fn clear_transient_flags(&mut self) {
+        self.scancodes.clear_transient_flags();
+        self.keycodes.clear_transient_flags();
     }
 
     #[inline]
@@ -717,7 +704,6 @@ pub enum Event {
 pub struct State {
     pub pointer: PointerState,
     pub keyboard: KeyboardState,
-
     /// event accumulator.
     ///
     /// NOTE: do not rely on `PointerState`/`KeyboardState` while iterating over `events` because
@@ -728,11 +714,12 @@ pub struct State {
 }
 
 impl State {
-    pub fn begin_iteration(&mut self, events: impl Iterator<Item = Event>) {
-        self.pointer.begin_iteration();
-        self.keyboard.begin_iteration();
-
+    pub fn handle_events(&mut self, events: impl Iterator<Item = Event>) {
+        self.pointer.reset_deltas();
+        self.pointer.clear_transient_flags();
+        self.keyboard.clear_transient_flags();
         self.events.clear();
+
         for event in events {
             match event.clone() {
                 Event::Pointer(ev) => self.pointer.handle_event(ev),
@@ -740,10 +727,5 @@ impl State {
             }
             self.events.push(event);
         }
-    }
-
-    pub fn end_iteration(&mut self) {
-        self.pointer.end_iteration();
-        self.keyboard.end_iteration();
     }
 }
