@@ -247,8 +247,10 @@ impl winit::application::ApplicationHandler for App {
         use winit::event::WindowEvent::*;
         match window_event {
             Resized(physical_size) => {
+                let scale_factor = window.scale_factor();
+                let logical_size = physical_size.to_logical(scale_factor);
                 self.events.push_back(Event::Window(WindowEvent::Resized {
-                    physical_size: (physical_size.width, physical_size.height),
+                    logical_size: (logical_size.width, logical_size.height),
                 }));
             }
             ScaleFactorChanged { scale_factor, .. } => {
@@ -436,10 +438,11 @@ impl Window for WinitBackend {
         Ok(())
     }
 
-    fn physical_size(&self) -> (u32, u32) {
+    fn logical_size(&self) -> (u32, u32) {
         let window = self.app.window.as_ref().expect("initialized window");
-        let inner_physical_size = window.inner_size();
-        (inner_physical_size.width, inner_physical_size.height)
+        let scale_factor = window.scale_factor();
+        let inner_logical_size = window.inner_size().to_logical(scale_factor);
+        (inner_logical_size.width, inner_logical_size.height)
     }
 
     fn scale_factor(&self) -> f64 {

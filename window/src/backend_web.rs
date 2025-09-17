@@ -109,7 +109,7 @@ impl Window for WebBackend {
         unimplemented!()
     }
 
-    fn physical_size(&self) -> (u32, u32) {
+    fn logical_size(&self) -> (u32, u32) {
         unimplemented!()
     }
 

@@ -294,7 +294,7 @@ impl RendererGl {
 
     pub fn render<E>(
         &mut self,
-        physical_size: Vec2,
+        logical_size: Vec2,
         scale_factor: f32,
         draw_buffer: &DrawBuffer<E>,
         gl_api: &gl::Api,
@@ -302,6 +302,8 @@ impl RendererGl {
     where
         E: Externs<TextureHandle = <Self as Renderer>::TextureHandle>,
     {
+        let physical_size = logical_size * scale_factor;
+
         self.setup_state(gl_api);
 
         unsafe {
@@ -313,8 +315,8 @@ impl RendererGl {
             );
             gl_api.uniform_2f(
                 self.u_view_size_location,
-                (physical_size.x / scale_factor) as gl::GLfloat,
-                (physical_size.y / scale_factor) as gl::GLfloat,
+                logical_size.x as gl::GLfloat,
+                logical_size.y as gl::GLfloat,
             );
         }
 
@@ -342,12 +344,12 @@ impl RendererGl {
                     if let Some(clip_rect) = clip_rect {
                         gl_api.enable(gl::SCISSOR_TEST);
 
-                        let x = (clip_rect.min.x * scale_factor).round() as i32;
-                        let y = physical_size.y as i32
-                            - (clip_rect.max.y * scale_factor).round() as i32;
-                        let width = (clip_rect.width() * scale_factor).round() as i32;
-                        let height = (clip_rect.height() * scale_factor).round() as i32;
-                        gl_api.scissor(x, y, width, height);
+                        let physical_clip_rect = clip_rect.scale(scale_factor);
+                        let x = physical_clip_rect.min.x as i32;
+                        let y = physical_size.y as i32 - physical_clip_rect.max.y as i32;
+                        let w = physical_clip_rect.width() as i32;
+                        let h = physical_clip_rect.height() as i32;
+                        gl_api.scissor(x, y, w, h);
                     }
 
                     gl_api.active_texture(gl::TEXTURE0);
@@ -369,7 +371,7 @@ impl RendererGl {
                         (index_range.start * size_of::<u32>() as u32) as *const c_void,
                     );
 
-                    if let Some(_) = clip_rect {
+                    if clip_rect.is_some() {
                         gl_api.disable(gl::SCISSOR_TEST);
                     }
                 }

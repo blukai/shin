@@ -33,7 +33,7 @@ pub struct WindowAttrs {
 // Event? or maybe you'll get better ideas?
 #[derive(Debug)]
 pub enum WindowEvent {
-    Resized { physical_size: (u32, u32) },
+    Resized { logical_size: (u32, u32) },
     ScaleFactorChanged { scale_factor: f64 },
     CloseRequested,
 }
@@ -130,7 +130,7 @@ pub trait Window: rwh::HasDisplayHandle + rwh::HasWindowHandle {
     // TODO: might need to introduce a method that would allow to list mime types that are
     // currently available for read from the clipboard.
 
-    fn physical_size(&self) -> (u32, u32);
+    fn logical_size(&self) -> (u32, u32);
     fn scale_factor(&self) -> f64;
 }
 

@@ -156,8 +156,8 @@ struct NativeContext<H: Handler + 'static> {
     // have multiple windows and thus multiple surfaces and all surfaces can (and must?) be created
     // by a single context.
     egl_window_surface: egl::wrap::WindowSurface,
-    events: Vec<Event>,
     app_handler: H,
+    events: Vec<Event>,
     close_requested: bool,
 }
 
@@ -174,7 +174,12 @@ impl<H: Handler + 'static> NativeContext<H> {
         let window_handle = window
             .window_handle()
             .context("window handle is unavailable")?;
-        let physical_size = window.physical_size();
+
+        let physical_size = {
+            let (w, h) = window.logical_size();
+            let scale = window.scale_factor();
+            ((w as f64 * scale) as u32, (h as f64 * scale) as u32)
+        };
         let egl_window_surface = match window_handle.as_raw() {
             rwh::RawWindowHandle::Wayland(rwh) => {
                 graphics_context.egl_connection.create_wayland_surface(
@@ -208,7 +213,14 @@ impl<H: Handler + 'static> NativeContext<H> {
 
         while let Some(event) = self.window.pop_event() {
             match event {
-                Event::Window(WindowEvent::Resized { physical_size }) => {
+                Event::Window(
+                    WindowEvent::Resized { .. } | WindowEvent::ScaleFactorChanged { .. },
+                ) => {
+                    let physical_size = {
+                        let (w, h) = self.window.logical_size();
+                        let scale = self.window.scale_factor();
+                        ((w as f64 * scale) as u32, (h as f64 * scale) as u32)
+                    };
                     self.egl_window_surface
                         .resize(physical_size.0, physical_size.1);
                 }

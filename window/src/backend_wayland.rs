@@ -1679,8 +1679,8 @@ impl WaylandBackend {
             )
         };
 
+        let logical_size = this.attrs.logical_size.unwrap_or(DEFAULT_LOGICAL_SIZE);
         if !this.attrs.resizable {
-            let logical_size = this.attrs.logical_size.unwrap_or(DEFAULT_LOGICAL_SIZE);
             unsafe {
                 wayland::xdg_toplevel_set_min_size(
                     &this.libwayland_client,
@@ -1726,6 +1726,14 @@ impl WaylandBackend {
                     &this.libwayland_client,
                     this.wp_viewporter,
                     this.wl_surface,
+                )
+            };
+            unsafe {
+                wayland::wp_viewport_set_destination(
+                    &this.libwayland_client,
+                    this.wp_viewport,
+                    logical_size.0 as i32,
+                    logical_size.1 as i32,
                 )
             };
         }
@@ -1911,7 +1919,7 @@ impl WaylandBackend {
 
         let mut logical_size_changed = false;
         if let Some(logical_size) = logical_size {
-            logical_size_changed = self.logical_size != Some(logical_size);
+            logical_size_changed = self.logical_size() != logical_size;
             if logical_size_changed {
                 self.logical_size = Some(logical_size);
 
@@ -1930,7 +1938,7 @@ impl WaylandBackend {
 
         let mut scale_factor_changed = false;
         if let Some(scale_factor) = scale_factor {
-            scale_factor_changed = self.scale_factor != Some(scale_factor);
+            scale_factor_changed = self.scale_factor() != scale_factor;
             if scale_factor_changed {
                 self.scale_factor = Some(scale_factor);
 
@@ -1953,14 +1961,12 @@ impl WaylandBackend {
             }
         }
 
-        if !logical_size_changed && !scale_factor_changed {
-            return;
+        // NOTE: we want to dispatch events AFTER applying possibly BOTH changes.
+        if logical_size_changed {
+            self.events.push_back(Event::Window(WindowEvent::Resized {
+                logical_size: self.logical_size(),
+            }));
         }
-
-        self.events.push_back(Event::Window(WindowEvent::Resized {
-            physical_size: self.physical_size(),
-        }));
-
         if scale_factor_changed {
             self.events
                 .push_back(Event::Window(WindowEvent::ScaleFactorChanged {
@@ -2235,14 +2241,10 @@ impl Window for WaylandBackend {
         self.set_clipboard_data(data_provider)
     }
 
-    fn physical_size(&self) -> (u32, u32) {
-        // TODO: don't panic, but return WindowAttrs' logical_size or DEFAULT_LOGICAL_SIZE.
-        let logical_size = self.logical_size.expect("logical size");
-        let scale_factor = self.scale_factor.unwrap_or(1.0);
-        (
-            (logical_size.0 as f64 * scale_factor) as u32,
-            (logical_size.1 as f64 * scale_factor) as u32,
-        )
+    fn logical_size(&self) -> (u32, u32) {
+        self.logical_size
+            .or(self.attrs.logical_size)
+            .unwrap_or(DEFAULT_LOGICAL_SIZE)
     }
 
     fn scale_factor(&self) -> f64 {

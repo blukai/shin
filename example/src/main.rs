@@ -83,10 +83,8 @@ impl Handler for App {
         unsafe { ctx.gl_api.clear_color(0.0, 0.0, 0.4, 1.0) };
         unsafe { ctx.gl_api.clear(gl::COLOR_BUFFER_BIT) };
 
-        let physical_size = sx::Vec2::from(sx::U32Vec2::from(ctx.window.physical_size()));
         let scale_factor = ctx.window.scale_factor() as f32;
-
-        let logical_size = physical_size / scale_factor;
+        let logical_size = sx::Vec2::from(sx::U32Vec2::from(ctx.window.logical_size()));
         let logical_rect = sx::Rect::new(sx::Vec2::ZERO, logical_size);
 
         let font_instance = self.font_service.get_or_create_font_instance(
@@ -108,7 +106,7 @@ impl Handler for App {
             .expect("could not update textures");
         self.renderer
             .render(
-                physical_size,
+                logical_size,
                 scale_factor,
                 &mut self.draw_buffer,
                 ctx.gl_api,
