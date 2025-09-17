@@ -1,9 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
-  "app",
   "dynlib",
   "egl",
+  "example",
   "gl",
   "input",
   "js",
@@ -20,18 +20,17 @@ members = [
 edition = "2024"
 
 [workspace.dependencies]
-ab_glyph = "0.2"
-anyhow = "1"
-libc = "0.2"
-log = "0.4"
-raw-window-handle = { version = "0.6", features = ["std"] } # TODO: get rid of rwh
-winit = "0.30"
+ab_glyph = { version = "0.2" }
+anyhow = { version = "1" }
+libc = { version = "0.2" }
+log = { version = "0.4" }
+raw-window-handle = { version = "0.6", features = ["std"] }
+winit = { version = "0.30" }
 # my other repos
 nohash = { git = "https://github.com/blukai/dungers.git", rev = "8b97aac", package = "nohash" }
 rangealloc = { git = "https://github.com/blukai/dungers.git", rev = "8b97aac", package = "rangealloc" }
 scopeguard = { git = "https://github.com/blukai/dungers.git", rev = "8b97aac", package = "scopeguard" }
 # workspace
-app = { path = "app" } # TODO: make the app thing non-serious example-only thing.
 dynlib = { path = "dynlib" }
 egl = { path = "egl" }
 gl = { path = "gl" }
@@ -44,24 +43,4 @@ wayland-scanner = { path = "wayland-scanner" }
 window = { path = "window" }
 xkbcommon = { path = "xkbcommon" }
 xml = { path = "xml" }
-
-# TODO: do i need this package declaration here? probably yes, just for the
-# examples/first.rs?
-[package]
-name = "shin"
-version = "0.0.0"
-edition.workspace = true
-
-[dev-dependencies]
-anyhow.workspace = true
-log.workspace = true
-raw-window-handle.workspace = true
-# workspace
-app.workspace = true
-gl.workspace = true
-input.workspace = true
-window.workspace = true
-
-[features]
-winit = ["window/winit"]
 

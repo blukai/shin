@@ -7,7 +7,7 @@ use gl::Apier as _;
 use nohash::NoHashMap;
 
 use super::Renderer;
-use crate::{
+use sx::{
     DrawBuffer, DrawCommand, Externs, TextureCommandKind, TextureHandle, TextureHandleKind,
     TextureService, Vec2, Vertex,
 };
@@ -88,7 +88,7 @@ unsafe fn create_default_white_tex(gl_api: &gl::Api) -> anyhow::Result<gl::Textu
 }
 
 #[derive(Debug)]
-pub struct GlRenderer {
+pub struct RendererGl {
     program: gl::Program,
 
     i_position_location: gl::GLint,
@@ -103,7 +103,7 @@ pub struct GlRenderer {
     textures: NoHashMap<TextureHandle, gl::Texture>,
 }
 
-impl GlRenderer {
+impl RendererGl {
     pub fn new(gl_api: &gl::Api) -> anyhow::Result<Self> {
         unsafe {
             let program = create_program(
@@ -380,6 +380,6 @@ impl GlRenderer {
     }
 }
 
-impl Renderer for GlRenderer {
+impl Renderer for RendererGl {
     type TextureHandle = gl::Texture;
 }

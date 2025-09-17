@@ -4,4 +4,4 @@ version = "0.0.0"
 edition.workspace = true
 
 [dependencies]
-nohash.workspace = true
+nohash = { workspace = true }

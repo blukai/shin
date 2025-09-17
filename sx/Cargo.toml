@@ -5,26 +5,11 @@ version = "0.0.0"
 edition.workspace = true
 
 [dependencies]
-ab_glyph.workspace = true
-anyhow.workspace = true
-log.workspace = true
+ab_glyph = { workspace = true }
+anyhow = { workspace = true }
+log = { workspace = true }
 # workspace
-# gl = { workspace = true, optional = true }
-gl.workspace = true
-input.workspace = true
-nohash.workspace = true
-rangealloc.workspace = true
-scopeguard.workspace = true
+nohash = { workspace = true }
+rangealloc = { workspace = true }
+scopeguard = { workspace = true }
 
-[dev-dependencies]
-# workspace
-app.workspace = true
-window.workspace = true
-
-[features]
-# renderer_gl = ["dep:gl"]
-renderer_gl = []
-
-[[example]]
-name = "text"
-features = ["renderer_gl"]

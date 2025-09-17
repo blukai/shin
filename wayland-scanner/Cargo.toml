@@ -4,6 +4,6 @@ version = "0.0.0"
 edition.workspace = true
 
 [dependencies]
-anyhow.workspace = true
+anyhow = { workspace = true }
 # workspace
-xml.workspace = true
+xml = { workspace = true }

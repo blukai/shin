@@ -5,15 +5,15 @@ edition.workspace = true
 
 [dependencies]
 # TODO: don't use anyhow in gl lib, be specific.
-anyhow.workspace = true
+anyhow = { workspace = true }
 log = { workspace = true, optional = true }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
-js.workspace = true
+js = { workspace = true }
 
 [build-dependencies]
 # workspace
-khronos-generator.workspace = true
+khronos-generator = { workspace = true }
 
 [features]
 # NOTE: `debug` will log all function calls (debug_assertions has to be also on).

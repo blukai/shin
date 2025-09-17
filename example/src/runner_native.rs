@@ -1,10 +1,12 @@
-use std::{ffi::c_void, mem, ptr::null_mut};
+use std::ffi::c_void;
+use std::mem;
+use std::ptr::null_mut;
 
 use anyhow::{Context as _, anyhow};
 use raw_window_handle as rwh;
 use window::{Event, Window, WindowAttrs, WindowEvent};
 
-use crate::{AppContext, AppHandler};
+use crate::{Context, Handler};
 
 struct Logger;
 
@@ -181,15 +183,15 @@ impl GraphicsContext {
     }
 }
 
-struct Context<A: AppHandler> {
+struct NativeContext<H: Handler + 'static> {
     window: Box<dyn Window>,
     graphics_context: GraphicsContext,
     events: Vec<Event>,
-    app_handler: Option<A>,
+    app_handler: Option<H>,
     close_requested: bool,
 }
 
-impl<A: AppHandler> Context<A> {
+impl<H: Handler + 'static> NativeContext<H> {
     fn new(window_attrs: WindowAttrs) -> anyhow::Result<Self> {
         let window = window::create_window(window_attrs)?;
         let graphics_context = GraphicsContext::new_uninit();
@@ -217,7 +219,7 @@ impl<A: AppHandler> Context<A> {
                                 logical_size.1,
                             )?;
 
-                            self.app_handler = Some(A::create(AppContext {
+                            self.app_handler = Some(H::create(Context {
                                 window: self.window.as_mut(),
                                 gl_api: &mut igc.gl_api,
                             }));
@@ -272,7 +274,7 @@ impl<A: AppHandler> Context<A> {
         }
 
         app_handler.iterate(
-            AppContext {
+            Context {
                 window: self.window.as_mut(),
                 gl_api,
             },
@@ -292,10 +294,10 @@ impl<A: AppHandler> Context<A> {
     }
 }
 
-pub fn run<A: AppHandler>(window_attrs: WindowAttrs) {
+pub fn run<H: Handler + 'static>(window_attrs: WindowAttrs) {
     Logger::init();
 
-    let mut ctx = Context::<A>::new(window_attrs).expect("could not create app context");
+    let mut ctx = NativeContext::<H>::new(window_attrs).expect("could not create app context");
     while !ctx.close_requested {
         ctx.iterate().expect("iteration failure");
     }

@@ -3,14 +3,12 @@ use std::fmt;
 mod drawbuffer;
 mod fontservice;
 mod geometry;
-mod renderer;
 mod texturepacker;
 mod textureservice;
 
 pub use drawbuffer::*;
 pub use fontservice::*;
 pub use geometry::*;
-pub use renderer::*;
 pub use texturepacker::*;
 pub use textureservice::*;
 

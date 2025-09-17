@@ -18,11 +18,9 @@ mod gl46;
 mod webgl2;
 
 pub use enums::*;
-pub use types::*;
-
 #[cfg(not(target_family = "wasm"))]
 pub use gl46::*;
-
+pub use types::*;
 #[cfg(target_family = "wasm")]
 pub use webgl2::*;
 

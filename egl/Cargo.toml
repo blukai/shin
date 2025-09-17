@@ -8,12 +8,12 @@ edition.workspace = true
 [dependencies]
 log = { workspace = true, optional = true }
 # workspace
-dynlib.workspace = true
-wayland.workspace = true
+dynlib = { workspace = true }
+wayland = { workspace = true }
 
 [build-dependencies]
 # workspace
-khronos-generator.workspace = true
+khronos-generator = { workspace = true }
 
 [features]
 # NOTE: `debug` will log all function calls (debug_assertions has to be also on).

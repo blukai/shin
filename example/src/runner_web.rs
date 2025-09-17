@@ -1,10 +1,11 @@
-use std::{cell::RefCell, rc::Rc};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use anyhow::{Context as _, anyhow};
 use raw_window_handle as rwh;
 use window::{Event, Window, WindowAttrs, WindowEvent};
 
-use crate::{AppContext, AppHandler};
+use crate::{Context, Handler};
 
 fn panic_hook(info: &std::panic::PanicHookInfo) {
     js::throw_str(&info.to_string());
@@ -83,14 +84,14 @@ impl GraphicsContext {
     }
 }
 
-struct Context<A: AppHandler + 'static> {
+struct WebContext<H: Handler + 'static> {
     window: Box<dyn Window>,
     graphics_context: GraphicsContext,
     events: Vec<Event>,
-    app_handler: Option<A>,
+    app_handler: Option<H>,
 }
 
-impl<A: AppHandler + 'static> Context<A> {
+impl<H: Handler + 'static> WebContext<H> {
     fn new(window_attrs: WindowAttrs) -> anyhow::Result<Self> {
         let window = window::create_window(window_attrs)?;
         let graphics_context = GraphicsContext::new_uninit();
@@ -112,7 +113,7 @@ impl<A: AppHandler + 'static> Context<A> {
                     match self.graphics_context {
                         GraphicsContext::Uninit => {
                             let igc = self.graphics_context.init(self.window.window_handle()?)?;
-                            self.app_handler = Some(A::create(AppContext {
+                            self.app_handler = Some(H::create(Context {
                                 window: self.window.as_mut(),
                                 gl_api: &mut igc.gl_api,
                             }));
@@ -141,7 +142,7 @@ impl<A: AppHandler + 'static> Context<A> {
         };
 
         app_handler.iterate(
-            AppContext {
+            Context {
                 window: self.window.as_mut(),
                 gl_api,
             },
@@ -152,8 +153,8 @@ impl<A: AppHandler + 'static> Context<A> {
     }
 }
 
-fn request_animation_frame_loop<A: AppHandler + 'static>(
-    ctx: Rc<RefCell<Context<A>>>,
+fn request_animation_frame_loop<H: Handler + 'static>(
+    ctx: Rc<RefCell<WebContext<H>>>,
 ) -> anyhow::Result<()> {
     let cb = Rc::<js::Closure<dyn FnMut()>>::new_uninit();
     let request_animation_frame = js::GLOBAL.get("requestAnimationFrame");
@@ -183,12 +184,12 @@ fn request_animation_frame_loop<A: AppHandler + 'static>(
     Ok(())
 }
 
-pub fn run<A: AppHandler + 'static>(window_attrs: WindowAttrs) {
+pub fn run<H: Handler + 'static>(window_attrs: WindowAttrs) {
     std::panic::set_hook(Box::new(panic_hook));
     Logger::init();
 
     let ctx = Rc::new(RefCell::new(
-        Context::<A>::new(window_attrs).expect("could not create app context"),
+        WebContext::<H>::new(window_attrs).expect("could not create app context"),
     ));
 
     request_animation_frame_loop(ctx).expect("could not start animation loop");

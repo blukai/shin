@@ -1,11 +1,12 @@
-use app::AppHandler;
 use gl::Apier as _;
 use window::{Event, WindowAttrs};
+
+use example::{Context, Handler, Renderer, RendererGl, run};
 
 struct SxExterns;
 
 impl sx::Externs for SxExterns {
-    type TextureHandle = <sx::GlRenderer as sx::Renderer>::TextureHandle;
+    type TextureHandle = <RendererGl as Renderer>::TextureHandle;
 }
 
 const DEFAULT_FONT_DATA: &[u8] = include_bytes!("../fixtures/JetBrainsMono-Regular.ttf");
@@ -44,12 +45,12 @@ struct App {
     font_service: sx::FontService,
     default_font_handle: sx::FontHandle,
     draw_buffer: sx::DrawBuffer<SxExterns>,
-    renderer: sx::GlRenderer,
+    renderer: RendererGl,
     input: input::State,
 }
 
-impl AppHandler for App {
-    fn create(ctx: app::AppContext) -> Self {
+impl Handler for App {
+    fn create(ctx: Context) -> Self {
         let mut font_service = sx::FontService::default();
         let default_font_handle = font_service
             .register_font_slice(DEFAULT_FONT_DATA)
@@ -63,12 +64,12 @@ impl AppHandler for App {
             font_service,
             default_font_handle,
             draw_buffer: sx::DrawBuffer::default(),
-            renderer: sx::GlRenderer::new(ctx.gl_api).expect("gl renderer fucky wucky"),
+            renderer: RendererGl::new(ctx.gl_api).expect("gl renderer fucky wucky"),
             input: input::State::default(),
         }
     }
 
-    fn iterate(&mut self, ctx: app::AppContext, events: impl Iterator<Item = Event>) {
+    fn iterate(&mut self, ctx: Context, events: impl Iterator<Item = Event>) {
         let physical_size = sx::Vec2::from(sx::U32Vec2::from(ctx.window.physical_size()));
         let scale_factor = ctx.window.scale_factor() as f32;
 
@@ -124,5 +125,5 @@ impl AppHandler for App {
 }
 
 fn main() {
-    app::run::<App>(WindowAttrs::default());
+    run::<App>(WindowAttrs::default());
 }

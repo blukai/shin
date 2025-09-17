@@ -9,7 +9,7 @@ use crate::{Externs, Rect, TextureHandleKind, Vec2};
 // renderer?) to the renderer. accumulate shapes, not verticies.
 
 // NOTE: repr(C) is here to ensure that ordering is correct in into_array transmutation.
-// NOTE: Copy is derived simply because it's cheap. size of u32.
+// NOTE: Copy is derived simply because it's cheap. size of Rgba == size of u32.
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Rgba {
@@ -57,6 +57,8 @@ impl Rgba {
     }
 }
 
+// TODO: FillTexture needs constructors.
+//   new, new_with_internal, new_with_external?
 #[derive(Debug, Clone)]
 pub struct FillTexture<E: Externs> {
     pub texture: TextureHandleKind<E>,
@@ -92,6 +94,10 @@ pub enum StrokeAlignment {
     Center,
 }
 
+// TODO: Stroke needs constructors
+//   i feel the inconvenience of having to specify alignment all the time considering that in
+//   majority of cases alignment is ::Center.
+//   but what should the constructor be called that defailts alignment to ::Center? idk.
 #[derive(Debug, Clone)]
 pub struct Stroke {
     pub width: f32,
