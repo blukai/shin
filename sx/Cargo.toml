@@ -1,5 +1,6 @@
 [package]
-name = "gui"
+# NOTE: sx stands for simple graphics
+name = "sx"
 version = "0.0.0"
 edition.workspace = true
 
@@ -16,7 +17,6 @@ rangealloc.workspace = true
 scopeguard.workspace = true
 
 [dev-dependencies]
-raw-window-handle.workspace = true
 # workspace
 app.workspace = true
 window.workspace = true
@@ -24,10 +24,6 @@ window.workspace = true
 [features]
 # renderer_gl = ["dep:gl"]
 renderer_gl = []
-
-[[example]]
-name = "layout"
-features = ["renderer_gl"]
 
 [[example]]
 name = "text"

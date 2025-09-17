@@ -5,10 +5,10 @@ members = [
   "dynlib",
   "egl",
   "gl",
-  "gui",
   "input",
   "js",
   "khronos-generator",
+  "sx",
   "wayland",
   "wayland-scanner",
   "window",
@@ -35,10 +35,10 @@ app = { path = "app" } # TODO: make the app thing non-serious example-only thing
 dynlib = { path = "dynlib" }
 egl = { path = "egl" }
 gl = { path = "gl" }
-gui = { path = "gui" }
 input = { path = "input" }
 js = { path = "js" }
 khronos-generator = { path = "khronos-generator" }
+sx = { path = "sx" }
 wayland = { path = "wayland" }
 wayland-scanner = { path = "wayland-scanner" }
 window = { path = "window" }

@@ -26,7 +26,7 @@ impl Hash for TextureHandle {
 impl NoHash for TextureHandle {}
 
 #[derive(Debug, Clone)]
-pub enum TextureKind<E: Externs> {
+pub enum TextureHandleKind<E: Externs> {
     Internal(TextureHandle),
     External(E::TextureHandle),
 }

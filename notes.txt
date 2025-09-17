@@ -15,3 +15,8 @@ see:
 - https://users.rust-lang.org/t/borrow-check-trouble-due-to-return-from-for-loop/58278
 - https://github.com/rust-lang/rust/issues/54663
 - https://ntietz.com/blog/my-reference-was-dropped-why-is-the-compiler-complaining-about-multiple-borrows/
+
+TODO
+----
+- get rid / change begin/end_iteration/frame
+- fix gl api inconsistencies

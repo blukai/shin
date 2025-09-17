@@ -8,8 +8,8 @@ use nohash::NoHashMap;
 
 use super::Renderer;
 use crate::{
-    Context, DrawCommand, Externs, TextureCommandKind, TextureHandle, TextureKind, TextureService,
-    Vertex, Viewport,
+    DrawBuffer, DrawCommand, Externs, TextureCommandKind, TextureHandle, TextureHandleKind,
+    TextureService, Vec2, Vertex,
 };
 
 const SHADER_SOURCE: &str = include_str!("shader.glsl");
@@ -195,10 +195,10 @@ impl GlRenderer {
             .unwrap_or_else(|| panic!("invalid handle: {handle:?}"))
     }
 
-    fn update_textures(
+    pub fn update_textures(
         &mut self,
-        gl_api: &gl::Api,
         texture_service: &mut TextureService,
+        gl_api: &gl::Api,
     ) -> anyhow::Result<()> {
         while let Some(command) = texture_service.pop_command() {
             match command.kind {
@@ -294,31 +294,31 @@ impl GlRenderer {
 
     pub fn render<E>(
         &mut self,
-        ctx: &mut Context,
-        vpt: &mut Viewport<E>,
+        physical_size: Vec2,
+        scale_factor: f32,
+        draw_buffer: &DrawBuffer<E>,
         gl_api: &gl::Api,
     ) -> anyhow::Result<()>
     where
         E: Externs<TextureHandle = <Self as Renderer>::TextureHandle>,
     {
         self.setup_state(gl_api);
-        self.update_textures(gl_api, &mut ctx.texture_service)?;
 
         unsafe {
             gl_api.viewport(
                 0,
                 0,
-                vpt.physical_size.x as gl::GLsizei,
-                vpt.physical_size.y as gl::GLsizei,
+                physical_size.x as gl::GLsizei,
+                physical_size.y as gl::GLsizei,
             );
             gl_api.uniform_2f(
                 self.u_view_size_location,
-                (vpt.physical_size.x / vpt.scale_factor) as gl::GLfloat,
-                (vpt.physical_size.y / vpt.scale_factor) as gl::GLfloat,
+                (physical_size.x / scale_factor) as gl::GLfloat,
+                (physical_size.y / scale_factor) as gl::GLfloat,
             );
         }
 
-        for draw_data in vpt.draw_buffer.iter_draw_data() {
+        for draw_data in draw_buffer.iter_draw_data() {
             unsafe {
                 gl_api.buffer_data(
                     gl::ARRAY_BUFFER,
@@ -342,11 +342,11 @@ impl GlRenderer {
                     if let Some(clip_rect) = clip_rect {
                         gl_api.enable(gl::SCISSOR_TEST);
 
-                        let x = (clip_rect.min.x * vpt.scale_factor).round() as i32;
-                        let y = vpt.physical_size.y as i32
-                            - (clip_rect.max.y * vpt.scale_factor).round() as i32;
-                        let width = (clip_rect.width() * vpt.scale_factor).round() as i32;
-                        let height = (clip_rect.height() * vpt.scale_factor).round() as i32;
+                        let x = (clip_rect.min.x * scale_factor).round() as i32;
+                        let y = physical_size.y as i32
+                            - (clip_rect.max.y * scale_factor).round() as i32;
+                        let width = (clip_rect.width() * scale_factor).round() as i32;
+                        let height = (clip_rect.height() * scale_factor).round() as i32;
                         gl_api.scissor(x, y, width, height);
                     }
 
@@ -356,8 +356,8 @@ impl GlRenderer {
                         Some(texture.as_ref().map_or_else(
                             || self.default_white_tex,
                             |tex_kind| match tex_kind {
-                                TextureKind::Internal(handle) => self.get_texture(*handle),
-                                TextureKind::External(texture) => *texture,
+                                TextureHandleKind::Internal(handle) => self.get_texture(*handle),
+                                TextureHandleKind::External(texture) => *texture,
                             },
                         )),
                     );

@@ -3,7 +3,7 @@ use std::{array, mem};
 
 use scopeguard::ScopeGuard;
 
-use crate::{Externs, Rect, TextureKind, Vec2};
+use crate::{Externs, Rect, TextureHandleKind, Vec2};
 
 // TODO: consider offloading vertex generation and stuff for the gpu (or maybe for software
 // renderer?) to the renderer. accumulate shapes, not verticies.
@@ -59,7 +59,7 @@ impl Rgba {
 
 #[derive(Debug, Clone)]
 pub struct FillTexture<E: Externs> {
-    pub kind: TextureKind<E>,
+    pub texture: TextureHandleKind<E>,
     pub coords: Rect,
 }
 
@@ -223,7 +223,7 @@ pub struct Vertex {
 pub struct DrawCommand<E: Externs> {
     pub clip_rect: Option<Rect>,
     pub index_range: Range<u32>,
-    pub texture: Option<TextureKind<E>>,
+    pub texture: Option<TextureHandleKind<E>>,
 }
 
 #[derive(Debug)]
@@ -265,7 +265,7 @@ impl<E: Externs> DrawData<E> {
         self.pending_indices += 3;
     }
 
-    fn commit_primitive(&mut self, clip_rect: Option<Rect>, texture: Option<TextureKind<E>>) {
+    fn commit_primitive(&mut self, clip_rect: Option<Rect>, texture: Option<TextureHandleKind<E>>) {
         assert!(self.pending_indices > 0);
         let start_index = (self.indices.len() - self.pending_indices) as u32;
         let end_index = self.indices.len() as u32;
@@ -327,8 +327,13 @@ impl<E: Externs> DrawBuffer<E> {
         ScopeGuard::new_with_data(self, |this| this.clip_rect = None)
     }
 
+    // TODO: transformation scope
+    //   similar to clip scope, but with staging buffers probably;
+    //   this will allow to measure things while drawing and then if it's text for example - center
+    //   it without having to re-iterate each and every character.
+
     // allows to create absolute layers.
-    pub fn layer_scope<'a>(
+    pub fn absolute_layer_scope<'a>(
         &'a mut self,
         layer: DrawLayer,
     ) -> ScopeGuard<&'a mut Self, impl FnOnce(&'a mut Self)> {
@@ -337,8 +342,10 @@ impl<E: Externs> DrawBuffer<E> {
         ScopeGuard::new_with_data(self, move |this| this.layer = layer_backup)
     }
 
+    // TODO: is the name `relative_layers_scope` good for creating staging draw buffers?
+    //
     // allows to create relative layers.
-    pub fn multi_staging_scope<'a, const N: usize>(
+    pub fn relative_layers_scope<'a, const N: usize>(
         &'a mut self,
     ) -> ScopeGuard<[StagingDrawBuffer<E>; N], impl FnOnce([StagingDrawBuffer<E>; N])> {
         let splits = array::from_fn::<_, N, _>(|_| {
@@ -368,7 +375,7 @@ impl<E: Externs> DrawBuffer<E> {
     }
 
     #[inline(always)]
-    fn get_draw_data_mut(&mut self) -> &mut DrawData<E> {
+    fn draw_data_mut(&mut self) -> &mut DrawData<E> {
         &mut self.layers[self.layer as usize]
     }
 
@@ -378,7 +385,7 @@ impl<E: Externs> DrawBuffer<E> {
         assert!(matches!(line.stroke.alignment, StrokeAlignment::Center));
 
         let clip_rect = self.clip_rect;
-        let draw_data = self.get_draw_data_mut();
+        let draw_data = self.draw_data_mut();
         let idx = draw_data.vertices.len() as u32;
 
         let [a, b] = line.points;
@@ -421,13 +428,13 @@ impl<E: Externs> DrawBuffer<E> {
 
     fn push_rect_filled(&mut self, coords: Rect, fill: Fill<E>) {
         let clip_rect = self.clip_rect;
-        let draw_data = self.get_draw_data_mut();
+        let draw_data = self.draw_data_mut();
         let idx = draw_data.vertices.len() as u32;
 
         let (color, texture, tex_coords) = if let Some(fill_texture) = fill.texture {
             (
                 fill.color,
-                Some(fill_texture.kind),
+                Some(fill_texture.texture),
                 Some(fill_texture.coords),
             )
         } else {

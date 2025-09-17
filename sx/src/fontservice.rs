@@ -8,8 +8,6 @@ use crate::{
     Vec2,
 };
 
-// TODO: maybe do not depend on texture service. instead produce output?
-
 const TEXTURE_WIDTH: u32 = 256;
 const TEXTURE_HEIGHT: u32 = 256;
 const TEXTURE_GAP: u32 = 1;
