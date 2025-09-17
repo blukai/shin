@@ -5,7 +5,7 @@ use window::{Event, Window};
 mod runner_native;
 
 #[cfg(target_family = "wasm")]
-#[path = "web.rs"]
+#[path = "runner_web.rs"]
 mod runner_web;
 
 #[cfg(not(target_family = "wasm"))]

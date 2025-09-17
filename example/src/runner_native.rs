@@ -37,32 +37,14 @@ impl Logger {
     }
 }
 
-struct InitializedGraphicsContext {
+struct GraphicsContext {
     egl_connection: egl::wrap::Connection,
     egl_context: egl::wrap::Context,
-    egl_surface: egl::wrap::WindowSurface,
     gl_api: gl::Api,
 }
 
-enum GraphicsContext {
-    Initialized(InitializedGraphicsContext),
-    Uninit,
-}
-
 impl GraphicsContext {
-    fn new_uninit() -> Self {
-        Self::Uninit
-    }
-
-    fn init(
-        &mut self,
-        display_handle: rwh::DisplayHandle,
-        window_handle: rwh::WindowHandle,
-        width: u32,
-        height: u32,
-    ) -> anyhow::Result<&mut InitializedGraphicsContext> {
-        assert!(matches!(self, Self::Uninit));
-
+    fn new(display_handle: rwh::DisplayHandle) -> anyhow::Result<Self> {
         let mut egl_connection = match display_handle.as_raw() {
             rwh::RawDisplayHandle::Wayland(rdh) => {
                 egl::wrap::Connection::from_wayland_display(rdh.display.as_ptr().cast(), None)
@@ -138,17 +120,6 @@ impl GraphicsContext {
             ]),
         )?;
 
-        let egl_surface = match window_handle.as_raw() {
-            rwh::RawWindowHandle::Wayland(rwh) => egl_connection.create_wayland_surface(
-                egl_context.config,
-                rwh.surface.as_ptr().cast(),
-                width,
-                height,
-                None,
-            )?,
-            other => return Err(anyhow!("unsupported window system: {other:?}")),
-        };
-
         if unsafe {
             egl_connection.api.MakeCurrent(
                 *egl_connection.display,
@@ -170,36 +141,64 @@ impl GraphicsContext {
             })
         };
 
-        *self = Self::Initialized(InitializedGraphicsContext {
+        Ok(Self {
             egl_connection,
             egl_context,
-            egl_surface,
             gl_api,
-        });
-        let Self::Initialized(init) = self else {
-            unreachable!();
-        };
-        Ok(init)
+        })
     }
 }
 
 struct NativeContext<H: Handler + 'static> {
     window: Box<dyn Window>,
     graphics_context: GraphicsContext,
+    // NOTE: surface does not belong to graphics context because a single app (not this one) can
+    // have multiple windows and thus multiple surfaces and all surfaces can (and must?) be created
+    // by a single context.
+    egl_window_surface: egl::wrap::WindowSurface,
     events: Vec<Event>,
-    app_handler: Option<H>,
+    app_handler: H,
     close_requested: bool,
 }
 
 impl<H: Handler + 'static> NativeContext<H> {
     fn new(window_attrs: WindowAttrs) -> anyhow::Result<Self> {
-        let window = window::create_window(window_attrs)?;
-        let graphics_context = GraphicsContext::new_uninit();
+        let mut window = window::create_window(window_attrs).context("could not create window")?;
+
+        let display_handle = window
+            .display_handle()
+            .context("display handle is unavailable")?;
+        let mut graphics_context =
+            GraphicsContext::new(display_handle).context("could not create graphics context")?;
+
+        let window_handle = window
+            .window_handle()
+            .context("window handle is unavailable")?;
+        let physical_size = window.physical_size();
+        let egl_window_surface = match window_handle.as_raw() {
+            rwh::RawWindowHandle::Wayland(rwh) => {
+                graphics_context.egl_connection.create_wayland_surface(
+                    graphics_context.egl_context.config,
+                    rwh.surface.as_ptr().cast(),
+                    physical_size.0,
+                    physical_size.1,
+                    None,
+                )?
+            }
+            other => return Err(anyhow!("unsupported window system: {other:?}")),
+        };
+
+        let app_handler = H::create(Context {
+            window: window.as_mut(),
+            gl_api: &mut graphics_context.gl_api,
+        });
+
         Ok(Self {
             window,
             graphics_context,
+            egl_window_surface,
             events: Vec::new(),
-            app_handler: None,
+            app_handler,
             close_requested: false,
         })
     }
@@ -209,30 +208,9 @@ impl<H: Handler + 'static> NativeContext<H> {
 
         while let Some(event) = self.window.pop_event() {
             match event {
-                Event::Window(WindowEvent::Configure { logical_size }) => {
-                    match self.graphics_context {
-                        GraphicsContext::Uninit => {
-                            let igc = self.graphics_context.init(
-                                self.window.display_handle()?,
-                                self.window.window_handle()?,
-                                logical_size.0,
-                                logical_size.1,
-                            )?;
-
-                            self.app_handler = Some(H::create(Context {
-                                window: self.window.as_mut(),
-                                gl_api: &mut igc.gl_api,
-                            }));
-                        }
-                        GraphicsContext::Initialized(_) => {
-                            unreachable!();
-                        }
-                    }
-                }
                 Event::Window(WindowEvent::Resized { physical_size }) => {
-                    if let GraphicsContext::Initialized(ref mut igc) = self.graphics_context {
-                        igc.egl_surface.resize(physical_size.0, physical_size.1);
-                    }
+                    self.egl_window_surface
+                        .resize(physical_size.0, physical_size.1);
                 }
                 Event::Window(WindowEvent::CloseRequested) => {
                     self.close_requested = true;
@@ -247,47 +225,35 @@ impl<H: Handler + 'static> NativeContext<H> {
         // shouldn't need to iterate more then once.
         let events = self.events.drain(..);
 
-        // TODO: maybe don't do this?
-        let (
-            Some(app_handler),
-            GraphicsContext::Initialized(InitializedGraphicsContext {
-                egl_connection,
-                egl_context,
-                egl_surface,
-                gl_api,
-            }),
-        ) = (self.app_handler.as_mut(), &mut self.graphics_context)
-        else {
-            return Ok(());
-        };
+        let gc = &mut self.graphics_context;
 
         if unsafe {
-            egl_connection.api.MakeCurrent(
-                *egl_connection.display,
-                egl_surface.surface,
-                egl_surface.surface,
-                egl_context.context,
+            gc.egl_connection.api.MakeCurrent(
+                *gc.egl_connection.display,
+                self.egl_window_surface.surface,
+                self.egl_window_surface.surface,
+                gc.egl_context.context,
             )
         } == egl::FALSE
         {
-            return Err(egl_connection.unwrap_err()).context("could not make current");
+            return Err(gc.egl_connection.unwrap_err()).context("could not make current");
         }
 
-        app_handler.iterate(
+        self.app_handler.iterate(
             Context {
                 window: self.window.as_mut(),
-                gl_api,
+                gl_api: &mut gc.gl_api,
             },
             events,
         );
 
         if unsafe {
-            egl_connection
+            gc.egl_connection
                 .api
-                .SwapBuffers(*egl_connection.display, egl_surface.surface)
+                .SwapBuffers(*gc.egl_connection.display, self.egl_window_surface.surface)
         } == egl::FALSE
         {
-            return Err(egl_connection.unwrap_err()).context("could not swap buffers");
+            return Err(gc.egl_connection.unwrap_err()).context("could not swap buffers");
         }
 
         Ok(())

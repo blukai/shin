@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use anyhow::{Context as _, anyhow};
 use raw_window_handle as rwh;
-use window::{Event, Window, WindowAttrs, WindowEvent};
+use window::{Event, Window, WindowAttrs};
 
 use crate::{Context, Handler};
 
@@ -45,62 +45,49 @@ impl Logger {
     }
 }
 
-struct InitializedGraphicsContext {
+struct GraphicsContext {
     gl_api: gl::Api,
 }
 
-enum GraphicsContext {
-    Initialized(InitializedGraphicsContext),
-    Uninit,
-}
-
 impl GraphicsContext {
-    fn new_uninit() -> Self {
-        Self::Uninit
-    }
-
-    fn init(
-        &mut self,
-        window_handle: rwh::WindowHandle,
-    ) -> anyhow::Result<&mut InitializedGraphicsContext> {
-        assert!(matches!(self, Self::Uninit));
-
+    fn new(window_handle: rwh::WindowHandle) -> anyhow::Result<Self> {
         let web_window_handle = match window_handle.as_raw() {
             rwh::RawWindowHandle::Web(web) => web,
-            _ => {
-                return Err(anyhow!(format!(
-                    "unsupported window system (window handle: {window_handle:?})"
-                )));
-            }
+            _ => return Err(anyhow!(format!("unsupported window: {window_handle:?}"))),
         };
         let selector = format!("canvas[data-raw-handle=\"{}\"]", web_window_handle.id);
         let gl_api = gl::Api::from_selector(selector.as_str()).context("could not load gl api")?;
-
-        *self = Self::Initialized(InitializedGraphicsContext { gl_api });
-        let Self::Initialized(init) = self else {
-            unreachable!();
-        };
-        Ok(init)
+        Ok(Self { gl_api })
     }
 }
 
 struct WebContext<H: Handler + 'static> {
     window: Box<dyn Window>,
     graphics_context: GraphicsContext,
+    app_handler: H,
     events: Vec<Event>,
-    app_handler: Option<H>,
 }
 
 impl<H: Handler + 'static> WebContext<H> {
     fn new(window_attrs: WindowAttrs) -> anyhow::Result<Self> {
-        let window = window::create_window(window_attrs)?;
-        let graphics_context = GraphicsContext::new_uninit();
+        let mut window = window::create_window(window_attrs).context("could not create window")?;
+
+        let window_handle = window
+            .window_handle()
+            .context("window handle is unavailable")?;
+        let mut graphics_context =
+            GraphicsContext::new(window_handle).context("could not create graphics context")?;
+
+        let app_handler = H::create(Context {
+            window: window.as_mut(),
+            gl_api: &mut graphics_context.gl_api,
+        });
 
         Ok(Self {
             window,
             graphics_context,
+            app_handler,
             events: Vec::new(),
-            app_handler: None,
         })
     }
 
@@ -108,23 +95,6 @@ impl<H: Handler + 'static> WebContext<H> {
         self.window.pump_events()?;
 
         while let Some(event) = self.window.pop_event() {
-            match event {
-                Event::Window(WindowEvent::Configure { logical_size: _ }) => {
-                    match self.graphics_context {
-                        GraphicsContext::Uninit => {
-                            let igc = self.graphics_context.init(self.window.window_handle()?)?;
-                            self.app_handler = Some(H::create(Context {
-                                window: self.window.as_mut(),
-                                gl_api: &mut igc.gl_api,
-                            }));
-                        }
-                        GraphicsContext::Initialized(_) => {
-                            unreachable!();
-                        }
-                    }
-                }
-                _ => {}
-            }
             self.events.push(event);
         }
 
@@ -133,18 +103,10 @@ impl<H: Handler + 'static> WebContext<H> {
         // shouldn't need to iterate more then once.
         let events = self.events.drain(..);
 
-        let (
-            Some(app_handler),
-            GraphicsContext::Initialized(InitializedGraphicsContext { gl_api, .. }),
-        ) = (self.app_handler.as_mut(), &mut self.graphics_context)
-        else {
-            return Ok(());
-        };
-
-        app_handler.iterate(
+        self.app_handler.iterate(
             Context {
                 window: self.window.as_mut(),
-                gl_api,
+                gl_api: &mut self.graphics_context.gl_api,
             },
             events,
         );

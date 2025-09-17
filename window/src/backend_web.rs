@@ -52,9 +52,6 @@ impl WebBackend {
 
         let width = canvas.get("width").as_f64();
         let height = canvas.get("height").as_f64();
-        events.push_back(Event::Window(WindowEvent::Configure {
-            logical_size: (width as u32, height as u32),
-        }));
 
         // TODO: scale factor (/ pixel ratio)
 

@@ -33,7 +33,6 @@ pub struct WindowAttrs {
 // Event? or maybe you'll get better ideas?
 #[derive(Debug)]
 pub enum WindowEvent {
-    Configure { logical_size: (u32, u32) },
     Resized { physical_size: (u32, u32) },
     ScaleFactorChanged { scale_factor: f64 },
     CloseRequested,

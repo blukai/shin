@@ -200,7 +200,7 @@ struct App {
     window_attrs: WindowAttrs,
 
     window: Option<winit::window::Window>,
-    window_create_error: Option<winit::error::OsError>,
+    create_window_error: Option<winit::error::OsError>,
 
     events: VecDeque<Event>,
 }
@@ -220,7 +220,6 @@ impl winit::application::ApplicationHandler for App {
             .window_attrs
             .logical_size
             .unwrap_or(DEFAULT_LOGICAL_SIZE);
-
         let window_attrs = winit::window::WindowAttributes::default()
             .with_inner_size(winit::dpi::LogicalSize::new(
                 logical_size.0 as f64,
@@ -229,11 +228,8 @@ impl winit::application::ApplicationHandler for App {
             .with_resizable(self.window_attrs.resizable);
         match event_loop.create_window(window_attrs) {
             Ok(window) => self.window = Some(window),
-            Err(err) => self.window_create_error = Some(err),
+            Err(err) => self.create_window_error = Some(err),
         }
-
-        self.events
-            .push_back(Event::Window(WindowEvent::Configure { logical_size }));
 
         log::info!("created winit window");
     }
@@ -355,17 +351,28 @@ impl winit::application::ApplicationHandler for App {
 
 impl WinitBackend {
     pub fn new(attrs: WindowAttrs) -> anyhow::Result<Self> {
-        Ok(Self {
+        let mut this = Self {
             event_loop: winit::event_loop::EventLoop::new()?,
             app: App {
                 window_attrs: attrs,
 
                 window: None,
-                window_create_error: None,
+                create_window_error: None,
 
                 events: VecDeque::new(),
             },
-        })
+        };
+
+        // NOTE: wait for window to be created on stupid winit's "resume".
+        this.pump_events()
+            .context("could not punp events while awaiting window creation")?;
+
+        if let Some(err) = this.app.create_window_error.take() {
+            return Err(err).context("could not create window");
+        }
+        assert!(this.app.window.is_some());
+
+        Ok(this)
     }
 }
 
@@ -399,11 +406,6 @@ impl Window for WinitBackend {
             PumpStatus::Exit(code) => Err(anyhow!(format!("unexpected exit (code {code})"))),
             PumpStatus::Continue => Ok(()),
         };
-
-        if let Some(err) = self.app.window_create_error.take() {
-            return Err(err).context("could not create window");
-        }
-        assert!(self.app.window.is_some());
 
         ret
     }

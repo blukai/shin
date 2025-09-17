@@ -1853,9 +1853,6 @@ impl WaylandBackend {
 
         // TODO: consider waiting for fractional scale event (if fractional scale interface exists)
         assert!(this.acked_first_xdg_surface_configure);
-        this.events.push_back(Event::Window(WindowEvent::Configure {
-            logical_size: this.logical_size.expect("configured logical size"),
-        }));
 
         log::info!("initialized window");
 
@@ -2112,7 +2109,11 @@ impl rwh::HasDisplayHandle for WaylandBackend {
 impl rwh::HasWindowHandle for WaylandBackend {
     fn window_handle(&self) -> Result<rwh::WindowHandle<'_>, rwh::HandleError> {
         let Some(wl_surface) = NonNull::new(self.wl_surface) else {
-            return Err(rwh::HandleError::Unavailable);
+            // NOTE: can do:
+            // return Err(rwh::HandleError::Unavailable);
+            // but that is unnecessary because wl_surface gets created and remains valid for the
+            // lifetime of a program.
+            unreachable!();
         };
         let wayland = rwh::WaylandWindowHandle::new(wl_surface.cast());
         let raw = rwh::RawWindowHandle::Wayland(wayland);
