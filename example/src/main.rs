@@ -104,7 +104,7 @@ impl Handler for App {
         );
 
         self.renderer
-            .update_textures(&mut self.texture_service, &ctx.gl_api)
+            .handle_texture_commands(self.texture_service.drain_comands(), &ctx.gl_api)
             .expect("could not update textures");
         self.renderer
             .render(

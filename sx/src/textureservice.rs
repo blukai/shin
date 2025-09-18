@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
+use std::iter;
 use std::ops::Range;
 
 use nohash::{NoHash, NoHashMap};
@@ -66,19 +67,16 @@ pub struct TextureRegion {
 }
 
 #[derive(Debug)]
-pub enum TextureCommandKind {
-    Create,
-    Upload {
-        region: TextureRegion,
-        buf_range: Range<usize>,
-    },
+pub enum TextureCommandKind<Desc, Buf> {
+    Create { desc: Desc },
+    Upload { region: TextureRegion, buf: Buf },
     Delete,
 }
 
 #[derive(Debug)]
-pub struct TextureCommand {
+pub struct TextureCommand<Desc, Buf> {
     pub handle: TextureHandle,
-    pub kind: TextureCommandKind,
+    pub kind: TextureCommandKind<Desc, Buf>,
 }
 
 #[derive(Default)]
@@ -89,7 +87,7 @@ pub struct TextureService {
     range_alloc: RangeAlloc<usize>,
 
     descs: NoHashMap<TextureHandle, TextureDesc>,
-    commands: VecDeque<TextureCommand>,
+    commands: VecDeque<TextureCommand<(), Range<usize>>>,
 }
 
 impl TextureService {
@@ -102,7 +100,7 @@ impl TextureService {
         self.descs.insert(handle, desc);
         self.commands.push_back(TextureCommand {
             handle,
-            kind: TextureCommandKind::Create,
+            kind: TextureCommandKind::Create { desc: () },
         });
         handle
     }
@@ -141,7 +139,7 @@ impl TextureService {
             handle,
             kind: TextureCommandKind::Upload {
                 region,
-                buf_range: buf_range.clone(),
+                buf: buf_range.clone(),
             },
         });
 
@@ -159,22 +157,33 @@ impl TextureService {
         });
     }
 
-    /// NOTE: when poping upload command you must pull data from the buffer immediately because pop
-    /// frees the range meaning that becomes available for reuse.
-    pub fn pop_command(&mut self) -> Option<TextureCommand> {
-        let command = self.commands.pop_front()?;
-        if let TextureCommandKind::Upload { buf_range, .. } = &command.kind {
-            self.range_alloc.deallocate(buf_range.clone());
-        }
-        Some(command)
-    }
-
-    pub fn get_desc(&self, handle: TextureHandle) -> &TextureDesc {
-        self.descs.get(&handle).expect("invalid handle")
-    }
-
-    /// NOTE: you must only use this with a range that you got from `pop_command`.
-    pub fn get_upload_data(&self, range: Range<usize>) -> &[u8] {
-        &self.buf[range]
+    pub fn drain_comands(&mut self) -> impl Iterator<Item = TextureCommand<&TextureDesc, &[u8]>> {
+        iter::from_fn(|| {
+            let TextureCommand {
+                handle,
+                kind: staging_kind,
+            } = self.commands.pop_front()?;
+            let ret_kind = match staging_kind {
+                TextureCommandKind::Create { desc: _ } => TextureCommandKind::Create {
+                    desc: self.descs.get(&handle).expect("invalid handle"),
+                },
+                TextureCommandKind::Upload {
+                    region,
+                    buf: buf_range,
+                } => {
+                    // NOTE: we want to make popped range available for reuse.
+                    self.range_alloc.deallocate(buf_range.clone());
+                    TextureCommandKind::Upload {
+                        region,
+                        buf: &self.buf[buf_range],
+                    }
+                }
+                TextureCommandKind::Delete => TextureCommandKind::Delete,
+            };
+            Some(TextureCommand {
+                handle,
+                kind: ret_kind,
+            })
+        })
     }
 }

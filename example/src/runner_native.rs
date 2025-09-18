@@ -210,7 +210,6 @@ impl<H: Handler + 'static> NativeContext<H> {
 
     fn iterate(&mut self) -> anyhow::Result<()> {
         self.window.pump_events()?;
-
         while let Some(event) = self.window.pop_event() {
             match event {
                 Event::Window(

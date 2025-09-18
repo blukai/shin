@@ -7,10 +7,6 @@ use gl::Apier as _;
 use nohash::NoHashMap;
 
 use super::Renderer;
-use sx::{
-    DrawBuffer, DrawCommand, Externs, TextureCommandKind, TextureHandle, TextureHandleKind,
-    TextureService, Vec2, Vertex,
-};
 
 const SHADER_SOURCE: &str = include_str!("shader.glsl");
 
@@ -66,7 +62,7 @@ unsafe fn create_program(
     }
 }
 
-unsafe fn create_default_white_tex(gl_api: &gl::Api) -> anyhow::Result<gl::Texture> {
+unsafe fn create_default_white_texture(gl_api: &gl::Api) -> anyhow::Result<gl::Texture> {
     unsafe {
         let texture = gl_api.create_texture()?;
         gl_api.bind_texture(gl::TEXTURE_2D, Some(texture));
@@ -99,8 +95,8 @@ pub struct RendererGl {
     vbo: gl::Buffer,
     ebo: gl::Buffer,
 
-    default_white_tex: gl::Texture,
-    textures: NoHashMap<TextureHandle, gl::Texture>,
+    default_white_texture: gl::Texture,
+    textures: NoHashMap<sx::TextureHandle, gl::Texture>,
 }
 
 impl RendererGl {
@@ -133,10 +129,25 @@ impl RendererGl {
                 vbo: gl_api.create_buffer().context("could not create vbo")?,
                 ebo: gl_api.create_buffer().context("could not create ebo")?,
 
-                default_white_tex: create_default_white_tex(gl_api)
+                default_white_texture: create_default_white_texture(gl_api)
                     .context("could not create default white tex")?,
                 textures: NoHashMap::default(),
             })
+        }
+    }
+
+    // TODO: figure out how to invoke this xd.
+    pub fn destroy(self, gl_api: &gl::Api) {
+        unsafe {
+            gl_api.delete_program(self.program);
+
+            gl_api.delete_buffer(self.vbo);
+            gl_api.delete_buffer(self.ebo);
+
+            gl_api.delete_texture(self.default_white_texture);
+            for (_, texture) in self.textures.iter() {
+                gl_api.delete_texture(*texture);
+            }
         }
     }
 
@@ -161,8 +172,8 @@ impl RendererGl {
                 2,
                 gl::FLOAT,
                 gl::FALSE,
-                size_of::<Vertex>() as gl::GLsizei,
-                offset_of!(Vertex, position) as *const c_void,
+                size_of::<sx::Vertex>() as gl::GLsizei,
+                offset_of!(sx::Vertex, position) as *const c_void,
             );
             gl_api.enable_vertex_attrib_array(self.i_tex_coord_location as gl::GLuint);
             gl_api.vertex_attrib_pointer(
@@ -170,8 +181,8 @@ impl RendererGl {
                 2,
                 gl::FLOAT,
                 gl::FALSE,
-                size_of::<Vertex>() as gl::GLsizei,
-                offset_of!(Vertex, tex_coord) as *const c_void,
+                size_of::<sx::Vertex>() as gl::GLsizei,
+                offset_of!(sx::Vertex, tex_coord) as *const c_void,
             );
             gl_api.enable_vertex_attrib_array(self.i_color_location as gl::GLuint);
             gl_api.vertex_attrib_pointer(
@@ -179,8 +190,8 @@ impl RendererGl {
                 4,
                 gl::UNSIGNED_BYTE,
                 gl::FALSE,
-                size_of::<Vertex>() as gl::GLsizei,
-                offset_of!(Vertex, color) as *const c_void,
+                size_of::<sx::Vertex>() as gl::GLsizei,
+                offset_of!(sx::Vertex, color) as *const c_void,
             );
 
             // index
@@ -188,23 +199,22 @@ impl RendererGl {
         }
     }
 
-    fn get_texture(&self, handle: TextureHandle) -> gl::Texture {
+    fn get_texture(&self, handle: sx::TextureHandle) -> gl::Texture {
         *self
             .textures
             .get(&handle)
             .unwrap_or_else(|| panic!("invalid handle: {handle:?}"))
     }
 
-    pub fn update_textures(
+    pub fn handle_texture_commands<'a>(
         &mut self,
-        texture_service: &mut TextureService,
+        texture_commands: impl Iterator<Item = sx::TextureCommand<&'a sx::TextureDesc, &'a [u8]>>,
         gl_api: &gl::Api,
     ) -> anyhow::Result<()> {
-        while let Some(command) = texture_service.pop_command() {
+        for command in texture_commands {
             match command.kind {
-                TextureCommandKind::Create => {
+                sx::TextureCommandKind::Create { desc } => {
                     assert!(!self.textures.contains_key(&command.handle));
-                    let desc = texture_service.get_desc(command.handle);
                     let texture = unsafe {
                         let texture = gl_api
                             .create_texture()
@@ -264,9 +274,8 @@ impl RendererGl {
                     };
                     self.textures.insert(command.handle, texture);
                 }
-                TextureCommandKind::Upload { region, buf_range } => {
+                sx::TextureCommandKind::Upload { region, buf } => {
                     let texture = self.get_texture(command.handle);
-                    let data = texture_service.get_upload_data(buf_range);
                     unsafe {
                         gl_api.bind_texture(gl::TEXTURE_2D, Some(texture));
                         // TODO: describe_texture_format thing
@@ -279,11 +288,11 @@ impl RendererGl {
                             region.h as gl::GLsizei,
                             gl::RED,
                             gl::UNSIGNED_BYTE,
-                            data.as_ptr() as *const c_void,
+                            buf.as_ptr() as *const c_void,
                         );
                     }
                 }
-                TextureCommandKind::Delete => {
+                sx::TextureCommandKind::Delete => {
                     let texture = self.get_texture(command.handle);
                     unsafe { gl_api.delete_texture(texture) };
                 }
@@ -294,13 +303,13 @@ impl RendererGl {
 
     pub fn render<E>(
         &mut self,
-        logical_size: Vec2,
+        logical_size: sx::Vec2,
         scale_factor: f32,
-        draw_buffer: &DrawBuffer<E>,
+        draw_buffer: &sx::DrawBuffer<E>,
         gl_api: &gl::Api,
     ) -> anyhow::Result<()>
     where
-        E: Externs<TextureHandle = <Self as Renderer>::TextureHandle>,
+        E: sx::Externs<TextureHandle = <Self as Renderer>::TextureHandle>,
     {
         let physical_size = logical_size * scale_factor;
 
@@ -324,7 +333,7 @@ impl RendererGl {
             unsafe {
                 gl_api.buffer_data(
                     gl::ARRAY_BUFFER,
-                    (draw_data.vertices.len() * size_of::<Vertex>()) as gl::GLsizeiptr,
+                    (draw_data.vertices.len() * size_of::<sx::Vertex>()) as gl::GLsizeiptr,
                     draw_data.vertices.as_ptr() as *const c_void,
                     gl::STREAM_DRAW,
                 );
@@ -335,7 +344,7 @@ impl RendererGl {
                     gl::STREAM_DRAW,
                 );
 
-                for DrawCommand {
+                for sx::DrawCommand {
                     clip_rect,
                     index_range,
                     texture,
@@ -344,7 +353,7 @@ impl RendererGl {
                     if let Some(clip_rect) = clip_rect {
                         gl_api.enable(gl::SCISSOR_TEST);
 
-                        let physical_clip_rect = clip_rect.scale(scale_factor);
+                        let physical_clip_rect = clip_rect.scale(scale_factor as f32);
                         let x = physical_clip_rect.min.x as i32;
                         let y = physical_size.y as i32 - physical_clip_rect.max.y as i32;
                         let w = physical_clip_rect.width() as i32;
@@ -356,10 +365,12 @@ impl RendererGl {
                     gl_api.bind_texture(
                         gl::TEXTURE_2D,
                         Some(texture.as_ref().map_or_else(
-                            || self.default_white_tex,
+                            || self.default_white_texture,
                             |tex_kind| match tex_kind {
-                                TextureHandleKind::Internal(handle) => self.get_texture(*handle),
-                                TextureHandleKind::External(texture) => *texture,
+                                sx::TextureHandleKind::Internal(handle) => {
+                                    self.get_texture(*handle)
+                                }
+                                sx::TextureHandleKind::External(texture) => *texture,
                             },
                         )),
                     );
