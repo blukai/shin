@@ -1,13 +1,7 @@
 use gl::Apier as _;
 use window::{Event, WindowAttrs};
 
-use example::{Context, Handler, Renderer, RendererGl, run};
-
-struct SxExterns;
-
-impl sx::Externs for SxExterns {
-    type TextureHandle = <RendererGl as Renderer>::TextureHandle;
-}
+use example::{Context, Handler, RendererGl as Renderer, run};
 
 const DEFAULT_FONT_DATA: &[u8] = include_bytes!("../fixtures/JetBrainsMono-Regular.ttf");
 
@@ -44,8 +38,8 @@ struct App {
     texture_service: sx::TextureService,
     font_service: sx::FontService,
     default_font_handle: sx::FontHandle,
-    draw_buffer: sx::DrawBuffer<SxExterns>,
-    renderer: RendererGl,
+    draw_buffer: sx::DrawBuffer<Renderer>,
+    renderer: Renderer,
     input: input::State,
 }
 
@@ -64,7 +58,7 @@ impl Handler for App {
             font_service,
             default_font_handle,
             draw_buffer: sx::DrawBuffer::default(),
-            renderer: RendererGl::new(ctx.gl_api).expect("gl renderer fucky wucky"),
+            renderer: Renderer::new(ctx.gl_api).expect("gl renderer fucky wucky"),
             input: input::State::default(),
         }
     }

@@ -6,8 +6,6 @@ use anyhow::{Context as _, anyhow};
 use gl::Apier as _;
 use nohash::NoHashMap;
 
-use super::Renderer;
-
 const SHADER_SOURCE: &str = include_str!("shader.glsl");
 
 unsafe fn create_shader(
@@ -97,6 +95,10 @@ pub struct RendererGl {
 
     default_white_texture: gl::Texture,
     textures: NoHashMap<sx::TextureHandle, gl::Texture>,
+}
+
+impl sx::Externs for RendererGl {
+    type TextureHandle = gl::Texture;
 }
 
 impl RendererGl {
@@ -309,7 +311,7 @@ impl RendererGl {
         gl_api: &gl::Api,
     ) -> anyhow::Result<()>
     where
-        E: sx::Externs<TextureHandle = <Self as Renderer>::TextureHandle>,
+        E: sx::Externs<TextureHandle = <Self as sx::Externs>::TextureHandle>,
     {
         let physical_size = logical_size * scale_factor;
 
@@ -353,7 +355,7 @@ impl RendererGl {
                     if let Some(clip_rect) = clip_rect {
                         gl_api.enable(gl::SCISSOR_TEST);
 
-                        let physical_clip_rect = clip_rect.scale(scale_factor as f32);
+                        let physical_clip_rect = clip_rect.scale(scale_factor);
                         let x = physical_clip_rect.min.x as i32;
                         let y = physical_size.y as i32 - physical_clip_rect.max.y as i32;
                         let w = physical_clip_rect.width() as i32;
@@ -391,8 +393,4 @@ impl RendererGl {
 
         Ok(())
     }
-}
-
-impl Renderer for RendererGl {
-    type TextureHandle = gl::Texture;
 }
