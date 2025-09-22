@@ -4,7 +4,7 @@ use anyhow::Context as _;
 use input::CursorShape;
 use raw_window_handle as rwh;
 
-use crate::{ClipboardDataProvider, DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent};
+use crate::{ClipboardDataProvider, DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs};
 
 pub struct WebBackend {
     attrs: WindowAttrs,
@@ -17,7 +17,7 @@ pub struct WebBackend {
 
 impl WebBackend {
     pub fn new_boxed(attrs: WindowAttrs) -> anyhow::Result<Box<Self>> {
-        let mut events = VecDeque::new();
+        let events = VecDeque::new();
 
         let document = js::GLOBAL.get("document");
         let canvas = match attrs.canvas_id.as_ref() {
@@ -50,10 +50,9 @@ impl WebBackend {
         canvas.set("width", &js::Value::from_f64(width as f64));
         canvas.set("height", &js::Value::from_f64(height as f64));
 
-        let width = canvas.get("width").as_f64();
-        let height = canvas.get("height").as_f64();
+        // TODO: do i need to check if width and height were set correctly?
 
-        // TODO: scale factor (/ pixel ratio)
+        // TODO: handle scale factor (/ pixel ratio)
 
         let boxed = Box::new(Self {
             attrs,
@@ -98,13 +97,13 @@ impl Window for WebBackend {
         unimplemented!()
     }
 
-    fn read_clipboard(&mut self, mime_type: &str, buf: &mut Vec<u8>) -> anyhow::Result<usize> {
+    fn read_clipboard(&mut self, _mime_type: &str, _buf: &mut Vec<u8>) -> anyhow::Result<usize> {
         unimplemented!()
     }
 
     fn provide_clipboard_data(
         &mut self,
-        data_provider: Box<dyn ClipboardDataProvider>,
+        _data_provider: Box<dyn ClipboardDataProvider>,
     ) -> anyhow::Result<()> {
         unimplemented!()
     }

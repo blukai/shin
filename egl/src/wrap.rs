@@ -181,9 +181,11 @@ impl fmt::Display for CreateWaylandWsiError {
     }
 }
 
-struct WaylandWsi {
+pub struct WaylandWsi {
     api: wayland::EglApi,
     wl_egl_window: *mut wayland::wl_egl_window,
+    width: u32,
+    height: u32,
 }
 
 impl WaylandWsi {
@@ -201,10 +203,19 @@ impl WaylandWsi {
             return Err(CreateWaylandWsiError::CouldNotCreateWlEglWindow);
         }
 
-        Ok(Self { api, wl_egl_window })
+        Ok(Self {
+            api,
+            wl_egl_window,
+            width,
+            height,
+        })
     }
 
-    fn resize(&self, width: u32, height: u32) {
+    pub fn size(&self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+
+    pub fn resize(&mut self, width: u32, height: u32) {
         unsafe {
             (self.api.wl_egl_window_resize)(
                 self.wl_egl_window,
@@ -214,6 +225,8 @@ impl WaylandWsi {
                 0,
             )
         };
+        self.width = width;
+        self.height = height;
     }
 }
 
@@ -223,7 +236,7 @@ impl Drop for WaylandWsi {
     }
 }
 
-enum Wsi {
+pub enum Wsi {
     Wayland(WaylandWsi),
 }
 
@@ -239,12 +252,6 @@ impl Wsi {
     fn as_native_window(&self) -> *mut c_void {
         match self {
             Self::Wayland(wayland) => wayland.wl_egl_window.cast(),
-        }
-    }
-
-    fn resize(&self, width: u32, height: u32) {
-        match self {
-            Self::Wayland(wayland) => wayland.resize(width, height),
         }
     }
 }
@@ -272,18 +279,12 @@ impl fmt::Display for CreateWindowSurfaceError {
 
 pub struct WindowSurface {
     index: u8,
-    wsi: Wsi,
+    pub wsi: Wsi,
     // TODO: would it make sense to make a SurfaceKind { Khr, Ext, Old } enum (same as Display)?
     // TODO: don't expose surface as is? but instead expose an `as_raw` method?
     pub surface: EGLSurface,
     // TODO: do i need config here?
     pub config: EGLConfig,
-}
-
-impl WindowSurface {
-    pub fn resize(&self, width: u32, height: u32) {
-        self.wsi.resize(width, height);
-    }
 }
 
 // ----
@@ -354,11 +355,11 @@ impl Connection {
         };
 
         let mut version = (0, 0);
-        if unsafe {
+        let ok = unsafe {
             this.api
                 .Initialize(*this.display, &mut version.0, &mut version.0)
-        } == FALSE
-        {
+        };
+        if ok == FALSE {
             return Err(CreateConnectionError::CouldNotInitializeDisplay(
                 this.unwrap_err(),
             ));
@@ -377,7 +378,8 @@ impl Connection {
     ) -> Result<Context, CreateContextError> {
         attribs.inspect(|attribs| assert!(attribs.contains(&(NONE as EGLint))));
 
-        if unsafe { self.api.BindAPI(api) } == FALSE {
+        let ok = unsafe { self.api.BindAPI(api) };
+        if ok == FALSE {
             return Err(CreateContextError::CouldNotBindApi(self.unwrap_err()));
         }
 
@@ -415,7 +417,7 @@ impl Connection {
     }
 
     /// NOTE: i don't care how you create your EGLConfig. EGLConfig does not need clean up.
-    pub fn create_wayland_surface(
+    pub fn create_wayland_window_surface(
         &mut self,
         config: EGLConfig,
         wl_surface: *mut wayland::wl_surface,
@@ -428,6 +430,7 @@ impl Connection {
         let wsi = Wsi::from_wayland_surface(wl_surface, width, height)
             .map_err(CreateWindowSurfaceError::CouldNotCreateWaylandWsi)?;
 
+        // TODO: make this into a separate function (create_surface?)?
         let surface = match self.display {
             Display::Khr(dpy) => unsafe {
                 self.api.CreatePlatformWindowSurface(

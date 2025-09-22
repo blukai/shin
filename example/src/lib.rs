@@ -1,5 +1,5 @@
-mod renderer_gl;
-mod runner;
+mod glcontext;
+mod glrenderer;
 
-pub use renderer_gl::*;
-pub use runner::*;
+pub use glcontext::*;
+pub use glrenderer::*;

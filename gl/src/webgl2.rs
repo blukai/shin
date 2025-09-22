@@ -13,11 +13,11 @@ pub struct Api {
 }
 
 impl Api {
-    pub fn from_selector(selector: &str) -> anyhow::Result<Self> {
+    pub fn from_canvas_selector(canvas_selector: &str) -> anyhow::Result<Self> {
         let canvas = js::GLOBAL
             .get("document")
             .get("querySelector")
-            .call(&[js::Value::from_str(selector)])
+            .call(&[js::Value::from_str(canvas_selector)])
             .context("could not find canvas")?;
         let context = canvas
             .get("getContext")

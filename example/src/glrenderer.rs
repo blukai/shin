@@ -82,7 +82,7 @@ unsafe fn create_default_white_texture(gl_api: &gl::Api) -> anyhow::Result<gl::T
 }
 
 #[derive(Debug)]
-pub struct RendererGl {
+pub struct GlRenderer {
     program: gl::Program,
 
     i_position_location: gl::GLint,
@@ -97,11 +97,11 @@ pub struct RendererGl {
     textures: NoHashMap<sx::TextureHandle, gl::Texture>,
 }
 
-impl sx::Externs for RendererGl {
+impl sx::Externs for GlRenderer {
     type TextureHandle = gl::Texture;
 }
 
-impl RendererGl {
+impl GlRenderer {
     pub fn new(gl_api: &gl::Api) -> anyhow::Result<Self> {
         unsafe {
             let program = create_program(
