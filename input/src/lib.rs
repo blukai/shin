@@ -124,17 +124,32 @@ pub struct PointerEvent {
     pub kind: PointerEventKind,
 }
 
+// https://developer.mozilla.org/en-US/docs/Web/CSS/cursor
+// https://github.com/manu-mannattil/adwaita-cursors/blob/9e9929fa544985623574df3e214ec03299baa251/Makefile
+// $ find /usr/share/icons/Adwaita/cursors -type f
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CursorShape {
     Default,
     Pointer,
-    Text,
     Crosshair,
+    Text,
     Move,
-    NwResize,
+    Grab,
+    Grabbing,
+    ColResize,
+    EResize,
+    EwResize,
+    NResize,
     NeResize,
+    NeswResize,
+    NsResize,
+    NwResize,
+    NwseResize,
+    RowResize,
+    SResize,
     SeResize,
     SwResize,
+    WResize,
 }
 
 // keyboard

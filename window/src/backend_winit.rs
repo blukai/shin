@@ -56,10 +56,22 @@ fn map_cursor_shape(cursor_shape: CursorShape) -> winit::window::Cursor {
         CursorShape::Text => CursorIcon::Text,
         CursorShape::Crosshair => CursorIcon::Crosshair,
         CursorShape::Move => CursorIcon::Move,
-        CursorShape::NwResize => CursorIcon::NwResize,
+        CursorShape::Grab => CursorIcon::Grab,
+        CursorShape::Grabbing => CursorIcon::Grabbing,
+        CursorShape::ColResize => CursorIcon::ColResize,
+        CursorShape::EResize => CursorIcon::EResize,
+        CursorShape::EwResize => CursorIcon::EwResize,
+        CursorShape::NResize => CursorIcon::NResize,
         CursorShape::NeResize => CursorIcon::NeResize,
+        CursorShape::NeswResize => CursorIcon::NeswResize,
+        CursorShape::NsResize => CursorIcon::NsResize,
+        CursorShape::NwResize => CursorIcon::NwResize,
+        CursorShape::NwseResize => CursorIcon::NwseResize,
+        CursorShape::RowResize => CursorIcon::RowResize,
+        CursorShape::SResize => CursorIcon::SResize,
         CursorShape::SeResize => CursorIcon::SeResize,
         CursorShape::SwResize => CursorIcon::SwResize,
+        CursorShape::WResize => CursorIcon::WResize,
     })
 }
 
