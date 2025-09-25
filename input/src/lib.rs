@@ -552,17 +552,16 @@ where
 
 #[derive(Debug, Default)]
 pub struct PointerState {
-    pub position: (f64, f64),
+    pub position: Option<(f64, f64)>,
     // NOTE: prev_position is needed to compute position_delta.
-    // a single iteration (of an event loop) may accumulate multiple move events thus to compute
-    // correct deltas we need to diff against prev frame and not against prev value.
-    prev_position: (f64, f64),
-    // TODO: how to handle position_delta on the very first frame? new position minus zero position
-    // will yield a weird result. do i care?
-    pub position_delta: (f64, f64),
+    //   a single iteration (of an event loop) may accumulate multiple move events thus to compute
+    //   correct deltas we need to diff against prev frame and not against prev value.
+    prev_position: Option<(f64, f64)>,
+    pub position_delta: Option<(f64, f64)>,
 
     // NOTE: scroll_delta is a accumulator that is being reset each iteration.
-    pub scroll_delta: (f64, f64),
+    //   accumulator because multiple scroll events may be received per iteration(/frame).
+    pub scroll_delta: Option<(f64, f64)>,
 
     pub buttons: StateTracker<Button>,
     pub press_origins: NoHashMap<Button, (f64, f64)>,
@@ -572,9 +571,9 @@ impl PointerState {
     #[inline]
     pub fn reset_deltas(&mut self) {
         self.prev_position = self.position;
-        self.position_delta = (0.0, 0.0);
+        self.position_delta = None;
 
-        self.scroll_delta = (0.0, 0.0);
+        self.scroll_delta = None;
     }
 
     #[inline]
@@ -592,20 +591,32 @@ impl PointerState {
                 position: Some(position),
             }
             | Move { position } => {
-                self.position = position;
-                self.position_delta.0 = self.position.0 - self.prev_position.0;
-                self.position_delta.1 = self.position.1 - self.prev_position.1;
+                self.position = Some(position);
+                if let Some(prev) = self.prev_position {
+                    let delta = (position.0 - prev.0, position.1 - prev.1);
+                    if delta != (0.0, 0.0) {
+                        self.position_delta = Some(delta);
+                    }
+                }
+            }
+            Leave => {
+                // TODO: would it make sense to clear/reset position and delta values on pointer
+                // leave?
             }
             Scroll { delta } => {
-                self.scroll_delta.0 += delta.0;
-                self.scroll_delta.1 += delta.1;
+                let acc = self.scroll_delta.get_or_insert((0.0, 0.0));
+                acc.0 += delta.0;
+                acc.1 += delta.1;
             }
             Button {
                 state: ButtonState::Pressed,
                 button,
             } => {
                 self.buttons.press(button, false);
-                self.press_origins.insert(button, self.position);
+                let position = self
+                    .position
+                    .expect("Enter or Move must have occured before Button");
+                self.press_origins.insert(button, position);
             }
             Button {
                 state: ButtonState::Released,
