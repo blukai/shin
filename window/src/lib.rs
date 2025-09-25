@@ -25,6 +25,11 @@ pub struct WindowAttrs {
     pub canvas_id: Option<Box<str>>,
     /// if not specified - [DEFAULT_LOGICAL_SIZE] will be used.
     pub logical_size: Option<(u32, u32)>,
+    // TODO: WindowAttrs' resizable must probably not be enabled on wasm target
+    //
+    /// resizable is weird.
+    ///   on wayland in a tiling wm if value is `false` window will spawn floating,
+    ///   but if `true` - it'll spawn as another tile.
     pub resizable: bool,
 }
 

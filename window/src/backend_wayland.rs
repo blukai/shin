@@ -780,7 +780,7 @@ unsafe extern "C" fn handle_xdg_toplevel_configure(
     // window dimension.
     let logical_size = (width > 0 || height > 0)
         .then_some((width as u32, height as u32))
-        .or(this.logical_size)
+        .or(this.attrs.logical_size)
         .unwrap_or(DEFAULT_LOGICAL_SIZE);
     this.maybe_resize(Some(logical_size), None);
 }

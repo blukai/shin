@@ -132,7 +132,8 @@ impl Context {
         let default_font_handle = font_service
             .register_font_slice(DEFAULT_FONT_DATA)
             .context("default font is invalid")?;
-        let renderer = GlRenderer::new(&gl_context.api).context("could not create gl renderer")?;
+        let gl_renderer =
+            GlRenderer::new(&gl_context.api).context("could not create gl renderer")?;
 
         Ok(Self {
             window,
@@ -144,7 +145,7 @@ impl Context {
             font_service,
             default_font_handle,
             draw_buffer: sx::DrawBuffer::default(),
-            gl_renderer: renderer,
+            gl_renderer,
         })
     }
 
