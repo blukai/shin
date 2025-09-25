@@ -1,7 +1,5 @@
 use std::ops;
 
-// TODO: introduce as_vec2 method for F64Vec2 and U32Vec2.
-
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct Vec2 {
     pub x: f32,
@@ -111,20 +109,6 @@ impl From<&(f32, f32)> for Vec2 {
     }
 }
 
-impl From<F64Vec2> for Vec2 {
-    #[inline]
-    fn from(value: F64Vec2) -> Self {
-        Self::new(value.x as f32, value.y as f32)
-    }
-}
-
-impl From<U32Vec2> for Vec2 {
-    #[inline]
-    fn from(value: U32Vec2) -> Self {
-        Self::new(value.x as f32, value.y as f32)
-    }
-}
-
 impl Vec2 {
     pub const ZERO: Self = Self::splat(0.0);
 
@@ -203,6 +187,9 @@ impl Vec2 {
 
 // ----
 
+// NOTE: F64Vec2 and U32Vec2 are sort of transient structs
+//   i don't wnat to implement From<(f64, f64)> etc. for Vec2, i don't wnat things to be implicit.
+
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct F64Vec2 {
     pub x: f64,
@@ -227,6 +214,11 @@ impl F64Vec2 {
     #[inline]
     pub const fn new(x: f64, y: f64) -> Self {
         Self { x, y }
+    }
+
+    #[inline]
+    pub const fn as_vec2(&self) -> Vec2 {
+        Vec2::new(self.x as f32, self.y as f32)
     }
 }
 
@@ -254,6 +246,11 @@ impl U32Vec2 {
     #[inline]
     pub const fn new(x: u32, y: u32) -> Self {
         Self { x, y }
+    }
+
+    #[inline]
+    pub const fn as_vec2(&self) -> Vec2 {
+        Vec2::new(self.x as f32, self.y as f32)
     }
 }
 

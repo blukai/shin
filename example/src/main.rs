@@ -172,7 +172,7 @@ impl Context {
             .context("window handle is unavailable")?
             .as_raw();
 
-        let logical_size = sx::Vec2::from(sx::U32Vec2::from(self.window.logical_size()));
+        let logical_size = sx::U32Vec2::from(self.window.logical_size()).as_vec2();
         let scale_factor = self.window.scale_factor() as f32;
         let physical_size = logical_size * scale_factor;
 
