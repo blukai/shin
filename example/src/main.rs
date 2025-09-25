@@ -71,10 +71,7 @@ fn draw_text<E: sx::Externs>(
                 .translate(sx::Vec2::new(x_offset, position.y + font_ascent)),
             sx::Fill::new(
                 fg,
-                sx::FillTexture {
-                    texture: sx::TextureHandleKind::Internal(glyph.texture_handle()),
-                    coords: glyph.texture_coords(),
-                },
+                sx::FillTexture::new_internal(glyph.texture_handle(), glyph.texture_coords()),
             ),
         ));
         x_offset += glyph_advance_width;

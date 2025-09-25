@@ -3,7 +3,7 @@ use std::{array, mem};
 
 use scopeguard::ScopeGuard;
 
-use crate::{Externs, Rect, TextureHandleKind, Vec2};
+use crate::{Externs, Rect, TextureHandle, TextureHandleKind, Vec2};
 
 // TODO: consider offloading vertex generation and stuff for the gpu (or maybe for software
 // renderer?) to the renderer. accumulate shapes, not verticies.
@@ -55,14 +55,31 @@ impl Rgba {
     pub const fn from_u32(value: u32) -> Self {
         Self::from_bytes(u32::to_be_bytes(value))
     }
+
+    pub const fn with_a(mut self, a: u8) -> Self {
+        self.a = a;
+        self
+    }
 }
 
-// TODO: FillTexture needs constructors.
-//   new, new_with_internal, new_with_external?
 #[derive(Debug, Clone)]
 pub struct FillTexture<E: Externs> {
     pub texture: TextureHandleKind<E>,
     pub coords: Rect,
+}
+
+impl<E: Externs> FillTexture<E> {
+    pub fn new(texture: TextureHandleKind<E>, coords: Rect) -> Self {
+        Self { texture, coords }
+    }
+
+    pub fn new_internal(texture: TextureHandle, coords: Rect) -> Self {
+        Self::new(TextureHandleKind::Internal(texture), coords)
+    }
+
+    pub fn new_external(texture: E::TextureHandle, coords: Rect) -> Self {
+        Self::new(TextureHandleKind::External(texture), coords)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -94,15 +111,27 @@ pub enum StrokeAlignment {
     Center,
 }
 
-// TODO: Stroke needs constructors
-//   i feel the inconvenience of having to specify alignment all the time considering that in
-//   majority of cases alignment is ::Center.
-//   but what should the constructor be called that defailts alignment to ::Center? idk.
 #[derive(Debug, Clone)]
 pub struct Stroke {
     pub width: f32,
     pub color: Rgba,
     pub alignment: StrokeAlignment,
+}
+
+impl Stroke {
+    // NOTE: in majority of cases alignment is `Center`.
+    pub fn new(width: f32, color: Rgba) -> Self {
+        Self {
+            width,
+            color,
+            alignment: StrokeAlignment::Center,
+        }
+    }
+
+    pub fn with_alignment(mut self, alignment: StrokeAlignment) -> Self {
+        self.alignment = alignment;
+        self
+    }
 }
 
 #[derive(Debug)]

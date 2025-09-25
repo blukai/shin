@@ -131,8 +131,8 @@ pub struct PointerEvent {
 pub enum CursorShape {
     Default,
     Pointer,
-    Crosshair,
     Text,
+    Crosshair,
     Move,
     Grab,
     Grabbing,
