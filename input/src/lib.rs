@@ -568,6 +568,7 @@ pub struct PointerState {
 }
 
 impl PointerState {
+    /// must be called at the beginning of the frame.
     #[inline]
     pub fn reset_deltas(&mut self) {
         self.prev_position = self.position;
@@ -600,8 +601,8 @@ impl PointerState {
                 }
             }
             Leave => {
-                // TODO: would it make sense to clear/reset position and delta values on pointer
-                // leave?
+                self.reset_deltas();
+                self.position = None;
             }
             Scroll { delta } => {
                 let acc = self.scroll_delta.get_or_insert((0.0, 0.0));
