@@ -60,6 +60,12 @@ impl Rgba {
         self.a = a;
         self
     }
+
+    pub const fn with_a_f32(mut self, a: f32) -> Self {
+        assert!(a >= 0.0 && a <= 1.0);
+        self.a = (a * u8::MAX as f32) as u8;
+        self
+    }
 }
 
 #[derive(Debug, Clone)]
