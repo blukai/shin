@@ -293,9 +293,15 @@ impl Rect {
     }
 
     pub fn contains(&self, point: Vec2) -> bool {
-        let x = point.x >= self.min.x && point.x <= self.max.x;
-        let y = point.y >= self.min.y && point.y <= self.max.y;
-        x && y
+        let x_in_bounds = (point.x >= self.min.x) & (point.x <= self.max.x);
+        let y_in_bounds = (point.y >= self.min.y) & (point.y <= self.max.y);
+        x_in_bounds & y_in_bounds
+    }
+
+    pub fn intersects(&self, other: &Rect) -> bool {
+        let x_overlap = (self.min.x < other.max.x) & (self.max.x > other.min.x);
+        let y_overlap = (self.min.y < other.max.y) & (self.max.y > other.min.y);
+        x_overlap & y_overlap
     }
 
     pub fn translate(self, delta: Vec2) -> Self {
@@ -368,4 +374,33 @@ impl Rect {
         self.max = Vec2::new(self.max.x, bottom_left.y);
         self
     }
+}
+
+#[test]
+fn test_rect_contains() {
+    let rect = Rect::new(Vec2::new(0.0, 0.0), Vec2::new(2.0, 2.0));
+
+    let inside = Vec2::new(1.0, 1.0);
+    assert!(rect.contains(inside));
+
+    // NOTE: contains is inclusive
+    let on_edge = Vec2::new(2.0, 2.0);
+    assert!(rect.contains(on_edge));
+
+    let outside = Vec2::new(3.0, 3.0);
+    assert!(!rect.contains(outside));
+}
+
+#[test]
+fn test_rect_intersects() {
+    let rect = Rect::new(Vec2::new(0.0, 0.0), Vec2::new(2.0, 2.0));
+
+    let overlapping = Rect::new(Vec2::new(1.0, 1.0), Vec2::new(3.0, 3.0));
+    assert!(rect.intersects(&overlapping));
+
+    let touching = Rect::new(Vec2::new(2.0, 0.0), Vec2::new(4.0, 2.0));
+    assert!(!rect.intersects(&touching));
+
+    let non_overlapping = Rect::new(Vec2::new(3.0, 3.0), Vec2::new(4.0, 4.0));
+    assert!(!rect.intersects(&non_overlapping));
 }
