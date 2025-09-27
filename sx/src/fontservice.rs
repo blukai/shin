@@ -170,13 +170,18 @@ impl<'a> GlyphRef<'a> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FontHandle {
-    idx: u32,
+    // you don't need more then 255 fonts do do?
+    idx: u8,
 }
 
 // NOTE: to many fidgeting is needed to hash floats. this is easier.
 #[inline(always)]
 fn make_font_instance_key(font_handle: FontHandle, pt_size: f32, scale_factor: f32) -> u64 {
-    (font_handle.idx as u64) << 32 | ((pt_size * scale_factor).to_bits() as u64)
+    debug_assert!(pt_size <= 65500.0);
+    debug_assert!(scale_factor <= 65500.0);
+    ((font_handle.idx as u64) << 32)
+        | ((pt_size.to_bits() as u64 as u64) << 16)
+        | (scale_factor.to_bits() as u64 as u64)
 }
 
 #[derive(Debug)]
@@ -352,13 +357,15 @@ impl FontService {
     pub fn register_font_slice(&mut self, font_data: &'static [u8]) -> anyhow::Result<FontHandle> {
         let idx = self.fonts.len();
         self.fonts.push(FontArc::try_from_slice(font_data)?);
-        Ok(FontHandle { idx: idx as u32 })
+        debug_assert!(idx <= u8::MAX as usize);
+        Ok(FontHandle { idx: idx as u8 })
     }
 
     pub fn register_font_vec(&mut self, font_data: Vec<u8>) -> anyhow::Result<FontHandle> {
         let idx = self.fonts.len();
         self.fonts.push(FontArc::try_from_vec(font_data)?);
-        Ok(FontHandle { idx: idx as u32 })
+        debug_assert!(idx <= u8::MAX as usize);
+        Ok(FontHandle { idx: idx as u8 })
     }
 
     pub fn get_or_create_font_instance(
