@@ -1,6 +1,35 @@
 use std::ops;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct BVec2 {
+    pub x: bool,
+    pub y: bool,
+}
+
+impl BVec2 {
+    #[inline]
+    pub const fn new(x: bool, y: bool) -> Self {
+        Self { x, y }
+    }
+
+    #[inline]
+    pub const fn splat(v: bool) -> Self {
+        Self::new(v, v)
+    }
+
+    #[inline]
+    pub fn any(self) -> bool {
+        self.x || self.y
+    }
+
+    #[inline]
+    pub fn all(self) -> bool {
+        self.x && self.y
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct Vec2 {
     pub x: f32,
     pub y: f32,
@@ -182,6 +211,28 @@ impl Vec2 {
     pub const fn clamp(self, min: Self, max: Self) -> Self {
         assert!(min.x <= max.x && min.y <= max.y);
         self.max(min).min(max)
+    }
+
+    // ----
+
+    #[inline]
+    pub fn lt(self, rhs: Self) -> BVec2 {
+        BVec2::new(self.x.lt(&rhs.x), self.y.lt(&rhs.y))
+    }
+
+    #[inline]
+    pub fn le(self, rhs: Self) -> BVec2 {
+        BVec2::new(self.x.le(&rhs.x), self.y.le(&rhs.y))
+    }
+
+    #[inline]
+    pub fn gt(self, rhs: Self) -> BVec2 {
+        BVec2::new(self.x.gt(&rhs.x), self.y.gt(&rhs.y))
+    }
+
+    #[inline]
+    pub fn ge(self, rhs: Self) -> BVec2 {
+        BVec2::new(self.x.ge(&rhs.x), self.y.ge(&rhs.y))
     }
 }
 
