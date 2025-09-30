@@ -154,13 +154,13 @@ impl Vec2 {
     // ----
 
     #[inline]
-    pub const fn with_x(mut self, x: f32) -> Self {
+    pub fn with_x(mut self, x: f32) -> Self {
         self.x = x;
         self
     }
 
     #[inline]
-    pub const fn with_y(mut self, y: f32) -> Self {
+    pub fn with_y(mut self, y: f32) -> Self {
         self.y = y;
         self
     }
@@ -168,7 +168,7 @@ impl Vec2 {
     // ----
 
     #[inline]
-    pub const fn dot(self, rhs: Self) -> f32 {
+    pub fn dot(self, rhs: Self) -> f32 {
         (self.x * rhs.x) + (self.y * rhs.y)
     }
 
@@ -193,27 +193,30 @@ impl Vec2 {
     }
 
     #[inline]
-    pub const fn perp(self) -> Self {
+    pub fn perp(self) -> Self {
         Self::new(-self.y, self.x)
     }
 
     #[inline]
-    pub const fn min(self, rhs: Self) -> Self {
+    pub fn min(self, rhs: Self) -> Self {
         Self::new(self.x.min(rhs.x), self.y.min(rhs.y))
     }
 
     #[inline]
-    pub const fn max(self, rhs: Self) -> Self {
+    pub fn max(self, rhs: Self) -> Self {
         Self::new(self.x.max(rhs.x), self.y.max(rhs.y))
     }
 
     #[inline]
-    pub const fn clamp(self, min: Self, max: Self) -> Self {
+    pub fn clamp(self, min: Self, max: Self) -> Self {
         assert!(min.x <= max.x && min.y <= max.y);
         self.max(min).min(max)
     }
 
-    // ----
+    #[inline]
+    pub fn abs(self) -> Self {
+        Self::new(self.x.abs(), self.y.abs())
+    }
 
     #[inline]
     pub fn lt(self, rhs: Self) -> BVec2 {
@@ -268,7 +271,7 @@ impl F64Vec2 {
     }
 
     #[inline]
-    pub const fn as_vec2(&self) -> Vec2 {
+    pub fn as_vec2(&self) -> Vec2 {
         Vec2::new(self.x as f32, self.y as f32)
     }
 }
@@ -300,7 +303,7 @@ impl U32Vec2 {
     }
 
     #[inline]
-    pub const fn as_vec2(&self) -> Vec2 {
+    pub fn as_vec2(&self) -> Vec2 {
         Vec2::new(self.x as f32, self.y as f32)
     }
 }
@@ -335,6 +338,7 @@ impl Rect {
         self.max.y - self.min.y
     }
 
+    // TODO: consider renaming this to `dimensions`.
     pub fn size(&self) -> Vec2 {
         self.max - self.min
     }
