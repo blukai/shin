@@ -188,39 +188,6 @@ impl LineShape {
     }
 }
 
-// NOTE: StagingDrawBufferCommand is what it is and not something like just Shape because the idea
-// is that it might need to support clip scopes and maybe layers at some point - meaning it might
-// be a good idea to design it with the same potential api as DrawBuffer.
-#[derive(Debug)]
-enum StagingDrawBufferCommand<E: Externs> {
-    PushRect(RectShape<E>),
-    PushLine(LineShape),
-}
-
-#[derive(Debug)]
-pub struct StagingDrawBuffer<E: Externs> {
-    commands: Vec<StagingDrawBufferCommand<E>>,
-}
-
-// @BlindDerive
-impl<E: Externs> Default for StagingDrawBuffer<E> {
-    fn default() -> Self {
-        Self {
-            commands: Vec::default(),
-        }
-    }
-}
-
-impl<E: Externs> StagingDrawBuffer<E> {
-    pub fn push_line(&mut self, line: LineShape) {
-        self.commands.push(StagingDrawBufferCommand::PushLine(line));
-    }
-
-    pub fn push_rect(&mut self, rect: RectShape<E>) {
-        self.commands.push(StagingDrawBufferCommand::PushRect(rect));
-    }
-}
-
 /// computes the vertex position offset away the from center caused by line width.
 fn compute_line_width_offset(a: Vec2, b: Vec2, width: f32) -> Vec2 {
     // direction defines how the line is oriented in space. it allows to know
@@ -270,6 +237,7 @@ pub struct DrawCommand<E: Externs> {
 #[derive(Debug)]
 pub struct DrawData<E: Externs> {
     pub vertices: Vec<Vertex>,
+    bounds: Rect,
     pub indices: Vec<u32>,
     pending_indices: usize,
     pub commands: Vec<DrawCommand<E>>,
@@ -280,6 +248,7 @@ impl<E: Externs> Default for DrawData<E> {
     fn default() -> Self {
         Self {
             vertices: Vec::new(),
+            bounds: Rect::new(Vec2::ZERO, Vec2::ZERO),
             indices: Vec::new(),
             pending_indices: 0,
             commands: Vec::new(),
@@ -289,13 +258,16 @@ impl<E: Externs> Default for DrawData<E> {
 
 impl<E: Externs> DrawData<E> {
     fn clear(&mut self) {
-        assert_eq!(self.pending_indices, 0);
         self.vertices.clear();
+        self.bounds = Rect::new(Vec2::ZERO, Vec2::ZERO);
         self.indices.clear();
+        assert_eq!(self.pending_indices, 0);
         self.commands.clear();
     }
 
     fn push_vertex(&mut self, vertex: Vertex) {
+        self.bounds.min = self.bounds.min.min(vertex.position);
+        self.bounds.max = self.bounds.max.max(vertex.position);
         self.vertices.push(vertex);
     }
 
@@ -338,7 +310,7 @@ pub struct DrawBuffer<E: Externs> {
     clip_rect: Option<Rect>,
     layer: DrawLayer,
     layers: [DrawData<E>; DrawLayer::MAX],
-    splits: Vec<StagingDrawBuffer<E>>,
+    stagers: Vec<Self>,
 }
 
 // @BlindDerive
@@ -348,7 +320,7 @@ impl<E: Externs> Default for DrawBuffer<E> {
             clip_rect: None,
             layer: DrawLayer::default(),
             layers: array::from_fn(|_| DrawData::default()),
-            splits: Vec::default(),
+            stagers: Vec::default(),
         }
     }
 }
@@ -368,13 +340,7 @@ impl<E: Externs> DrawBuffer<E> {
         ScopeGuard::new_with_data(self, |this| this.clip_rect = None)
     }
 
-    // TODO: transformation scope
-    //   similar to clip scope, but with staging buffers probably;
-    //   this will allow to measure things while drawing and then if it's text for example - center
-    //   it without having to re-iterate each and every character.
-
-    // allows to create absolute layers.
-    pub fn absolute_layer_scope<'a>(
+    pub fn layer_scope<'a>(
         &'a mut self,
         layer: DrawLayer,
     ) -> ScopeGuard<&'a mut Self, impl FnOnce(&'a mut Self)> {
@@ -383,30 +349,33 @@ impl<E: Externs> DrawBuffer<E> {
         ScopeGuard::new_with_data(self, move |this| this.layer = layer_backup)
     }
 
-    // TODO: is the name `relative_layers_scope` good for creating staging draw buffers?
-    //
-    // allows to create relative layers.
-    pub fn relative_layers_scope<'a, const N: usize>(
+    pub fn stage_scope<'a, const N: usize>(
         &'a mut self,
-    ) -> ScopeGuard<[StagingDrawBuffer<E>; N], impl FnOnce([StagingDrawBuffer<E>; N])> {
-        let splits = array::from_fn::<_, N, _>(|_| {
-            let split = if self.splits.len() > 1 {
-                self.splits.remove(self.splits.len() - 1)
-            } else {
-                StagingDrawBuffer::default()
-            };
-            assert!(split.commands.is_empty());
-            split
+    ) -> ScopeGuard<[Self; N], impl FnOnce([Self; N])> {
+        let stagers = array::from_fn::<_, N, _>(|_| {
+            let mut ret = self.stagers.pop().unwrap_or_else(|| Self::default());
+            ret.clip_rect = self.clip_rect;
+            ret.layer = self.layer;
+            ret
         });
-        ScopeGuard::new_with_data(splits, |splits| {
-            for mut split in splits.into_iter() {
-                for command in split.commands.drain(..) {
-                    match command {
-                        StagingDrawBufferCommand::PushRect(rect) => self.push_rect(rect),
-                        StagingDrawBufferCommand::PushLine(line) => self.push_line(line),
-                    }
+        ScopeGuard::new_with_data(stagers, |stagers| {
+            for mut stager in stagers.into_iter() {
+                for (src, dst) in stager.layers.iter_mut().zip(self.layers.iter_mut()) {
+                    let base_vertex = dst.vertices.len() as u32;
+                    let base_index = dst.indices.len() as u32;
+                    dst.vertices.extend(src.vertices.drain(..));
+                    dst.indices
+                        .extend(src.indices.drain(..).map(|it| it + base_vertex));
+                    assert_eq!(src.pending_indices, 0);
+                    dst.commands
+                        .extend(src.commands.drain(..).map(|it| DrawCommand {
+                            index_range: it.index_range.start + base_index
+                                ..it.index_range.end + base_index,
+                            ..it
+                        }));
+                    src.clear();
                 }
-                self.splits.push(split);
+                self.stagers.push(stager);
             }
         })
     }
@@ -416,8 +385,17 @@ impl<E: Externs> DrawBuffer<E> {
     }
 
     #[inline(always)]
+    fn draw_data(&self) -> &DrawData<E> {
+        &self.layers[self.layer as usize]
+    }
+
+    #[inline(always)]
     fn draw_data_mut(&mut self) -> &mut DrawData<E> {
         &mut self.layers[self.layer as usize]
+    }
+
+    pub fn bounds(&self) -> Rect {
+        self.draw_data().bounds
     }
 
     pub fn push_line(&mut self, line: LineShape) {
@@ -578,5 +556,20 @@ impl<E: Externs> DrawBuffer<E> {
         if let Some(stroke) = rect.stroke {
             self.push_rect_stroked(rect.coords, stroke);
         }
+    }
+
+    // TODO: would it make any sense to offload transforms to gpu
+    //   apply this translation in vertex shader?
+    //   i imagine this would be very similar to what's happening with clip rect except we'll need
+    //   to set a uniform. should be easy.
+    //
+    // TODO: maybe clarity what this function exactly does
+    //   applies translation to all vertices on the current layer.
+    //   it can't really be the same as clip_scope, etc because for what i currently want to use
+    //   translations i know deltas only after i push shapes into draw buffer.
+    pub fn translate(&mut self, delta: Vec2) {
+        self.draw_data_mut().vertices.iter_mut().for_each(|vertex| {
+            vertex.position += delta;
+        });
     }
 }
