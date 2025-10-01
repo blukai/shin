@@ -1,6 +1,6 @@
-use std::hash::Hash;
+use std::hash::{BuildHasherDefault, Hash};
 
-use ab_glyph::{Font as _, FontArc, PxScale, ScaleFont as _};
+use ab_glyph::{Font as _, FontArc, ScaleFont as _};
 use nohash::NoHashMap;
 
 use crate::{
@@ -12,6 +12,29 @@ const TEXTURE_WIDTH: u32 = 256;
 const TEXTURE_HEIGHT: u32 = 256;
 const TEXTURE_GAP: u32 = 1;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FontHandle {
+    idx: u32,
+}
+
+// NOTE: FontDesc cannot be used as a hash map key because f32 does not implement Eq.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FontDesc {
+    pub handle: FontHandle,
+    pub pt_size: f32,
+    pub scale_factor: f32,
+}
+
+// NOTE: to many fidgeting is needed to hash floats. this is easier.
+#[inline(always)]
+fn pack_font_desc(desc: &FontDesc) -> u64 {
+    debug_assert!(desc.pt_size <= 65500.0);
+    debug_assert!(desc.scale_factor <= 65500.0);
+    ((desc.handle.idx as u64) << 32)
+        | ((desc.pt_size.to_bits() as u64 as u64) << 16)
+        | (desc.scale_factor.to_bits() as u64 as u64)
+}
+
 #[derive(Debug)]
 pub struct TexturePage {
     pub texture_packer: TexturePacker,
@@ -21,8 +44,7 @@ pub struct TexturePage {
 #[derive(Debug)]
 struct Glyph {
     texture_page_idx: usize,
-    #[allow(dead_code, reason = "useful for debugging")]
-    texture_packer_entry_idx: usize,
+    _texture_packer_entry_idx: usize,
     texture_coords: Rect,
     bounds: Rect,
     advance_width: f32,
@@ -30,8 +52,8 @@ struct Glyph {
 
 fn rasterize_glyph(
     ch: char,
-    font: FontArc,
-    px_scale: PxScale,
+    font: &FontArc,
+    px_scale: ab_glyph::PxScale,
     scale_factor: f32,
     texture_pages: &mut Vec<TexturePage>,
     texture_service: &mut TextureService,
@@ -133,7 +155,7 @@ fn rasterize_glyph(
 
     Glyph {
         texture_page_idx,
-        texture_packer_entry_idx,
+        _texture_packer_entry_idx: texture_packer_entry_idx,
         texture_coords,
         bounds,
         advance_width,
@@ -148,7 +170,7 @@ pub struct GlyphRef<'a> {
 
 impl<'a> GlyphRef<'a> {
     #[inline]
-    pub fn bounding_rect(&self) -> Rect {
+    pub fn bounds(&self) -> Rect {
         self.glyph.bounds
     }
 
@@ -168,22 +190,6 @@ impl<'a> GlyphRef<'a> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FontHandle {
-    // you don't need more then 255 fonts do do?
-    idx: u8,
-}
-
-// NOTE: to many fidgeting is needed to hash floats. this is easier.
-#[inline(always)]
-fn make_font_instance_key(font_handle: FontHandle, pt_size: f32, scale_factor: f32) -> u64 {
-    debug_assert!(pt_size <= 65500.0);
-    debug_assert!(scale_factor <= 65500.0);
-    ((font_handle.idx as u64) << 32)
-        | ((pt_size.to_bits() as u64 as u64) << 16)
-        | (scale_factor.to_bits() as u64 as u64)
-}
-
 #[derive(Debug)]
 pub struct FontInstance {
     // NOTE: TexturePacker's partitioning is theoretically fine for same-sized rects.
@@ -195,7 +201,7 @@ pub struct FontInstance {
     texture_pages: Vec<TexturePage>,
     glyphs: NoHashMap<u32, Glyph>,
 
-    px_scale: PxScale,
+    px_scale: ab_glyph::PxScale,
     scale_factor: f32,
 
     height: f32,
@@ -206,27 +212,32 @@ pub struct FontInstance {
     // NOTE: touched_this_iteration is a flag that determines whether this font instance needs to
     // be evicted or not.
     in_use: bool,
+    font: FontArc,
 }
 
 impl FontInstance {
     fn new(font: FontArc, pt_size: f32, scale_factor: f32) -> Self {
-        // NOTE: see https://github.com/alexheretic/ab-glyph/issues/14 for details.
+        // NOTE: ab_glyph is weird, for more infor on what's going on with pt_size and scale_factor
+        // see https://github.com/alexheretic/ab-glyph/issues/14.
+
         let font_scale = font
             .units_per_em()
             .map(|units_per_em| font.height_unscaled() / units_per_em)
             .unwrap_or(1.0);
-        let px_scale = PxScale::from(pt_size * scale_factor * font_scale);
+        let px_scale = ab_glyph::PxScale::from(pt_size * scale_factor * font_scale);
         let scaled = font.as_scaled(px_scale);
 
         let ascent = scaled.ascent() / scale_factor;
         let descent = scaled.descent() / scale_factor;
         let line_gap = scaled.line_gap() / scale_factor;
+
         // see https://developer.mozilla.org/en-US/docs/Web/CSS/length#ch
         let typical_advance_width = scaled.h_advance(font.glyph_id('0')) / scale_factor;
 
         Self {
             texture_pages: Vec::default(),
-            glyphs: NoHashMap::default(),
+            // NOTE: 128 is num of ascii code points.
+            glyphs: NoHashMap::with_capacity_and_hasher(128, BuildHasherDefault::default()),
 
             px_scale,
             scale_factor,
@@ -236,59 +247,46 @@ impl FontInstance {
             typical_advance_width,
 
             in_use: false,
+            font,
         }
     }
 
-    pub fn iter_texture_pages(&self) -> impl Iterator<Item = &TexturePage> {
-        self.texture_pages.iter()
-    }
-}
-
-// NOTE: font instance != font. a single font may parent multiple font instances.
-#[derive(Debug)]
-pub struct FontInstanceRefMut<'a> {
-    font: FontArc,
-    font_instance: &'a mut FontInstance,
-}
-
-impl<'a> FontInstanceRefMut<'a> {
     #[inline]
     pub fn height(&self) -> f32 {
-        self.font_instance.height
+        self.height
     }
 
     #[inline]
     pub fn ascent(&self) -> f32 {
-        self.font_instance.ascent
+        self.ascent
     }
 
     #[inline]
     pub fn typical_advance_width(&self) -> f32 {
-        self.font_instance.typical_advance_width
+        self.typical_advance_width
     }
 
     /// gets a glyph for a given character, rasterizing and caching it if not already cached.
     /// glyphs are cached per font instance (font + size combination) for subsequent lookups.
+    ///
+    /// NOTE: this techinaclly dones't have to be &mut, but &mut prevents overlapping borrows from
+    /// the same handle (e.g., holding one glyph while requesting another).
     pub fn get_or_rasterize_glyph(
         &mut self,
         ch: char,
         texture_service: &mut TextureService,
     ) -> GlyphRef<'_> {
-        let glyph = self
-            .font_instance
-            .glyphs
-            .entry(ch as u32)
-            .or_insert_with(|| {
-                rasterize_glyph(
-                    ch,
-                    FontArc::clone(&self.font),
-                    self.font_instance.px_scale,
-                    self.font_instance.scale_factor,
-                    &mut self.font_instance.texture_pages,
-                    texture_service,
-                )
-            });
-        let texture_page = &self.font_instance.texture_pages[glyph.texture_page_idx];
+        let glyph = self.glyphs.entry(ch as u32).or_insert_with(|| {
+            rasterize_glyph(
+                ch,
+                &self.font,
+                self.px_scale,
+                self.scale_factor,
+                &mut self.texture_pages,
+                texture_service,
+            )
+        });
+        let texture_page = &mut self.texture_pages[glyph.texture_page_idx];
         GlyphRef {
             glyph,
             texture_page,
@@ -304,29 +302,13 @@ impl<'a> FontInstanceRefMut<'a> {
         width
     }
 
-    /// all this really is is an alias for `clone` xd.
-    ///
-    /// you don't want to pass a reference to a thing that is carrying references; that creates
-    /// more indirection that i am willing to tolerate for no good reason.
-    ///
-    /// this is a hack somewhat and i am totally fine with it being a hack. rust really-really
-    /// sucks at certain things. just don't fuck up.
-    ///
-    /// sometimes multiple functions may want [`FontInstanceRefMut`], but i do not believe that
-    /// doing a lookup on [`FontService`] for it multiple times is sane, and you can't derive Clone
-    /// for thisbecause it contains mutable references that are not "clonable">
-    pub fn reborrow_mut(&mut self) -> FontInstanceRefMut<'a> {
-        Self {
-            font: FontArc::clone(&self.font),
-            font_instance: unsafe { &mut *(self.font_instance as *mut FontInstance) },
-        }
+    pub fn iter_texture_pages(&self) -> impl Iterator<Item = &TexturePage> {
+        self.texture_pages.iter()
     }
 }
 
 #[derive(Default)]
 pub struct FontService {
-    // NOTE: i don't need an Arc, but whatever. FontArc makes it convenient because it wraps both
-    // FontRef and FontVec.
     fonts: Vec<FontArc>,
     font_instances: NoHashMap<u64, FontInstance>,
 }
@@ -357,36 +339,43 @@ impl FontService {
     pub fn register_font_slice(&mut self, font_data: &'static [u8]) -> anyhow::Result<FontHandle> {
         let idx = self.fonts.len();
         self.fonts.push(FontArc::try_from_slice(font_data)?);
-        debug_assert!(idx <= u8::MAX as usize);
-        Ok(FontHandle { idx: idx as u8 })
+        assert!(idx <= u32::MAX as usize);
+        Ok(FontHandle { idx: idx as u32 })
     }
 
     pub fn register_font_vec(&mut self, font_data: Vec<u8>) -> anyhow::Result<FontHandle> {
         let idx = self.fonts.len();
         self.fonts.push(FontArc::try_from_vec(font_data)?);
-        debug_assert!(idx <= u8::MAX as usize);
-        Ok(FontHandle { idx: idx as u8 })
+        assert!(idx <= u32::MAX as usize);
+        Ok(FontHandle { idx: idx as u32 })
     }
 
-    pub fn get_or_create_font_instance(
+    pub fn get_disjoint_font_instances_mut<const N: usize>(
         &mut self,
-        font_handle: FontHandle,
-        pt_size: f32,
-        scale_factor: f32,
-    ) -> FontInstanceRefMut<'_> {
-        assert!(pt_size > 0.0);
+        descs: [FontDesc; N],
+    ) -> [&'_ mut FontInstance; N] {
+        let ptrs = descs.map(|desc| {
+            assert!(desc.pt_size > 0.0);
+            let key = pack_font_desc(&desc);
+            let font_instance = self.font_instances.entry(key).or_insert_with(|| {
+                let font = &self.fonts[desc.handle.idx as usize];
+                FontInstance::new(FontArc::clone(&font), desc.pt_size, desc.scale_factor)
+            });
+            font_instance.in_use = true;
+            font_instance as *mut _
+        });
 
-        let font = &self.fonts[font_handle.idx as usize];
-        let font_instance = self
-            .font_instances
-            .entry(make_font_instance_key(font_handle, pt_size, scale_factor))
-            .or_insert_with(|| FontInstance::new(FontArc::clone(font), pt_size, scale_factor));
-        font_instance.in_use = true;
-
-        FontInstanceRefMut {
-            font: FontArc::clone(font),
-            font_instance,
+        for (i, ptr) in ptrs.iter().enumerate() {
+            if ptrs[..i].contains(ptr) {
+                panic!("duplicate keys");
+            }
         }
+
+        ptrs.map(|ptr| unsafe { &mut *ptr })
+    }
+
+    pub fn get_font_instance_mut(&mut self, desc: FontDesc) -> &mut FontInstance {
+        self.get_disjoint_font_instances_mut([desc])[0]
     }
 
     pub fn iter_font_instances(&self) -> impl Iterator<Item = &FontInstance> {

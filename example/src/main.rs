@@ -54,7 +54,7 @@ impl Logger {
 
 fn draw_text<E: sx::Externs>(
     text: &str,
-    mut font_instance: sx::FontInstanceRefMut,
+    font_instance: &mut sx::FontInstance,
     fg: sx::Rgba,
     position: sx::Vec2,
     texture_service: &mut sx::TextureService,
@@ -67,7 +67,7 @@ fn draw_text<E: sx::Externs>(
         let glyph_advance_width = glyph.advance_width();
         draw_buffer.push_rect(sx::RectShape::new_with_fill(
             glyph
-                .bounding_rect()
+                .bounds()
                 .translate(sx::Vec2::new(x_offset, position.y + font_ascent)),
             sx::Fill::new(
                 fg,
@@ -183,11 +183,11 @@ impl Context {
         unsafe { self.gl_context.api.clear_color(0.0, 0.0, 0.4, 1.0) };
         unsafe { self.gl_context.api.clear(gl::COLOR_BUFFER_BIT) };
 
-        let font_instance = self.font_service.get_or_create_font_instance(
-            self.default_font_handle,
-            16.0,
+        let font_instance = self.font_service.get_font_instance_mut(sx::FontDesc {
+            handle: self.default_font_handle,
+            pt_size: 16.0,
             scale_factor,
-        );
+        });
         draw_text(
             "hello sailor!",
             font_instance,

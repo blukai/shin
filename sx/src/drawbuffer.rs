@@ -349,6 +349,11 @@ impl<E: Externs> DrawBuffer<E> {
         ScopeGuard::new_with_data(self, move |this| this.layer = layer_backup)
     }
 
+    // TODO: make so that it'll hand-out owned draw buffers and introduce pub fn extend that'll
+    // consume it and push into staging buf.
+    //
+    // TODO: consider getting rid of ScopeGuard things and instead operate on owned staging draw
+    // buffers that can be lended consumed.
     pub fn stage_scope<'a, const N: usize>(
         &'a mut self,
     ) -> ScopeGuard<[Self; N], impl FnOnce([Self; N])> {

@@ -1,4 +1,4 @@
-use std::ops::Deref;
+use std::ops;
 
 use dynlib::DynLib;
 
@@ -35,7 +35,7 @@ pub struct Api {
     _dynlib: DynLib,
 }
 
-impl Deref for Api {
+impl ops::Deref for Api {
     type Target = api::Api;
 
     fn deref(&self) -> &Self::Target {
