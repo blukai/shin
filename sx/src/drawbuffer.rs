@@ -336,17 +336,17 @@ impl<E: Externs> DrawBuffer<E> {
         &'a mut self,
         rect: Rect,
     ) -> ScopeGuard<&'a mut Self, impl FnOnce(&'a mut Self)> {
-        self.clip_rect = Some(rect);
-        ScopeGuard::new_with_data(self, |this| this.clip_rect = None)
+        let prev = self.clip_rect.replace(rect);
+        ScopeGuard::new_with_data(self, move |this| this.clip_rect = prev)
     }
 
     pub fn layer_scope<'a>(
         &'a mut self,
         layer: DrawLayer,
     ) -> ScopeGuard<&'a mut Self, impl FnOnce(&'a mut Self)> {
-        let layer_backup = self.layer;
+        let prev = self.layer;
         self.layer = layer;
-        ScopeGuard::new_with_data(self, move |this| this.layer = layer_backup)
+        ScopeGuard::new_with_data(self, move |this| this.layer = prev)
     }
 
     // TODO: make so that it'll hand-out owned draw buffers and introduce pub fn extend that'll
@@ -359,6 +359,7 @@ impl<E: Externs> DrawBuffer<E> {
     ) -> ScopeGuard<[Self; N], impl FnOnce([Self; N])> {
         let stagers = array::from_fn::<_, N, _>(|_| {
             let mut ret = self.stagers.pop().unwrap_or_else(|| Self::default());
+            ret.clear();
             ret.clip_rect = self.clip_rect;
             ret.layer = self.layer;
             ret
@@ -371,14 +372,12 @@ impl<E: Externs> DrawBuffer<E> {
                     dst.vertices.extend(src.vertices.drain(..));
                     dst.indices
                         .extend(src.indices.drain(..).map(|it| it + base_vertex));
-                    assert_eq!(src.pending_indices, 0);
                     dst.commands
                         .extend(src.commands.drain(..).map(|it| DrawCommand {
                             index_range: it.index_range.start + base_index
                                 ..it.index_range.end + base_index,
                             ..it
                         }));
-                    src.clear();
                 }
                 self.stagers.push(stager);
             }
@@ -573,8 +572,14 @@ impl<E: Externs> DrawBuffer<E> {
     //   it can't really be the same as clip_scope, etc because for what i currently want to use
     //   translations i know deltas only after i push shapes into draw buffer.
     pub fn translate(&mut self, delta: Vec2) {
-        self.draw_data_mut().vertices.iter_mut().for_each(|vertex| {
+        let draw_data = self.draw_data_mut();
+        draw_data.vertices.iter_mut().for_each(|vertex| {
             vertex.position += delta;
+        });
+        draw_data.commands.iter_mut().for_each(|command| {
+            if let Some(ref mut clip_rect) = command.clip_rect {
+                *clip_rect = clip_rect.translate(delta);
+            }
         });
     }
 }
