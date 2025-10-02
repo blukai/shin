@@ -204,7 +204,7 @@ impl Context {
             .render(
                 logical_size,
                 scale_factor,
-                &mut self.draw_buffer,
+                self.draw_buffer.iter_draw_data(),
                 &self.gl_context.api,
             )
             .context("could not render")?;

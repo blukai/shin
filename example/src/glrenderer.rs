@@ -303,11 +303,11 @@ impl GlRenderer {
         Ok(())
     }
 
-    pub fn render<E>(
+    pub fn render<'a, E: sx::Externs + 'a>(
         &mut self,
         logical_size: sx::Vec2,
         scale_factor: f32,
-        draw_buffer: &sx::DrawBuffer<E>,
+        draw_data: impl Iterator<Item = &'a sx::DrawData<E>>,
         gl_api: &gl::Api,
     ) -> anyhow::Result<()>
     where
@@ -331,18 +331,18 @@ impl GlRenderer {
             );
         }
 
-        for draw_data in draw_buffer.iter_draw_data() {
+        for it in draw_data {
             unsafe {
                 gl_api.buffer_data(
                     gl::ARRAY_BUFFER,
-                    (draw_data.vertices.len() * size_of::<sx::Vertex>()) as gl::GLsizeiptr,
-                    draw_data.vertices.as_ptr() as *const c_void,
+                    (it.vertices.len() * size_of::<sx::Vertex>()) as gl::GLsizeiptr,
+                    it.vertices.as_ptr() as *const c_void,
                     gl::STREAM_DRAW,
                 );
                 gl_api.buffer_data(
                     gl::ELEMENT_ARRAY_BUFFER,
-                    (draw_data.indices.len() * size_of::<u32>()) as gl::GLsizeiptr,
-                    draw_data.indices.as_ptr() as *const c_void,
+                    (it.indices.len() * size_of::<u32>()) as gl::GLsizeiptr,
+                    it.indices.as_ptr() as *const c_void,
                     gl::STREAM_DRAW,
                 );
 
@@ -350,7 +350,7 @@ impl GlRenderer {
                     clip_rect,
                     index_range,
                     texture,
-                } in draw_data.commands.iter()
+                } in it.commands.iter()
                 {
                     if let Some(clip_rect) = clip_rect {
                         gl_api.enable(gl::SCISSOR_TEST);

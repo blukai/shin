@@ -3,8 +3,12 @@ use std::hash::{Hash, Hasher};
 use nohash::{NoHash, NoHashMap};
 
 // TODO: events must carry device id in addition to surface id.
-// (on device id) maybe you want to let people play split screen with with different controllers
-// (event though i am absolutely clueless and never did own one).
+//   (on device id) maybe you want to let people play split screen with with different controllers
+//   (event though i am absolutely clueless and never did own one).
+
+// TODO: some kind of surface state
+//   must be able to do something like .just_resized(), .just_rescaled() or
+//   .scale_factor_just_changed() .. stuff like that.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SurfaceId(pub u64);

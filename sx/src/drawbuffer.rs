@@ -229,11 +229,28 @@ pub struct Vertex {
 
 #[derive(Debug)]
 pub struct DrawCommand<E: Externs> {
+    // TODO: maybe don't store clip rect within the command, but instead make it possible to group
+    // commands with attributes or something.
     pub clip_rect: Option<Rect>,
     pub index_range: Range<u32>,
     pub texture: Option<TextureHandleKind<E>>,
 }
 
+// TODO: split DrawData into buffers and commands
+//
+//   bounds accumulator will need to live next to commands.
+//
+//   when lending new draw buffers make sure that the lended draw buffer will be pushing indices
+//   and vertices into central buffers that it'll be referencing (possibly will need an Rc and a
+//   RefCell, but i really don't want an Rc).
+//
+//   OR maybe there needs to be a centeral draw buffer only for storage / allocation; it'll not be
+//   possible to push shapes into it. its purpose will be to hand-out other kind of draw buffer
+//   that'll be for drawing.
+//   not 100%, but i think this will make it easier for something higher order to start scopes
+//   (clip, layer, etc.).
+//   but perhaps RefCell + RefMut::map_split can do well here; and ownership semantics will be
+//   clear.
 #[derive(Debug)]
 pub struct DrawData<E: Externs> {
     pub vertices: Vec<Vertex>,
@@ -349,43 +366,45 @@ impl<E: Externs> DrawBuffer<E> {
         ScopeGuard::new_with_data(self, move |this| this.layer = prev)
     }
 
-    // TODO: make so that it'll hand-out owned draw buffers and introduce pub fn extend that'll
-    // consume it and push into staging buf.
-    //
-    // TODO: consider getting rid of ScopeGuard things and instead operate on owned staging draw
-    // buffers that can be lended consumed.
-    pub fn stage_scope<'a, const N: usize>(
-        &'a mut self,
-    ) -> ScopeGuard<[Self; N], impl FnOnce([Self; N])> {
-        let stagers = array::from_fn::<_, N, _>(|_| {
+    /// returns an instance of self with inherited clip rect and layer.
+    pub fn lend<const N: usize>(&mut self) -> [Self; N] {
+        array::from_fn(|_| {
             let mut ret = self.stagers.pop().unwrap_or_else(|| Self::default());
             ret.clear();
             ret.clip_rect = self.clip_rect;
             ret.layer = self.layer;
             ret
-        });
-        ScopeGuard::new_with_data(stagers, |stagers| {
-            for mut stager in stagers.into_iter() {
-                for (src, dst) in stager.layers.iter_mut().zip(self.layers.iter_mut()) {
-                    let base_vertex = dst.vertices.len() as u32;
-                    let base_index = dst.indices.len() as u32;
-                    dst.vertices.extend(src.vertices.drain(..));
-                    dst.indices
-                        .extend(src.indices.drain(..).map(|it| it + base_vertex));
-                    dst.commands
-                        .extend(src.commands.drain(..).map(|it| DrawCommand {
-                            index_range: it.index_range.start + base_index
-                                ..it.index_range.end + base_index,
-                            ..it
-                        }));
-                }
-                self.stagers.push(stager);
-            }
         })
     }
 
-    pub fn iter_draw_data<'a>(&'a self) -> impl Iterator<Item = &'a DrawData<E>> {
-        self.layers.iter()
+    /// extends self from other instance that most likely was handed-out by [`Self::lend`].
+    /// the other instance will not be discarded, but will be stored for future lending.
+    pub fn extend<I: IntoIterator<Item = Self>>(&mut self, others: I) {
+        // TODO: central allocator / storage
+        //   see other TODO comment next to DrawData struct.
+
+        for mut other in others {
+            for (src, dst) in other.layers.iter_mut().zip(self.layers.iter_mut()) {
+                let base_vertex = dst.vertices.len() as u32;
+                let base_index = dst.indices.len() as u32;
+                dst.vertices.extend(src.vertices.drain(..));
+                dst.indices
+                    .extend(src.indices.drain(..).map(|it| it + base_vertex));
+                dst.commands
+                    .extend(src.commands.drain(..).map(|it| DrawCommand {
+                        index_range: it.index_range.start + base_index
+                            ..it.index_range.end + base_index,
+                        ..it
+                    }));
+            }
+            self.stagers.push(other);
+        }
+    }
+
+    pub fn stage_scope<'a, const N: usize>(
+        &'a mut self,
+    ) -> ScopeGuard<[Self; N], impl FnOnce([Self; N])> {
+        ScopeGuard::new_with_data(self.lend(), |stagers| self.extend(stagers))
     }
 
     #[inline(always)]
@@ -396,10 +415,6 @@ impl<E: Externs> DrawBuffer<E> {
     #[inline(always)]
     fn draw_data_mut(&mut self) -> &mut DrawData<E> {
         &mut self.layers[self.layer as usize]
-    }
-
-    pub fn bounds(&self) -> Rect {
-        self.draw_data().bounds
     }
 
     pub fn push_line(&mut self, line: LineShape) {
@@ -562,6 +577,10 @@ impl<E: Externs> DrawBuffer<E> {
         }
     }
 
+    pub fn bounds(&self) -> Rect {
+        self.draw_data().bounds
+    }
+
     // TODO: would it make any sense to offload transforms to gpu
     //   apply this translation in vertex shader?
     //   i imagine this would be very similar to what's happening with clip rect except we'll need
@@ -581,5 +600,9 @@ impl<E: Externs> DrawBuffer<E> {
                 *clip_rect = clip_rect.translate(delta);
             }
         });
+    }
+
+    pub fn iter_draw_data<'a>(&'a self) -> impl Iterator<Item = &'a DrawData<E>> {
+        self.layers.iter()
     }
 }
