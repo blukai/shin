@@ -61,7 +61,7 @@ impl Rgba {
         self
     }
 
-    pub const fn with_a_f32(mut self, a: f32) -> Self {
+    pub const fn with_af(mut self, a: f32) -> Self {
         assert!(a >= 0.0 && a <= 1.0);
         self.a = (a * u8::MAX as f32) as u8;
         self
@@ -283,8 +283,13 @@ impl<E: Externs> DrawData<E> {
     }
 
     fn push_vertex(&mut self, vertex: Vertex) {
-        self.bounds.min = self.bounds.min.min(vertex.position);
-        self.bounds.max = self.bounds.max.max(vertex.position);
+        if self.vertices.is_empty() {
+            self.bounds.min = vertex.position;
+            self.bounds.max = vertex.position;
+        } else {
+            self.bounds.min = self.bounds.min.min(vertex.position);
+            self.bounds.max = self.bounds.max.max(vertex.position);
+        }
         self.vertices.push(vertex);
     }
 
@@ -353,7 +358,12 @@ impl<E: Externs> DrawBuffer<E> {
         &'a mut self,
         rect: Rect,
     ) -> ScopeGuard<&'a mut Self, impl FnOnce(&'a mut Self)> {
-        let prev = self.clip_rect.replace(rect);
+        let next = if let Some(prev) = self.clip_rect {
+            rect.clamp(prev)
+        } else {
+            rect
+        };
+        let prev = self.clip_rect.replace(next);
         ScopeGuard::new_with_data(self, move |this| this.clip_rect = prev)
     }
 
@@ -595,6 +605,7 @@ impl<E: Externs> DrawBuffer<E> {
         draw_data.vertices.iter_mut().for_each(|vertex| {
             vertex.position += delta;
         });
+        draw_data.bounds = draw_data.bounds.translate(delta);
         draw_data.commands.iter_mut().for_each(|command| {
             if let Some(ref mut clip_rect) = command.clip_rect {
                 *clip_rect = clip_rect.translate(delta);
