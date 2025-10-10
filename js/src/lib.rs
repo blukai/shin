@@ -82,11 +82,14 @@ impl Drop for Value {
     }
 }
 
-// nan-tagging
+// nan-tagging:
+//   - https://craftinginterpreters.com/optimization.html#nan-boxing
+//   - https://anniecherkaev.com/the-secret-life-of-nan
+//   - https://wingolog.org/archives/2011/05/18/value-representation-in-javascript-implementations
 //
-// https://craftinginterpreters.com/optimization.html#nan-boxing
-// https://anniecherkaev.com/the-secret-life-of-nan
-// https://wingolog.org/archives/2011/05/18/value-representation-in-javascript-implementations
+// additionally theres this (similar tecnique can be applied to real pointers):
+//   - https://source.android.com/docs/security/test/tagged-pointers
+//   - https://fedang.net/posts/pointer-tagging/
 
 const QUIET_NAN: u64 = 0x7ff8_0000_0000_0000;
 const _: () = assert!(f64::NAN.to_bits() == QUIET_NAN);
