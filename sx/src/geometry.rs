@@ -8,21 +8,25 @@ pub struct BVec2 {
 
 impl BVec2 {
     #[inline]
+    #[must_use]
     pub const fn new(x: bool, y: bool) -> Self {
         Self { x, y }
     }
 
     #[inline]
+    #[must_use]
     pub const fn splat(v: bool) -> Self {
         Self::new(v, v)
     }
 
     #[inline]
+    #[must_use]
     pub fn any(self) -> bool {
         self.x || self.y
     }
 
     #[inline]
+    #[must_use]
     pub fn all(self) -> bool {
         self.x && self.y
     }
@@ -142,11 +146,13 @@ impl Vec2 {
     pub const ZERO: Self = Self::splat(0.0);
 
     #[inline]
+    #[must_use]
     pub const fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
 
     #[inline]
+    #[must_use]
     pub const fn splat(v: f32) -> Self {
         Self::new(v, v)
     }
@@ -154,12 +160,14 @@ impl Vec2 {
     // ----
 
     #[inline]
+    #[must_use]
     pub fn with_x(mut self, x: f32) -> Self {
         self.x = x;
         self
     }
 
     #[inline]
+    #[must_use]
     pub fn with_y(mut self, y: f32) -> Self {
         self.y = y;
         self
@@ -168,12 +176,14 @@ impl Vec2 {
     // ----
 
     #[inline]
+    #[must_use]
     pub fn dot(self, rhs: Self) -> f32 {
         (self.x * rhs.x) + (self.y * rhs.y)
     }
 
     /// computes the length (magnitude) of the vector.
     #[inline]
+    #[must_use]
     pub fn length(self) -> f32 {
         self.dot(self).sqrt()
     }
@@ -182,6 +192,7 @@ impl Vec2 {
     /// in particular, if the input is zero, or non-finite, the result of
     /// this operation will be zero.
     #[inline]
+    #[must_use]
     pub fn normalize_or_zero(self) -> Self {
         // reciprocal is also called multiplicative inverse
         let reciprocal_length = 1.0 / self.length();
@@ -193,47 +204,56 @@ impl Vec2 {
     }
 
     #[inline]
+    #[must_use]
     pub fn perp(self) -> Self {
         Self::new(-self.y, self.x)
     }
 
     #[inline]
+    #[must_use]
     pub fn min(self, rhs: Self) -> Self {
         Self::new(self.x.min(rhs.x), self.y.min(rhs.y))
     }
 
     #[inline]
+    #[must_use]
     pub fn max(self, rhs: Self) -> Self {
         Self::new(self.x.max(rhs.x), self.y.max(rhs.y))
     }
 
     #[inline]
+    #[must_use]
     pub fn clamp(self, min: Self, max: Self) -> Self {
         assert!(min.x <= max.x && min.y <= max.y);
         self.max(min).min(max)
     }
 
     #[inline]
+    #[must_use]
     pub fn abs(self) -> Self {
         Self::new(self.x.abs(), self.y.abs())
     }
 
     #[inline]
+    #[must_use]
     pub fn lt(self, rhs: Self) -> BVec2 {
         BVec2::new(self.x.lt(&rhs.x), self.y.lt(&rhs.y))
     }
 
     #[inline]
+    #[must_use]
     pub fn le(self, rhs: Self) -> BVec2 {
         BVec2::new(self.x.le(&rhs.x), self.y.le(&rhs.y))
     }
 
     #[inline]
+    #[must_use]
     pub fn gt(self, rhs: Self) -> BVec2 {
         BVec2::new(self.x.gt(&rhs.x), self.y.gt(&rhs.y))
     }
 
     #[inline]
+    #[must_use]
     pub fn ge(self, rhs: Self) -> BVec2 {
         BVec2::new(self.x.ge(&rhs.x), self.y.ge(&rhs.y))
     }
@@ -266,11 +286,13 @@ impl From<&(f64, f64)> for F64Vec2 {
 
 impl F64Vec2 {
     #[inline]
+    #[must_use]
     pub const fn new(x: f64, y: f64) -> Self {
         Self { x, y }
     }
 
     #[inline]
+    #[must_use]
     pub fn as_vec2(&self) -> Vec2 {
         Vec2::new(self.x as f32, self.y as f32)
     }
@@ -298,11 +320,13 @@ impl From<&(u32, u32)> for U32Vec2 {
 
 impl U32Vec2 {
     #[inline]
+    #[must_use]
     pub const fn new(x: u32, y: u32) -> Self {
         Self { x, y }
     }
 
     #[inline]
+    #[must_use]
     pub fn as_vec2(&self) -> Vec2 {
         Vec2::new(self.x as f32, self.y as f32)
     }
@@ -318,11 +342,13 @@ pub struct Rect {
 
 impl Rect {
     #[inline]
+    #[must_use]
     pub fn new(min: Vec2, max: Vec2) -> Self {
         Self { min, max }
     }
 
     #[inline]
+    #[must_use]
     pub fn from_center_half_size(center: Vec2, size: f32) -> Self {
         let radius = Vec2::splat(size / 2.0);
         Self::new(center - radius, center + radius)
@@ -330,43 +356,52 @@ impl Rect {
 
     // ----
 
+    #[must_use]
     pub fn width(&self) -> f32 {
         self.max.x - self.min.x
     }
 
+    #[must_use]
     pub fn height(&self) -> f32 {
         self.max.y - self.min.y
     }
 
     // TODO: consider renaming this to `dimensions`.
+    #[must_use]
     pub fn size(&self) -> Vec2 {
         self.max - self.min
     }
 
+    #[must_use]
     pub fn center(&self) -> Vec2 {
         (self.min + self.max) / 2.0
     }
 
+    #[must_use]
     pub fn contains(&self, point: Vec2) -> bool {
         let x_in_bounds = (point.x >= self.min.x) & (point.x <= self.max.x);
         let y_in_bounds = (point.y >= self.min.y) & (point.y <= self.max.y);
         x_in_bounds & y_in_bounds
     }
 
+    #[must_use]
     pub fn intersects(&self, other: &Rect) -> bool {
         let x_overlap = (self.min.x < other.max.x) & (self.max.x > other.min.x);
         let y_overlap = (self.min.y < other.max.y) & (self.max.y > other.min.y);
         x_overlap & y_overlap
     }
 
+    #[must_use]
     pub fn translate(self, delta: Vec2) -> Self {
         Self::new(self.min + delta, self.max + delta)
     }
 
+    #[must_use]
     pub fn inflate(self, amount: Vec2) -> Self {
         Self::new(self.min - amount, self.max + amount)
     }
 
+    #[must_use]
     pub fn scale(self, amount: f32) -> Self {
         Self::new(self.min * amount, self.max * amount)
     }
@@ -375,14 +410,17 @@ impl Rect {
     //
     // TODO: think of a better name for this function that basically flips `min` and `max` if
     // needed, so that `min <= max`.
+    #[must_use]
     pub fn normalize(self) -> Self {
         Self::new(self.min.min(self.max), self.min.max(self.max))
     }
 
+    #[must_use]
     pub fn is_normalized(&self) -> bool {
         self.min.x <= self.max.x && self.min.y <= self.max.y
     }
 
+    #[must_use]
     pub fn clamp(self, other: Self) -> Self {
         assert_eq!(self, self.normalize());
         assert_eq!(other, other.normalize());
@@ -392,38 +430,46 @@ impl Rect {
     // ----
     // sugary stuff
 
+    #[must_use]
     pub fn top_left(&self) -> Vec2 {
         self.min
     }
 
+    #[must_use]
     pub fn top_right(&self) -> Vec2 {
         Vec2::new(self.max.x, self.min.y)
     }
 
+    #[must_use]
     pub fn bottom_left(&self) -> Vec2 {
         Vec2::new(self.min.x, self.max.y)
     }
 
+    #[must_use]
     pub fn bottom_right(&self) -> Vec2 {
         self.max
     }
 
+    #[must_use]
     pub fn with_top_left(mut self, top_left: Vec2) -> Self {
         self.min = top_left;
         self
     }
 
+    #[must_use]
     pub fn with_top_right(mut self, top_right: Vec2) -> Self {
         self.min = Vec2::new(self.min.x, top_right.y);
         self.max = Vec2::new(top_right.x, self.max.y);
         self
     }
 
+    #[must_use]
     pub fn with_bottom_right(mut self, bottom_right: Vec2) -> Self {
         self.max = bottom_right;
         self
     }
 
+    #[must_use]
     pub fn with_bottom_left(mut self, bottom_left: Vec2) -> Self {
         self.min = Vec2::new(bottom_left.x, self.min.y);
         self.max = Vec2::new(self.max.x, bottom_left.y);
