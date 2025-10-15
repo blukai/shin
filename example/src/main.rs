@@ -55,7 +55,7 @@ impl Logger {
 fn draw_text<E: sx::Externs>(
     text: &str,
     font_instance: &mut sx::FontInstance,
-    fg: sx::Rgba,
+    fg: sx::Rgba8,
     position: sx::Vec2,
     texture_service: &mut sx::TextureService,
     draw_buffer: &mut sx::DrawBuffer<E>,
@@ -191,7 +191,7 @@ impl Context {
         draw_text(
             "hello sailor!",
             font_instance,
-            sx::Rgba::WHITE,
+            sx::Rgba8::WHITE,
             sx::Vec2::splat(24.0),
             &mut self.texture_service,
             &mut self.draw_buffer,

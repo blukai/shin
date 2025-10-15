@@ -27,9 +27,9 @@ log = { version = "0.4" }
 raw-window-handle = { version = "0.6", features = ["std"] }
 winit = { version = "0.30" }
 # my other repos
-nohash = { git = "https://github.com/blukai/dungers.git", rev = "10d65a0", package = "nohash" }
-rangealloc = { git = "https://github.com/blukai/dungers.git", rev = "10d65a0", package = "rangealloc" }
-scopeguard = { git = "https://github.com/blukai/dungers.git", rev = "10d65a0", package = "scopeguard" }
+nohash = { path = "../dungers/nohash", package = "nohash" }
+rangealloc = { path = "../dungers/rangealloc", package = "rangealloc" }
+scopeguard = { path = "../dungers/scopeguard", package = "scopeguard" }
 # workspace
 dynlib = { path = "dynlib" }
 egl = { path = "egl" }

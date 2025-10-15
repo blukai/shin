@@ -12,14 +12,14 @@ use crate::{Externs, Rect, TextureHandle, TextureHandleKind, Vec2};
 // NOTE: Copy is derived simply because it's cheap. size of Rgba == size of u32.
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct Rgba {
+pub struct Rgba8 {
     pub r: u8,
     pub g: u8,
     pub b: u8,
     pub a: u8,
 }
 
-impl Rgba {
+impl Rgba8 {
     // https://en.wikipedia.org/wiki/Web_colors#Basic_colors
     pub const WHITE: Self = Self::new(255, 255, 255, 255);
     pub const SILVER: Self = Self::new(192, 192, 192, 255);
@@ -46,14 +46,34 @@ impl Rgba {
     }
 
     #[inline]
-    pub const fn from_bytes(arr: [u8; 4]) -> Self {
+    pub const fn from_u8_array(arr: [u8; 4]) -> Self {
         unsafe { mem::transmute(arr) }
     }
 
     /// works with hex: `Rgba8::from_u32(0x8faf9fff)`.
     #[inline]
     pub const fn from_u32(value: u32) -> Self {
-        Self::from_bytes(u32::to_be_bytes(value))
+        Self::from_u8_array(u32::to_be_bytes(value))
+    }
+
+    #[inline]
+    pub const fn from_f32_array(arr: [f32; 4]) -> Self {
+        Self::from_u8_array([
+            (arr[0].clamp(0.0, 1.0) * 255.0) as u8,
+            (arr[1].clamp(0.0, 1.0) * 255.0) as u8,
+            (arr[2].clamp(0.0, 1.0) * 255.0) as u8,
+            (arr[3].clamp(0.0, 1.0) * 255.0) as u8,
+        ])
+    }
+
+    #[inline]
+    pub const fn to_f32_array(self) -> [f32; 4] {
+        [
+            self.r as f32 / 255.0,
+            self.g as f32 / 255.0,
+            self.b as f32 / 255.0,
+            self.a as f32 / 255.0,
+        ]
     }
 
     pub const fn with_a(mut self, a: u8) -> Self {
@@ -62,10 +82,18 @@ impl Rgba {
     }
 
     pub const fn with_af(mut self, a: f32) -> Self {
-        assert!(a >= 0.0 && a <= 1.0);
-        self.a = (a * u8::MAX as f32) as u8;
+        debug_assert!(a >= 0.0 && a <= 1.0);
+        self.a = (a * 255 as f32) as u8;
         self
     }
+}
+
+#[test]
+fn test_rgba8_f32_conversions() {
+    let arru8 = [255, 0, 0, 255];
+    let arrf32 = [1.0, 0.0, 0.0, 1.0];
+    assert_eq!(Rgba8::from_u8_array(arru8).to_f32_array(), arrf32);
+    assert_eq!(Rgba8::from_f32_array(arrf32), Rgba8::from_u8_array(arru8));
 }
 
 #[derive(Debug, Clone)]
@@ -90,19 +118,19 @@ impl<E: Externs> FillTexture<E> {
 
 #[derive(Debug, Clone)]
 pub struct Fill<E: Externs> {
-    pub color: Rgba,
+    pub color: Rgba8,
     pub texture: Option<FillTexture<E>>,
 }
 
 impl<E: Externs> Fill<E> {
-    pub fn new(color: Rgba, texture: FillTexture<E>) -> Self {
+    pub fn new(color: Rgba8, texture: FillTexture<E>) -> Self {
         Self {
             color,
             texture: Some(texture),
         }
     }
 
-    pub fn new_with_color(color: Rgba) -> Self {
+    pub fn new_with_color(color: Rgba8) -> Self {
         Self {
             color,
             texture: None,
@@ -120,13 +148,13 @@ pub enum StrokeAlignment {
 #[derive(Debug, Clone)]
 pub struct Stroke {
     pub width: f32,
-    pub color: Rgba,
+    pub color: Rgba8,
     pub alignment: StrokeAlignment,
 }
 
 impl Stroke {
     // NOTE: in majority of cases alignment is `Center`.
-    pub fn new(width: f32, color: Rgba) -> Self {
+    pub fn new(width: f32, color: Rgba8) -> Self {
         Self {
             width,
             color,
@@ -224,7 +252,7 @@ pub struct Vertex {
     /// 0, 0 is the top left corner of the texture.
     /// 1, 1 is the bottom right corner of the texture.
     pub tex_coord: Vec2,
-    pub color: Rgba,
+    pub color: Rgba8,
 }
 
 #[derive(Debug)]
