@@ -20,9 +20,9 @@ struct GlContextEgl {
 #[cfg(unix)]
 impl GlContextEgl {
     fn from_egl_connection(mut egl_connection: egl::wrap::Connection) -> anyhow::Result<Self> {
-        let egl_config = {
-            use egl::*;
+        use egl::*;
 
+        let egl_config = {
             #[rustfmt::skip]
             let config_attrs = [
                 RED_SIZE, 8,
@@ -32,6 +32,7 @@ impl GlContextEgl {
                 ALPHA_SIZE, 8,
                 CONFORMANT, OPENGL_BIT as _,
                 RENDERABLE_TYPE, OPENGL_BIT as _,
+                SURFACE_TYPE, WINDOW_BIT as _,
                 // NOTE: EGL_SAMPLE_BUFFERS + EGL_SAMPLES enable some kind of don't care anti aliasing.
                 SAMPLE_BUFFERS, 1,
                 SAMPLES, 4,
@@ -71,25 +72,26 @@ impl GlContextEgl {
                 .context("could not choose config (no compatible ones probably)")?
         };
 
-        let egl_context = egl_connection.create_context(
-            egl::OPENGL_API,
-            egl_config,
-            None,
-            Some(&[
-                egl::CONTEXT_MAJOR_VERSION as egl::EGLint,
-                3,
-                egl::NONE as egl::EGLint,
-            ]),
-        )?;
+        let egl_context = {
+            #[rustfmt::skip]
+            let context_attrs = [
+                CONTEXT_MAJOR_VERSION as _, 3,
+                // TODO: can't get gl 3.3 working AND core profile, figure out why.
+                // CONTEXT_MINOR_VERSION as _, 3,
+                // CONTEXT_OPENGL_PROFILE_MASK as _, CONTEXT_OPENGL_CORE_PROFILE_BIT,
+                NONE as EGLint,
+            ];
+            egl_connection.create_context(OPENGL_API, egl_config, None, Some(&context_attrs))?
+        };
 
         if unsafe {
             egl_connection.api.MakeCurrent(
                 *egl_connection.display,
-                egl::NO_SURFACE,
-                egl::NO_SURFACE,
+                NO_SURFACE,
+                NO_SURFACE,
                 egl_context.context,
             )
-        } == egl::FALSE
+        } == FALSE
         {
             return Err(egl_connection.unwrap_err()).context("could not make current");
         }

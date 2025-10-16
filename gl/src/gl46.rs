@@ -208,17 +208,16 @@ impl Apier for Api {
     #[inline]
     unsafe fn get_program_info_log(&self, program: Self::Program) -> String {
         let mut len = unsafe { self.get_shader_parameter(program, INFO_LOG_LENGTH) };
-        let mut info_log = String::with_capacity(len as usize);
+        let mut info_log = vec![0; len as usize];
         unsafe {
             self.api.GetProgramInfoLog(
                 program.get(),
                 len,
                 &mut len,
                 info_log.as_mut_ptr() as *mut GLchar,
-            )
-        };
-        info_log.truncate(len as usize);
-        info_log
+            );
+            String::from_utf8_unchecked(info_log)
+        }
     }
 
     #[inline]
@@ -231,17 +230,16 @@ impl Apier for Api {
     #[inline]
     unsafe fn get_shader_info_log(&self, shader: Self::Shader) -> String {
         let mut len = unsafe { self.get_shader_parameter(shader, INFO_LOG_LENGTH) };
-        let mut info_log = String::with_capacity(len as usize);
+        let mut info_log = vec![0; len as usize];
         unsafe {
             self.api.GetShaderInfoLog(
                 shader.get(),
                 len,
                 &mut len,
                 info_log.as_mut_ptr() as *mut GLchar,
-            )
-        };
-        info_log.truncate(len as usize);
-        info_log
+            );
+            String::from_utf8_unchecked(info_log)
+        }
     }
 
     #[inline]

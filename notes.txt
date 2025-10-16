@@ -16,3 +16,11 @@ see:
 - https://github.com/rust-lang/rust/issues/54663
 - https://ntietz.com/blog/my-reference-was-dropped-why-is-the-compiler-complaining-about-multiple-borrows/
 
+TODO:
+  - super minimal rotating triangle example without sx
+  - figure out why i can't get anything happen with opengl 3.3 core profile
+  - figure out why everything is black on nvidia gpu
+  - can i hash all the shapes that can be pushed into draw buffer and NOT draw
+    if prev frame hash == next frame hash?
+  - i want to be able to attach custom shaders to probably sub-drawbuffers
+  - i want rounded corners

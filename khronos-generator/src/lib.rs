@@ -558,7 +558,7 @@ pub type GLDEBUGPROC = Option<extern \"C\" fn(
     severity: GLenum,
     length: GLsizei,
     message: *const GLchar,
-    userParam: *mut std::ffi::c_void,
+    user_param: *mut std::ffi::c_void,
 )>;
 ";
 

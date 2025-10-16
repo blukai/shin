@@ -139,32 +139,32 @@ pub trait Window: rwh::HasDisplayHandle + rwh::HasWindowHandle {
     fn scale_factor(&self) -> f64;
 }
 
-pub fn create_window(window_attrs: WindowAttrs) -> anyhow::Result<Box<dyn Window>> {
+pub fn create_window(attrs: WindowAttrs) -> anyhow::Result<Box<dyn Window>> {
     let backend_hint = env::var("SHIN_WINDOW_BACKEND");
     match backend_hint.as_ref().map(|string| string.as_str()) {
         #[cfg(unix)]
-        Ok("wayland") => return Ok(backend_wayland::WaylandBackend::new_boxed(window_attrs)?),
+        Ok("wayland") => return Ok(backend_wayland::WaylandBackend::new_boxed(attrs)?),
         #[cfg(feature = "winit")]
-        Ok("winit") => return Ok(Box::new(backend_winit::WinitBackend::new(window_attrs)?)),
+        Ok("winit") => return Ok(Box::new(backend_winit::WinitBackend::new(attrs)?)),
         _ => {}
     }
 
     let mut errors: Vec<anyhow::Error> = Vec::new();
 
     #[cfg(unix)]
-    match backend_wayland::WaylandBackend::new_boxed(window_attrs.clone()) {
+    match backend_wayland::WaylandBackend::new_boxed(attrs.clone()) {
         Ok(wayland_window) => return Ok(wayland_window),
         Err(err) => errors.push(err),
     }
 
     #[cfg(target_family = "wasm")]
-    match backend_web::WebBackend::new_boxed(window_attrs.clone()) {
+    match backend_web::WebBackend::new_boxed(attrs.clone()) {
         Ok(web_window) => return Ok(web_window),
         Err(err) => errors.push(err),
     }
 
     #[cfg(feature = "winit")]
-    match backend_winit::WinitBackend::new(window_attrs.clone()) {
+    match backend_winit::WinitBackend::new(attrs.clone()) {
         Ok(winit_window) => return Ok(Box::new(winit_window)),
         Err(err) => errors.push(err),
     }
