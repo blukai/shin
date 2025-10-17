@@ -1,7 +1,7 @@
 use std::iter;
 
 use anyhow::{Context as _, anyhow};
-use gl::Adapter as _;
+use gl::wrap::Adapter as _;
 use raw_window_handle as rwh;
 use window::{Event, Window, WindowAttrs, WindowEvent};
 

@@ -2,25 +2,19 @@ use std::ops;
 
 use dynlib::DynLib;
 
-#[allow(non_camel_case_types)]
-#[allow(non_snake_case)]
-#[allow(non_upper_case_globals)]
+#[expect(non_camel_case_types)]
 mod types {
     include!(concat!(env!("OUT_DIR"), "/egl_types_generated.rs"));
 }
 
-#[allow(non_camel_case_types)]
-#[allow(non_snake_case)]
-#[allow(non_upper_case_globals)]
+#[expect(non_upper_case_globals)]
 mod enums {
     use super::types::*;
 
     include!(concat!(env!("OUT_DIR"), "/egl_enums_generated.rs"));
 }
 
-#[allow(non_camel_case_types)]
-#[allow(non_snake_case)]
-#[allow(non_upper_case_globals)]
+#[expect(non_snake_case)]
 mod api {
     use super::types::*;
 

@@ -3,16 +3,16 @@ use std::mem::offset_of;
 use std::ptr::null;
 
 use anyhow::{Context as _, anyhow};
-use gl::Adapter as _;
+use gl::wrap::Adapter as _;
 use nohash::NoHashMap;
 
 const SHADER_SOURCE: &str = include_str!("shader.glsl");
 
 unsafe fn create_shader(
-    gl_api: &gl::Api,
+    gl_api: &gl::wrap::Api,
     source: &str,
     r#type: gl::GLenum,
-) -> anyhow::Result<gl::Shader> {
+) -> anyhow::Result<gl::wrap::Shader> {
     unsafe {
         let shader = gl_api.create_shader(r#type)?;
         gl_api.shader_source(shader, source);
@@ -29,10 +29,10 @@ unsafe fn create_shader(
 }
 
 unsafe fn create_program(
-    gl_api: &gl::Api,
+    gl_api: &gl::wrap::Api,
     vert_src: &str,
     frag_src: &str,
-) -> anyhow::Result<gl::Program> {
+) -> anyhow::Result<gl::wrap::Program> {
     unsafe {
         let vert_shader = create_shader(gl_api, vert_src, gl::VERTEX_SHADER)?;
         let frag_shader = create_shader(gl_api, frag_src, gl::FRAGMENT_SHADER)?;
@@ -60,7 +60,9 @@ unsafe fn create_program(
     }
 }
 
-unsafe fn create_default_white_texture(gl_api: &gl::Api) -> anyhow::Result<gl::Texture> {
+unsafe fn create_default_white_texture(
+    gl_api: &gl::wrap::Api,
+) -> anyhow::Result<gl::wrap::Texture> {
     unsafe {
         let texture = gl_api.create_texture()?;
         gl_api.bind_texture(gl::TEXTURE_2D, Some(texture));
@@ -83,26 +85,26 @@ unsafe fn create_default_white_texture(gl_api: &gl::Api) -> anyhow::Result<gl::T
 
 #[derive(Debug)]
 pub struct GlRenderer {
-    program: gl::Program,
+    program: gl::wrap::Program,
 
     i_position_location: gl::GLint,
     i_tex_coord_location: gl::GLint,
     i_color_location: gl::GLint,
     u_view_size_location: gl::GLint,
 
-    vbo: gl::Buffer,
-    ebo: gl::Buffer,
+    vbo: gl::wrap::Buffer,
+    ebo: gl::wrap::Buffer,
 
-    default_white_texture: gl::Texture,
-    textures: NoHashMap<sx::TextureHandle, gl::Texture>,
+    default_white_texture: gl::wrap::Texture,
+    textures: NoHashMap<sx::TextureHandle, gl::wrap::Texture>,
 }
 
 impl sx::Externs for GlRenderer {
-    type TextureHandle = gl::Texture;
+    type TextureHandle = gl::wrap::Texture;
 }
 
 impl GlRenderer {
-    pub fn new(gl_api: &gl::Api) -> anyhow::Result<Self> {
+    pub fn new(gl_api: &gl::wrap::Api) -> anyhow::Result<Self> {
         unsafe {
             let program = create_program(
                 gl_api,
@@ -139,7 +141,7 @@ impl GlRenderer {
     }
 
     // TODO: figure out how to invoke this xd.
-    pub fn destroy(self, gl_api: &gl::Api) {
+    pub fn destroy(self, gl_api: &gl::wrap::Api) {
         unsafe {
             gl_api.delete_program(self.program);
 
@@ -153,7 +155,7 @@ impl GlRenderer {
         }
     }
 
-    fn setup_state(&self, gl_api: &gl::Api) {
+    fn setup_state(&self, gl_api: &gl::wrap::Api) {
         unsafe {
             gl_api.use_program(Some(self.program));
 
@@ -201,7 +203,7 @@ impl GlRenderer {
         }
     }
 
-    fn get_texture(&self, handle: sx::TextureHandle) -> gl::Texture {
+    fn get_texture(&self, handle: sx::TextureHandle) -> gl::wrap::Texture {
         *self
             .textures
             .get(&handle)
@@ -211,7 +213,7 @@ impl GlRenderer {
     pub fn handle_texture_commands<'a>(
         &mut self,
         texture_commands: impl Iterator<Item = sx::TextureCommand<&'a sx::TextureDesc, &'a [u8]>>,
-        gl_api: &gl::Api,
+        gl_api: &gl::wrap::Api,
     ) -> anyhow::Result<()> {
         for command in texture_commands {
             match command.kind {
@@ -308,7 +310,7 @@ impl GlRenderer {
         logical_size: sx::Vec2,
         scale_factor: f32,
         draw_data: impl Iterator<Item = &'a sx::DrawData<E>>,
-        gl_api: &gl::Api,
+        gl_api: &gl::wrap::Api,
     ) -> anyhow::Result<()>
     where
         E: sx::Externs<TextureHandle = <Self as sx::Externs>::TextureHandle>,

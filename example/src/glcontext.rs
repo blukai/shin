@@ -157,7 +157,7 @@ enum GlContextKind {
 
 pub struct GlContext {
     kind: GlContextKind,
-    pub api: gl::Api,
+    pub api: gl::wrap::Api,
 }
 
 impl GlContext {
@@ -165,7 +165,7 @@ impl GlContext {
     pub fn from_wayland_display(wl_display: *mut c_void) -> anyhow::Result<Self> {
         let ctx = GlContextEgl::from_wayland_display(wl_display)?;
         let api = unsafe {
-            gl::Api::load_with(|procname| {
+            gl::wrap::Api::load_with(|procname| {
                 ctx.egl_connection.api.GetProcAddress(procname) as *mut c_void
             })
         };
@@ -177,8 +177,8 @@ impl GlContext {
 
     #[cfg(target_family = "wasm")]
     pub fn from_canvas_selector(canvas_selector: &str) -> anyhow::Result<Self> {
-        let api =
-            gl::Api::from_canvas_selector(canvas_selector).context("could not load gl api")?;
+        let api = gl::wrap::Api::from_canvas_selector(canvas_selector)
+            .context("could not load gl api")?;
         Ok(Self {
             kind: GlContextKind::Web,
             api,
