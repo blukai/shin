@@ -2,10 +2,10 @@ use std::ffi::{c_int, c_void};
 use std::ptr::null;
 use std::{array, error, fmt, mem, ops};
 
-use crate::libegl::*;
+use crate::libegl as egl;
 
 /// contains code from `eglGetError`.
-pub struct RawError(EGLint);
+pub struct RawError(egl::EGLint);
 
 impl error::Error for RawError {}
 
@@ -24,7 +24,7 @@ impl fmt::Debug for RawError {
 }
 
 impl RawError {
-    pub fn code(&self) -> EGLint {
+    pub fn code(&self) -> egl::EGLint {
         self.0
     }
 }
@@ -38,19 +38,19 @@ impl RawError {
 
 pub enum Display {
     /// eglGetPlatformDisplay
-    Khr(EGLDisplay),
+    Khr(egl::EGLDisplay),
     /// eglGetPlatformDisplayEXT
     /// - https://registry.khronos.org/EGL/extensions/EXT/EGL_EXT_platform_base.txt
-    Ext(EGLDisplay),
+    Ext(egl::EGLDisplay),
     /// eglGetDisplay
     /// > the set of platforms to which display_id is permitted to belong, as well as the actual
     /// type of display_id, are implementation-specific.
     /// - https://registry.khronos.org/EGL/sdk/docs/man/html/eglGetDisplay.xhtml
-    Old(EGLDisplay),
+    Old(egl::EGLDisplay),
 }
 
 impl ops::Deref for Display {
-    type Target = EGLDisplay;
+    type Target = egl::EGLDisplay;
 
     fn deref(&self) -> &Self::Target {
         let (Self::Khr(dpy) | Self::Ext(dpy) | Self::Old(dpy)) = self;
@@ -60,11 +60,11 @@ impl ops::Deref for Display {
 
 impl Display {
     fn get_platform_display(
-        api: &Api,
-        platform: EGLenum,
+        api: &egl::Api,
+        platform: egl::EGLenum,
         native_display: *mut c_void,
-        attribs: Option<&[EGLAttrib]>,
-    ) -> Option<EGLDisplay> {
+        attribs: Option<&[egl::EGLAttrib]>,
+    ) -> Option<egl::EGLDisplay> {
         if api.GetPlatformDisplay.as_ptr().is_null() {
             return None;
         }
@@ -75,15 +75,19 @@ impl Display {
                 attribs.map_or(null(), |attribs| attribs.as_ptr()),
             )
         };
-        if ret == NO_DISPLAY { None } else { Some(ret) }
+        if ret == egl::NO_DISPLAY {
+            None
+        } else {
+            Some(ret)
+        }
     }
 
     fn get_platform_display_ext(
-        api: &Api,
-        platform: EGLenum,
+        api: &egl::Api,
+        platform: egl::EGLenum,
         native_display: *mut c_void,
-        attribs: Option<&[EGLint]>,
-    ) -> Option<EGLDisplay> {
+        attribs: Option<&[egl::EGLint]>,
+    ) -> Option<egl::EGLDisplay> {
         if api.GetPlatformDisplayEXT.as_ptr().is_null() {
             return None;
         }
@@ -94,27 +98,35 @@ impl Display {
                 attribs.map_or(null(), |attribs| attribs.as_ptr()),
             )
         };
-        if ret == NO_DISPLAY { None } else { Some(ret) }
+        if ret == egl::NO_DISPLAY {
+            None
+        } else {
+            Some(ret)
+        }
     }
 
-    fn get_display(api: &Api, native_display: *mut c_void) -> Option<EGLDisplay> {
+    fn get_display(api: &egl::Api, native_display: *mut c_void) -> Option<egl::EGLDisplay> {
         let ret = unsafe { api.GetDisplay(native_display) };
-        if ret == NO_DISPLAY { None } else { Some(ret) }
+        if ret == egl::NO_DISPLAY {
+            None
+        } else {
+            Some(ret)
+        }
     }
 
     fn from_wayland_display(
-        api: &Api,
+        api: &egl::Api,
         wl_display: *mut wayland::wl_display,
-        attribs: Option<&[EGLAttrib]>,
+        attribs: Option<&[egl::EGLAttrib]>,
     ) -> Option<Self> {
-        attribs.inspect(|attribs| assert!(attribs.contains(&(NONE as EGLAttrib))));
+        attribs.inspect(|attribs| assert!(attribs.contains(&(egl::NONE as egl::EGLAttrib))));
 
-        Self::get_platform_display(api, PLATFORM_WAYLAND_KHR, wl_display.cast(), attribs)
+        Self::get_platform_display(api, egl::PLATFORM_WAYLAND_KHR, wl_display.cast(), attribs)
             .map(Self::Khr)
             .or_else(|| {
                 Self::get_platform_display_ext(
                     api,
-                    PLATFORM_WAYLAND_EXT,
+                    egl::PLATFORM_WAYLAND_EXT,
                     wl_display.cast(),
                     attribs.map(|attribs| unsafe { mem::transmute(attribs) }),
                 )
@@ -149,9 +161,9 @@ impl fmt::Display for CreateContextError {
 pub struct Context {
     index: u8,
     // TODO: don't expose context as is? but instead expose an `as_raw` method?
-    pub context: EGLContext,
+    pub context: egl::EGLContext,
     // TODO: do i need config here?
-    pub config: EGLConfig,
+    pub config: egl::EGLConfig,
 }
 
 // ----
@@ -282,9 +294,9 @@ pub struct WindowSurface {
     pub wsi: Wsi,
     // TODO: would it make sense to make a SurfaceKind { Khr, Ext, Old } enum (same as Display)?
     // TODO: don't expose surface as is? but instead expose an `as_raw` method?
-    pub surface: EGLSurface,
+    pub surface: egl::EGLSurface,
     // TODO: do i need config here?
-    pub config: EGLConfig,
+    pub config: egl::EGLConfig,
 }
 
 // ----
@@ -313,12 +325,12 @@ impl fmt::Display for CreateConnectionError {
 
 // TODO: Connection might need to be Arc'ed.
 pub struct Connection {
-    pub api: Api,
+    pub api: egl::Api,
     pub display: Display,
 
     // NOTE: would you want more then 16? 16 is prob too excessive?
-    contexts: [Option<EGLContext>; 16],
-    surfaces: [Option<EGLSurface>; 16],
+    contexts: [Option<egl::EGLContext>; 16],
+    surfaces: [Option<egl::EGLSurface>; 16],
 }
 
 impl Drop for Connection {
@@ -342,9 +354,9 @@ impl Drop for Connection {
 impl Connection {
     pub fn from_wayland_display(
         wl_display: *mut wayland::wl_display,
-        attribs: Option<&[EGLAttrib]>,
+        attribs: Option<&[egl::EGLAttrib]>,
     ) -> Result<Self, CreateConnectionError> {
-        let api = Api::load().map_err(CreateConnectionError::CouldNotLoadEgl)?;
+        let api = egl::Api::load().map_err(CreateConnectionError::CouldNotLoadEgl)?;
         let display = Display::from_wayland_display(&api, wl_display, attribs)
             .ok_or(CreateConnectionError::CouldNotGetDisplay)?;
         let this = Self {
@@ -359,7 +371,7 @@ impl Connection {
             this.api
                 .Initialize(*this.display, &mut version.0, &mut version.0)
         };
-        if ok == FALSE {
+        if ok == egl::FALSE {
             return Err(CreateConnectionError::CouldNotInitializeDisplay(
                 this.unwrap_err(),
             ));
@@ -371,15 +383,15 @@ impl Connection {
     /// NOTE: i don't care how you create your EGLConfig. EGLConfig does not need clean up.
     pub fn create_context(
         &mut self,
-        api: EGLenum,
-        config: EGLConfig,
+        api: egl::EGLenum,
+        config: egl::EGLConfig,
         share_context: Option<Context>,
-        attribs: Option<&[EGLint]>,
+        attribs: Option<&[egl::EGLint]>,
     ) -> Result<Context, CreateContextError> {
-        attribs.inspect(|attribs| assert!(attribs.contains(&(NONE as EGLint))));
+        attribs.inspect(|attribs| assert!(attribs.contains(&(egl::NONE as egl::EGLint))));
 
         let ok = unsafe { self.api.BindAPI(api) };
-        if ok == FALSE {
+        if ok == egl::FALSE {
             return Err(CreateContextError::CouldNotBindApi(self.unwrap_err()));
         }
 
@@ -387,11 +399,11 @@ impl Connection {
             self.api.CreateContext(
                 *self.display,
                 config,
-                share_context.map_or(NO_CONTEXT, |c| c.context),
+                share_context.map_or(egl::NO_CONTEXT, |c| c.context),
                 attribs.map_or(null(), |attribs| attribs.as_ptr()),
             )
         };
-        if context == NO_CONTEXT {
+        if context == egl::NO_CONTEXT {
             return Err(CreateContextError::CouldNotCreateContext(self.unwrap_err()));
         }
 
@@ -419,13 +431,13 @@ impl Connection {
     /// NOTE: i don't care how you create your EGLConfig. EGLConfig does not need clean up.
     pub fn create_wayland_window_surface(
         &mut self,
-        config: EGLConfig,
+        config: egl::EGLConfig,
         wl_surface: *mut wayland::wl_surface,
         width: u32,
         height: u32,
-        attribs: Option<&[EGLAttrib]>,
+        attribs: Option<&[egl::EGLAttrib]>,
     ) -> Result<WindowSurface, CreateWindowSurfaceError> {
-        attribs.inspect(|attribs| assert!(attribs.contains(&(NONE as EGLAttrib))));
+        attribs.inspect(|attribs| assert!(attribs.contains(&(egl::NONE as egl::EGLAttrib))));
 
         let wsi = Wsi::from_wayland_surface(wl_surface, width, height)
             .map_err(CreateWindowSurfaceError::CouldNotCreateWaylandWsi)?;
@@ -446,7 +458,7 @@ impl Connection {
                     config,
                     wsi.as_native_window(),
                     attribs.map_or(null(), |attribs| {
-                        mem::transmute::<_, &[EGLint]>(attribs).as_ptr()
+                        mem::transmute::<_, &[egl::EGLint]>(attribs).as_ptr()
                     }),
                 )
             },
@@ -456,12 +468,12 @@ impl Connection {
                     config,
                     wsi.as_native_window(),
                     attribs.map_or(null(), |attribs| {
-                        mem::transmute::<_, &[EGLint]>(attribs).as_ptr()
+                        mem::transmute::<_, &[egl::EGLint]>(attribs).as_ptr()
                     }),
                 )
             },
         };
-        if surface == NO_SURFACE {
+        if surface == egl::NO_SURFACE {
             return Err(CreateWindowSurfaceError::CouldNotCreateSurface(
                 self.unwrap_err(),
             ));
@@ -495,7 +507,7 @@ impl Connection {
     /// `Err(connection.unwrap_err()).context("bla bla ..")`
     pub fn unwrap_err(&self) -> RawError {
         let code = unsafe { self.api.GetError() };
-        if code == SUCCESS as EGLint {
+        if code == egl::SUCCESS as egl::EGLint {
             panic!("attempt to unwrap error, but the last function succeeded");
         } else {
             RawError(code)

@@ -3,7 +3,7 @@ use std::ffi::{c_char, c_int};
 use std::ptr::null_mut;
 use std::{error, fmt, mem};
 
-use crate::libxkbcommon::*;
+use crate::libxkbcommon as xkbcommon;
 
 // ----
 // keymap+state
@@ -40,8 +40,8 @@ pub struct KeymapStateHandle {
 }
 
 pub struct KeymapState {
-    pub keymap: *mut xkb_keymap,
-    pub state: *mut xkb_state,
+    pub keymap: *mut xkbcommon::xkb_keymap,
+    pub state: *mut xkbcommon::xkb_state,
     id: KeymapStateId,
 }
 
@@ -76,8 +76,8 @@ impl fmt::Display for ApiContextCreationError {
 }
 
 pub struct ApiContext {
-    pub api: Api,
-    pub context: *mut xkb_context,
+    pub api: xkbcommon::Api,
+    pub context: *mut xkbcommon::xkb_context,
     keymap_state: Option<KeymapState>,
 }
 
@@ -96,9 +96,10 @@ impl Drop for ApiContext {
 
 impl ApiContext {
     pub fn new() -> Result<Self, ApiContextCreationError> {
-        let api = Api::load().map_err(ApiContextCreationError::Dynlib)?;
+        let api = xkbcommon::Api::load().map_err(ApiContextCreationError::Dynlib)?;
 
-        let context = unsafe { (api.xkb_context_new)(xkb_context_flags::XKB_CONTEXT_NO_FLAGS) };
+        let context =
+            unsafe { (api.xkb_context_new)(xkbcommon::xkb_context_flags::XKB_CONTEXT_NO_FLAGS) };
         if context.is_null() {
             return Err(ApiContextCreationError::NoContext);
         }
@@ -141,8 +142,8 @@ impl ApiContext {
             (self.api.xkb_keymap_new_from_string)(
                 self.context,
                 keymap_addr as *const c_char,
-                xkb_keymap_format::XKB_KEYMAP_FORMAT_TEXT_V1,
-                xkb_keymap_compile_flags::XKB_KEYMAP_COMPILE_NO_FLAGS,
+                xkbcommon::xkb_keymap_format::XKB_KEYMAP_FORMAT_TEXT_V1,
+                xkbcommon::xkb_keymap_compile_flags::XKB_KEYMAP_COMPILE_NO_FLAGS,
             )
         };
         if keymap.is_null() {

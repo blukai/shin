@@ -11,16 +11,18 @@ mod enums {
     include!(concat!(env!("OUT_DIR"), "/gl_enums_generated.rs"));
 }
 
+pub use enums::*;
+pub use types::*;
+
 #[cfg(not(target_family = "wasm"))]
 mod gl46;
 
 #[cfg(target_family = "wasm")]
 mod webgl2;
 
-pub use enums::*;
 #[cfg(not(target_family = "wasm"))]
 pub use gl46::*;
-pub use types::*;
+
 #[cfg(target_family = "wasm")]
 pub use webgl2::*;
 

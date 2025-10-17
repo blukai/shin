@@ -20,23 +20,21 @@ struct GlContextEgl {
 #[cfg(unix)]
 impl GlContextEgl {
     fn from_egl_connection(mut egl_connection: egl::wrap::Connection) -> anyhow::Result<Self> {
-        use egl::*;
-
         let egl_config = {
             #[rustfmt::skip]
             let config_attrs = [
-                RED_SIZE, 8,
-                GREEN_SIZE, 8,
-                BLUE_SIZE, 8,
+                egl::RED_SIZE, 8,
+                egl::GREEN_SIZE, 8,
+                egl::BLUE_SIZE, 8,
                 // NOTE: EGL_ALPHA_SIZE enables surface transparency.
-                ALPHA_SIZE, 8,
-                CONFORMANT, OPENGL_BIT as _,
-                RENDERABLE_TYPE, OPENGL_BIT as _,
-                SURFACE_TYPE, WINDOW_BIT as _,
+                egl::ALPHA_SIZE, 8,
+                egl::CONFORMANT, egl::OPENGL_BIT as _,
+                egl::RENDERABLE_TYPE, egl::OPENGL_BIT as _,
+                egl::SURFACE_TYPE, egl::WINDOW_BIT as _,
                 // NOTE: EGL_SAMPLE_BUFFERS + EGL_SAMPLES enable some kind of don't care anti aliasing.
-                SAMPLE_BUFFERS, 1,
-                SAMPLES, 4,
-                NONE,
+                egl::SAMPLE_BUFFERS, 1,
+                egl::SAMPLES, 4,
+                egl::NONE,
             ];
             // TODO: might need/want MIN_SWAP_INTERVAL and MAX_SWAP_INTERVAL these to disable vsync?
             let mut num_configs = 0;
@@ -47,7 +45,7 @@ impl GlContextEgl {
                     0,
                     &mut num_configs,
                 )
-            } == FALSE
+            } == egl::FALSE
             {
                 return Err(egl_connection.unwrap_err()).context("could not get num configs");
             }
@@ -61,7 +59,7 @@ impl GlContextEgl {
                     num_configs,
                     &mut num_configs,
                 )
-            } == FALSE
+            } == egl::FALSE
             {
                 return Err(egl_connection.unwrap_err()).context("could not choose config");
             }
@@ -75,29 +73,34 @@ impl GlContextEgl {
         let egl_context = {
             #[rustfmt::skip]
             let context_attrs = [
-                CONTEXT_MAJOR_VERSION as _, 3,
+                egl::CONTEXT_MAJOR_VERSION as _, 3,
                 // TODO: can't get gl 3.3 working AND core profile, figure out why.
                 // CONTEXT_MINOR_VERSION as _, 3,
                 // CONTEXT_OPENGL_PROFILE_MASK as _, CONTEXT_OPENGL_CORE_PROFILE_BIT,
-                NONE as EGLint,
+                egl::NONE as _,
             ];
-            egl_connection.create_context(OPENGL_API, egl_config, None, Some(&context_attrs))?
+            egl_connection.create_context(
+                egl::OPENGL_API,
+                egl_config,
+                None,
+                Some(&context_attrs),
+            )?
         };
 
         if unsafe {
             egl_connection.api.MakeCurrent(
                 *egl_connection.display,
-                NO_SURFACE,
-                NO_SURFACE,
+                egl::NO_SURFACE,
+                egl::NO_SURFACE,
                 egl_context.context,
             )
-        } == FALSE
+        } == egl::FALSE
         {
             return Err(egl_connection.unwrap_err()).context("could not make current");
         }
 
         // TODO: figure out an okay way to include vsync toggle.
-        // context.set_swap_interval(&egl, 0)?;
+        // unsafe { egl_connection.api.SwapInterval(*egl_connection.display, 0) };
 
         Ok(Self {
             egl_connection,
