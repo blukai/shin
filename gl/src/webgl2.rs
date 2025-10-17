@@ -2,7 +2,7 @@ use std::ffi::{CStr, c_void};
 
 use anyhow::Context as _;
 
-use super::Apier;
+use super::Adapter;
 use super::types::*;
 
 pub struct Api {
@@ -33,7 +33,7 @@ impl Api {
     }
 }
 
-impl Apier for Api {
+impl Adapter for Api {
     type Buffer = u32;
     type Program = u32;
     type Shader = u32;

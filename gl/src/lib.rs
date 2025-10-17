@@ -30,7 +30,7 @@ pub use webgl2::*;
 //
 // TODO: make sure that all methods match libgl's methods 1:1 with the exception of things that can
 // be rustified (like strings and stuff).
-pub trait Apier {
+pub trait Adapter {
     type Buffer;
     type Program;
     type Shader;
@@ -146,7 +146,7 @@ pub trait Apier {
     unsafe fn viewport(&self, x: GLint, y: GLint, width: GLsizei, height: GLsizei);
 }
 
-pub type Buffer = <Api as Apier>::Buffer;
-pub type Program = <Api as Apier>::Program;
-pub type Shader = <Api as Apier>::Shader;
-pub type Texture = <Api as Apier>::Texture;
+pub type Buffer = <Api as Adapter>::Buffer;
+pub type Program = <Api as Adapter>::Program;
+pub type Shader = <Api as Adapter>::Shader;
+pub type Texture = <Api as Adapter>::Texture;

@@ -3,7 +3,7 @@ use std::num::NonZero;
 
 use anyhow::{Context as _, anyhow};
 
-use super::Apier;
+use super::Adapter;
 use super::enums::*;
 use super::types::*;
 
@@ -31,7 +31,7 @@ impl Api {
     }
 }
 
-impl Apier for Api {
+impl Adapter for Api {
     type Buffer = NonZero<GLuint>;
     type Program = NonZero<GLuint>;
     type Shader = NonZero<GLuint>;

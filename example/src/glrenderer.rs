@@ -3,7 +3,7 @@ use std::mem::offset_of;
 use std::ptr::null;
 
 use anyhow::{Context as _, anyhow};
-use gl::Apier as _;
+use gl::Adapter as _;
 use nohash::NoHashMap;
 
 const SHADER_SOURCE: &str = include_str!("shader.glsl");
