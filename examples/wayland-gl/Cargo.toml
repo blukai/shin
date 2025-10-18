@@ -1,0 +1,17 @@
+[package]
+name = "example-wayland-gl"
+version = "0.0.0"
+edition.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+# workspace
+egl = { workspace = true }
+gl = { workspace = true }
+
+# workspace
+[dependencies.wayland]
+workspace = true
+features = [
+  "xdg-shell",
+]

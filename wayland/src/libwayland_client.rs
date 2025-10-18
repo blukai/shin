@@ -92,8 +92,8 @@ pub struct ClientApi {
 
 impl ClientApi {
     pub fn load() -> Result<Self, dynlib::Error> {
-        let dynlib = DynLib::load(c"libwayland-client.so")
-            .or_else(|_| DynLib::load(c"libwayland-client.so.0"))?;
+        let dynlib = DynLib::load(c"libwayland-client.so.0")
+            .or_else(|_| DynLib::load(c"libwayland-client.so"))?;
 
         Ok(Self {
             wl_display_cancel_read: dynlib.lookup(c"wl_display_cancel_read")?,

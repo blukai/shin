@@ -47,8 +47,8 @@ pub struct CursorApi {
 
 impl CursorApi {
     pub fn load() -> Result<Self, dynlib::Error> {
-        let dynlib = DynLib::load(c"libwayland-cursor.so")
-            .or_else(|_| DynLib::load(c"libwayland-cursor.so.0"))?;
+        let dynlib = DynLib::load(c"libwayland-cursor.so.0")
+            .or_else(|_| DynLib::load(c"libwayland-cursor.so"))?;
 
         Ok(Self {
             wl_cursor_theme_load: dynlib.lookup(c"wl_cursor_theme_load")?,

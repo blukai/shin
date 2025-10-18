@@ -5,7 +5,7 @@ use gl::wrap::Adapter as _;
 use raw_window_handle as rwh;
 use window::{Event, Window, WindowAttrs, WindowEvent};
 
-use example::{GlContext, GlRenderer};
+use example_framework::{GlContext, GlRenderer};
 
 const DEFAULT_FONT_DATA: &[u8] = include_bytes!("../fixtures/JetBrainsMono-Regular.ttf");
 

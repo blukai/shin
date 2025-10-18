@@ -1,4 +1,3 @@
-use std::mem;
 use std::ptr::null_mut;
 use std::{array, ffi::c_void};
 
@@ -20,54 +19,48 @@ struct GlContextEgl {
 #[cfg(unix)]
 impl GlContextEgl {
     fn from_egl_connection(mut egl_connection: egl::wrap::Connection) -> anyhow::Result<Self> {
+        // NOTE: c is soooooo lax about types; but all of them really are just ints.
+
         let egl_config = {
             #[rustfmt::skip]
-            let config_attrs = [
-                egl::RED_SIZE, 8,
-                egl::GREEN_SIZE, 8,
-                egl::BLUE_SIZE, 8,
-                // NOTE: EGL_ALPHA_SIZE enables surface transparency.
-                egl::ALPHA_SIZE, 8,
-                egl::CONFORMANT, egl::OPENGL_BIT as _,
-                egl::RENDERABLE_TYPE, egl::OPENGL_BIT as _,
-                egl::SURFACE_TYPE, egl::WINDOW_BIT as _,
-                // NOTE: EGL_SAMPLE_BUFFERS + EGL_SAMPLES enable some kind of don't care anti aliasing.
-                egl::SAMPLE_BUFFERS, 1,
-                egl::SAMPLES, 4,
-                egl::NONE,
-            ];
-            // TODO: might need/want MIN_SWAP_INTERVAL and MAX_SWAP_INTERVAL these to disable vsync?
-            let mut num_configs = 0;
-            if unsafe {
-                egl_connection.api.GetConfigs(
-                    *egl_connection.display,
-                    null_mut(),
-                    0,
-                    &mut num_configs,
-                )
-            } == egl::FALSE
-            {
-                return Err(egl_connection.unwrap_err()).context("could not get num configs");
-            }
+            let config_attrs: [egl::EGLint; _] = [
+                egl::SURFACE_TYPE  as _, egl::WINDOW_BIT,
+                egl::CONFORMANT as _, egl::OPENGL_BIT,
+                egl::RENDERABLE_TYPE as _, egl::OPENGL_BIT,
+                egl::COLOR_BUFFER_TYPE as _, egl::RGB_BUFFER as _,
 
-            let mut configs = vec![unsafe { mem::zeroed() }; num_configs as usize];
-            if unsafe {
+                egl::RED_SIZE as _, 8,
+                egl::GREEN_SIZE as _, 8,
+                egl::BLUE_SIZE as _, 8,
+                // NOTE: EGL_ALPHA_SIZE enables surface transparency.
+                egl::ALPHA_SIZE as _, 8,
+
+                // NOTE: EGL_SAMPLE_BUFFERS + EGL_SAMPLES enable some kind of don't care anti aliasing.
+                egl::SAMPLE_BUFFERS as _, 1,
+                egl::SAMPLES as _, 4,
+
+                egl::NONE as _,
+            ];
+
+            // NOTE: 64 is enough configs, isn't it?
+            let mut configs = [null_mut(); 64];
+            let mut num_configs = 0;
+            let ok = unsafe {
                 egl_connection.api.ChooseConfig(
                     *egl_connection.display,
-                    config_attrs.as_ptr() as _,
+                    config_attrs.as_ptr(),
                     configs.as_mut_ptr(),
-                    num_configs,
+                    configs.len() as egl::EGLint,
                     &mut num_configs,
                 )
-            } == egl::FALSE
-            {
+            };
+            if ok == egl::FALSE || num_configs == 0 {
                 return Err(egl_connection.unwrap_err()).context("could not choose config");
             }
-            unsafe { configs.set_len(num_configs as usize) };
-            configs
-                .first()
-                .copied()
-                .context("could not choose config (no compatible ones probably)")?
+
+            let ret = configs[0];
+            assert!(!ret.is_null());
+            ret
         };
 
         let egl_context = {

@@ -1,5 +1,5 @@
 [package]
-name = "example"
+name = "example-framework"
 version = "0.0.0"
 edition.workspace = true
 

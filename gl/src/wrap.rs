@@ -148,6 +148,8 @@ mod gl46 {
 
     pub use crate::libgl::Api;
 
+    // TODO: do not implement this on libgl::Api, but in a separate api please. it's easy to mix
+    // adapter stuff into non-adapter env.
     impl Adapter for Api {
         type Buffer = NonZero<gl::GLuint>;
         type Program = NonZero<gl::GLuint>;

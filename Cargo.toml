@@ -3,7 +3,8 @@ resolver = "2"
 members = [
   "dynlib",
   "egl",
-  "example",
+  "examples/framework",
+  "examples/wayland-gl",
   "gl",
   "input",
   "js",

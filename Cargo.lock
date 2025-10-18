@@ -320,7 +320,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "example"
+name = "example-framework"
 version = "0.0.0"
 dependencies = [
  "anyhow",
@@ -333,6 +333,16 @@ dependencies = [
  "raw-window-handle",
  "sx",
  "window",
+]
+
+[[package]]
+name = "example-wayland-gl"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "egl",
+ "gl",
+ "wayland",
 ]
 
 [[package]]

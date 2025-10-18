@@ -33,7 +33,7 @@ pub struct EglApi {
 impl EglApi {
     pub fn load() -> Result<Self, dynlib::Error> {
         let dynlib =
-            DynLib::load(c"libwayland-egl.so").or_else(|_| DynLib::load(c"libwayland-egl.so.1"))?;
+            DynLib::load(c"libwayland-egl.so.1").or_else(|_| DynLib::load(c"libwayland-egl.so"))?;
 
         Ok(Self {
             wl_egl_window_create: dynlib.lookup(c"wl_egl_window_create")?,
