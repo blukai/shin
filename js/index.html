@@ -11,7 +11,7 @@
             WebAssembly.instantiateStreaming(
                 // TODO: don't hardcode? can i list compiled wasm modules? or
                 // maybe display a file select?
-                fetch("../target/wasm32-unknown-unknown/debug/example.wasm"),
+                fetch("../target/wasm32-unknown-unknown/debug/example-framework.wasm"),
                 glue.importObject
             ).then((result) => {
                 glue.init(result.instance);

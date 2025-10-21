@@ -89,6 +89,9 @@ struct Context {
     default_font_handle: sx::FontHandle,
     draw_buffer: sx::DrawBuffer<GlRenderer>,
     gl_renderer: GlRenderer,
+    //
+    // TODO: std::time::Instante is not available on wasm targets.
+    // prev_time: Option<std::time::Instant>,
 }
 
 impl Context {
@@ -143,10 +146,15 @@ impl Context {
             default_font_handle,
             draw_buffer: sx::DrawBuffer::default(),
             gl_renderer,
+            // prev_time: None,
         })
     }
 
     fn iterate(&mut self) -> anyhow::Result<()> {
+        // let now = std::time::Instant::now();
+        // let prev_time = self.prev_time.replace(now);
+        // let dt = prev_time.map_or(0.0, |prev_time| (now - prev_time).as_secs_f32());
+
         self.window.pump_events()?;
         let events = iter::from_fn(|| self.window.pop_event()).filter_map(|event| match event {
             Event::Window(window_event) => {
@@ -188,14 +196,28 @@ impl Context {
             pt_size: 16.0,
             scale_factor,
         });
+
+        let mut text_pos = sx::Vec2::splat(24.0);
+
+        // draw_text(
+        //     &format!("frame time: {dt:.6}, fps: {}", 1.0 / dt),
+        //     font_instance,
+        //     sx::Rgba8::WHITE,
+        //     text_pos,
+        //     &mut self.texture_service,
+        //     &mut self.draw_buffer,
+        // );
+        // text_pos.y += font_instance.height();
+
         draw_text(
             "hello sailor!",
             font_instance,
             sx::Rgba8::WHITE,
-            sx::Vec2::splat(24.0),
+            text_pos,
             &mut self.texture_service,
             &mut self.draw_buffer,
         );
+        text_pos.y += font_instance.height();
 
         self.gl_renderer
             .handle_texture_commands(self.texture_service.drain_comands(), &self.gl_context.api)

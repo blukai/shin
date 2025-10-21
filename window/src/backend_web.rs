@@ -46,13 +46,31 @@ impl WebBackend {
         let dataset = canvas.get("dataset");
         dataset.set("rawHandle", &js::Value::from_f64(canvas_raw_handle as f64));
 
-        let (width, height) = attrs.logical_size.unwrap_or(DEFAULT_LOGICAL_SIZE);
-        canvas.set("width", &js::Value::from_f64(width as f64));
-        canvas.set("height", &js::Value::from_f64(height as f64));
+        {
+            // NOTE: on web
+            //   canvas.style.width, canvas.style.height = css pixels (logical pixels)
+            //   canvas.width, canvas.height = framebuffer resolution (physical pixels).
 
-        // TODO: do i need to check if width and height were set correctly?
+            let logical = attrs.logical_size.unwrap_or(DEFAULT_LOGICAL_SIZE);
+            let scale = js::GLOBAL.get("devicePixelRatio").as_f64();
+            let physical = ((logical.0 as f64 * scale), (logical.1 as f64 * scale));
 
-        // TODO: handle scale factor (/ pixel ratio)
+            let style = canvas.get("style");
+            style.set("width", &js::Value::from_str(&format!("{}px", logical.0)));
+            style.set("height", &js::Value::from_str(&format!("{}px", logical.1)));
+
+            canvas.set("width", &js::Value::from_f64(physical.0));
+            canvas.set("height", &js::Value::from_f64(physical.1));
+
+            // TODO: would it be good check if width and height were set correctly?
+            //   ensure that there's no conflicts with css and stuff (maybe there are !important
+            //   bangs on things).
+            //   and if yes - bail out or log a warning or something?
+
+            // TODO: handle canvas resizing (resize observer?)
+            //   canvas.width, canvas.height need to be adjusted when devicePixelRatio changes or
+            //   when size of a canvas itself changes.
+        }
 
         let boxed = Box::new(Self {
             attrs,
@@ -109,10 +127,30 @@ impl Window for WebBackend {
     }
 
     fn logical_size(&self) -> (u32, u32) {
-        unimplemented!()
+        let computed_style = js::GLOBAL
+            .get("getComputedStyle")
+            .call(&[self.canvas.clone()])
+            .expect("could not get computed style");
+
+        let width: u32 = computed_style
+            .get("width")
+            .as_string()
+            .strip_suffix("px")
+            .and_then(|s| s.parse::<f64>().ok())
+            .expect("invalid computed width") as u32;
+        let height: u32 = computed_style
+            .get("height")
+            .as_string()
+            .strip_suffix("px")
+            .and_then(|s| s.parse::<f64>().ok())
+            .expect("invalid computed height") as u32;
+
+        (width, height)
     }
 
     fn scale_factor(&self) -> f64 {
-        unimplemented!()
+        // NOTE: devicePixelRatio changes when you zoom-in/zoom-out on a page.
+        //   it can't really be cached.
+        js::GLOBAL.get("devicePixelRatio").as_f64()
     }
 }

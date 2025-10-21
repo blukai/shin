@@ -10,6 +10,10 @@ use std::{error, fmt};
 // TODO: call and construct must operate not on owned Value, but on references.
 //   this will elliminate many ref counting calls.
 
+// TODO: owned Value is not always good; there needs to be some kind of weak handle.
+//   gl::wrap Adapter implementor owns Value and hands out self-made weak references, while it's a
+//   functional solution, it's somewhat ugly.
+
 mod sys {
     use std::alloc;
 

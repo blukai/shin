@@ -3,7 +3,7 @@ use std::{array, mem};
 
 use scopeguard::ScopeGuard;
 
-use crate::{Externs, Rect, TextureHandle, TextureHandleKind, Vec2};
+use crate::{Externs, Rect, TextureFormat, TextureHandle, TextureHandleKind, Vec2};
 
 // TODO: consider offloading vertex generation and stuff for the gpu (or maybe for software
 // renderer?) to the renderer. accumulate shapes, not verticies.
@@ -107,12 +107,12 @@ impl<E: Externs> FillTexture<E> {
         Self { texture, coords }
     }
 
-    pub fn new_internal(texture: TextureHandle, coords: Rect) -> Self {
-        Self::new(TextureHandleKind::Internal(texture), coords)
+    pub fn new_internal(handle: TextureHandle, coords: Rect) -> Self {
+        Self::new(TextureHandleKind::Internal(handle), coords)
     }
 
-    pub fn new_external(texture: E::TextureHandle, coords: Rect) -> Self {
-        Self::new(TextureHandleKind::External(texture), coords)
+    pub fn new_external(handle: E::TextureHandle, format: TextureFormat, coords: Rect) -> Self {
+        Self::new(TextureHandleKind::External { handle, format }, coords)
     }
 }
 
@@ -138,7 +138,7 @@ impl<E: Externs> Fill<E> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum StrokeAlignment {
     Inside,
     Outside,
@@ -345,7 +345,7 @@ impl<E: Externs> DrawData<E> {
 // the implementation is completely useless. this will probably work pretty well for tooptips and
 // stuff.
 #[repr(usize)]
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy)]
 pub enum DrawLayer {
     #[default]
     Primary,

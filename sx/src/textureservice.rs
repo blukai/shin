@@ -13,30 +13,11 @@ use crate::Externs;
 //   the word texture doesn't make a lot of sense to me in context of images or graphics really.
 //   texture is something physical, something that you can sense; or imagine how it would feel.
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TextureHandle {
-    id: u32,
-}
-
-impl Hash for TextureHandle {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        state.write_u32(self.id);
-    }
-}
-
-impl NoHash for TextureHandle {}
-
-#[derive(Debug, Clone)]
-pub enum TextureHandleKind<E: Externs> {
-    Internal(TextureHandle),
-    External(E::TextureHandle),
-}
-
 // NOTE: TextureFormat is modeled after webgpu
 //   see:
 //   - https://github.com/webgpu-native/webgpu-headers/blob/449359147fae26c07efe4fece25013df396287db/webgpu.h
 //   - https://www.w3.org/TR/webgpu/#texture-formats
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum TextureFormat {
     Rgba8Unorm,
     R8Unorm,
@@ -56,6 +37,28 @@ pub struct TextureDesc {
     pub format: TextureFormat,
     pub w: u32,
     pub h: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TextureHandle {
+    id: u32,
+}
+
+impl Hash for TextureHandle {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_u32(self.id);
+    }
+}
+
+impl NoHash for TextureHandle {}
+
+#[derive(Debug, Clone)]
+pub enum TextureHandleKind<E: Externs> {
+    Internal(TextureHandle),
+    External {
+        handle: E::TextureHandle,
+        format: TextureFormat,
+    },
 }
 
 #[derive(Debug, Clone)]

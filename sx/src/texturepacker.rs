@@ -294,7 +294,7 @@ impl TexturePacker {
     }
 
     pub fn get_entry(&self, index: usize) -> &TexturePackerEntry {
-        self.try_get_entry(index).expect("invalud index")
+        self.try_get_entry(index).expect("invalid index")
     }
 
     pub fn texture_size(&self) -> (u32, u32) {
