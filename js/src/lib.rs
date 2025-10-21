@@ -3,6 +3,13 @@ use std::{error, fmt};
 // NOTE: this is based on  <https://pkg.go.dev/syscall/js>.
 // it's nothing like wasm-bindgen.
 
+// TODO: get and set must operate not on singular properties, but on property paths.
+//   instead of GLOBAL.get("performance").get("now")
+//   must be possible to do GLOBAL.get(&["performance", "now"])
+
+// TODO: call and construct must operate not on owned Value, but on references.
+//   this will elliminate many ref counting calls.
+
 mod sys {
     use std::alloc;
 
@@ -36,6 +43,7 @@ mod sys {
         // NOTE: value arg is a pointer because the value itself can be a number or predefined or a
         // reference.
         pub fn set(r#ref: Value, prop_ptr: *const u8, prop_len: u32, value: *const Value);
+
         pub fn call(r#ref: Value, agrs_ptr: *const Value, args_len: u32, out: *mut Value) -> bool;
         // NOTE: some things require you to invoke their constructor (for example Uint8Array).
         //   this is almost the exact copy of the `call` method.

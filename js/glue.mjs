@@ -262,6 +262,7 @@ export class Glue {
                     const value = resolveJsValueFromRsValuePtr(valuePtr);
                     Reflect.set(target, prop, value);
                 },
+
                 call: (ref, argsPtr, argsLen, outPtr) => {
                     const mem = getMemoryView(DataView);
                     try {
@@ -318,7 +319,7 @@ export class Glue {
         //     }
         //     this.importObject.env[key] = (...args) => {
         //         const ret = value(...args);
-        //         console.log(`${key.padEnd(32)} (${args.join(", ").padEnd(32)}) -> ${ret}`);
+        //         console.log(`${key.padEnd(32)} (${args.join(", ").padEnd(64)}) -> ${ret}`);
         //         return ret;
         //     };
         // });
