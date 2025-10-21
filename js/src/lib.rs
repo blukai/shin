@@ -37,6 +37,14 @@ mod sys {
         // reference.
         pub fn set(r#ref: Value, prop_ptr: *const u8, prop_len: u32, value: *const Value);
         pub fn call(r#ref: Value, agrs_ptr: *const Value, args_len: u32, out: *mut Value) -> bool;
+        // NOTE: some things require you to invoke their constructor (for example Uint8Array).
+        //   this is almost the exact copy of the `call` method.
+        pub fn construct(
+            r#ref: Value,
+            agrs_ptr: *const Value,
+            args_len: u32,
+            out: *mut Value,
+        ) -> bool;
 
         pub fn string_get(r#ref: Value, ptr: *mut u32, len: *mut u32);
     }
@@ -102,20 +110,24 @@ const TY_OBJECT: u64 = 1;
 const TY_FUNCTION: u64 = 2;
 const TY_STRING: u64 = 3;
 
-// TODO: add bools.
-//
 // NOTE: ids can't start at 0 because when encoded into tagged/boxed nan there would be no
 // distinction between id 0 and nan.
 const ID_UNDEFINED: u64 = 1;
 const ID_NULL: u64 = 2;
 const ID_NAN: u64 = 3;
-const ID_GLOBAL: u64 = 4;
-const ID_MAX: u64 = 5;
+const ID_TRUE: u64 = 4;
+const ID_FALSE: u64 = 5;
+const ID_GLOBAL: u64 = 6;
+const ID_GLUE: u64 = 7;
+const ID_MAX: u64 = 8;
 
 pub const UNDEFINED: Value = Value::from_ty_id(TY_DONT_CARE, ID_UNDEFINED);
 pub const NULL: Value = Value::from_ty_id(TY_DONT_CARE, ID_NULL);
 pub const NAN: Value = Value::from_ty_id(TY_DONT_CARE, ID_NAN);
+pub const TRUE: Value = Value::from_ty_id(TY_DONT_CARE, ID_TRUE);
+pub const FALSE: Value = Value::from_ty_id(TY_DONT_CARE, ID_FALSE);
 pub const GLOBAL: Value = Value::from_ty_id(TY_OBJECT, ID_GLOBAL);
+pub const GLUE: Value = Value::from_ty_id(TY_OBJECT, ID_GLUE);
 
 impl Value {
     const fn from_ty_id(ty: u64, id: u64) -> Self {
@@ -142,6 +154,10 @@ impl Value {
     /// be careful when using it as a callback with things like requestAnimationFrame, etc.
     pub fn from_closure<F: ?Sized>(c: &Closure<F>) -> Self {
         c.value.clone()
+    }
+
+    pub fn from_bool(b: bool) -> Self {
+        if b { TRUE } else { FALSE }
     }
 
     const fn ty(&self) -> u64 {
@@ -172,6 +188,10 @@ impl Value {
         self.ty() == TY_STRING
     }
 
+    pub fn is_boolean(&self) -> bool {
+        self.eq(&TRUE) || self.eq(&FALSE)
+    }
+
     fn is_ref(&self) -> bool {
         !(self.is_predefined() || self.is_number())
     }
@@ -192,6 +212,18 @@ impl Value {
         debug_assert!(self.is_function());
         let mut ret = UNDEFINED;
         let ok = unsafe { sys::call(self.0, args.as_ptr().cast(), args.len() as u32, &mut ret.0) };
+        if ok {
+            Ok(ret)
+        } else {
+            Err(Error { value: ret })
+        }
+    }
+
+    pub fn construct(&self, args: &[Self]) -> Result<Value, Error> {
+        debug_assert!(self.is_function());
+        let mut ret = UNDEFINED;
+        let ok =
+            unsafe { sys::construct(self.0, args.as_ptr().cast(), args.len() as u32, &mut ret.0) };
         if ok {
             Ok(ret)
         } else {
@@ -230,12 +262,24 @@ impl Value {
     pub fn as_string(&self) -> String {
         self.try_as_string().expect("not a string")
     }
+
+    pub fn try_as_bool(&self) -> Option<bool> {
+        match () {
+            _ if self.0 == TRUE.0 => Some(true),
+            _ if self.0 == FALSE.0 => Some(false),
+            _ => None,
+        }
+    }
+
+    pub fn as_bool(&self) -> bool {
+        self.try_as_bool().expect("not a bool")
+    }
 }
 
 // ----
 // error
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Error {
     value: Value,
 }
@@ -250,6 +294,14 @@ impl fmt::Display for Error {
         } else {
             f.write_str("could not get error message")
         }
+    }
+}
+
+// NOTE: derive(Debug) prints the underlying Value.
+//   it's not great when .expect is used.
+impl fmt::Debug for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        (self as &dyn fmt::Display).fmt(f)
     }
 }
 

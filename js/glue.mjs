@@ -40,8 +40,11 @@ const TY_STRING = 3;
 const ID_UNDEFINED = 1;
 const ID_NULL = 2;
 const ID_NAN = 3;
-const ID_GLOBAL = 4;
-const ID_MAX = 5;
+const ID_TRUE = 4;
+const ID_FALSE = 5;
+const ID_GLOBAL = 6;
+const ID_GLUE = 7;
+const ID_MAX = 8;
 
 function rsValueFromTyId(ty, id) {
     assertEq(typeof ty, "number");
@@ -67,7 +70,10 @@ function rsValueIsPredefined(value) {
 const UNDEFINED = rsValueFromTyId(TY_DONT_CARE, ID_UNDEFINED);
 const NULL = rsValueFromTyId(TY_DONT_CARE, ID_NULL);
 const NAN = rsValueFromTyId(TY_DONT_CARE, ID_NAN);
+const TRUE = rsValueFromTyId(TY_DONT_CARE, ID_TRUE);
+const FALSE = rsValueFromTyId(TY_DONT_CARE, ID_FALSE);
 const GLOBAL = rsValueFromTyId(TY_OBJECT, ID_GLOBAL);
+const GLUE = rsValueFromTyId(TY_OBJECT, ID_GLUE);
 
 function rsValueIdx(value) {
     assertEq(typeof value, "bigint");
@@ -128,7 +134,10 @@ export class Glue {
             switch (jsValue) {
                 case undefined: return mem.setBigUint64(rsValuePtr, UNDEFINED, true);
                 case null: return mem.setBigUint64(rsValuePtr, NULL, true);
+                case true: return mem.setBigUint64(rsValuePtr, TRUE, true);
+                case false: return mem.setBigUint64(rsValuePtr, FALSE, true);
                 case globalThis: return assert(false);
+                case this: return assert(false);
             }
             if (typeof jsValue === "number") {
                 // NOTE: nan is a special case that cannot be covered by the switch
@@ -166,7 +175,10 @@ export class Glue {
                 case UNDEFINED: return undefined;
                 case NULL: return null;
                 case NAN: return NaN;
+                case TRUE: return true;
+                case FALSE: return false;
                 case GLOBAL: return globalThis;
+                case GLUE: return this;
             }
             const idx = rsValueIdx(rsValue);
             return this.values.get(idx);
@@ -265,6 +277,22 @@ export class Glue {
                         return false;
                     }
                 },
+                construct: (ref, argsPtr, argsLen, outPtr) => {
+                    const mem = getMemoryView(DataView);
+                    try {
+                        const target = resolveJsValueFromRsValue(ref);
+                        const args = Array.from({ length: argsLen }, (_, i) => {
+                            return resolveJsValueFromRsValuePtr(argsPtr + i * 8);
+                        });
+                        const ok = Reflect.construct(target, args);
+                        storeJsValueIntoRsValuePtr(ok, outPtr);
+                        return true;
+                    } catch (err) {
+                        storeJsValueIntoRsValuePtr(err, outPtr);
+                        return false;
+                    }
+                },
+
 
                 string_get: (ref, ptrPtr, lenPtr) => {
                     const value = resolveJsValueFromRsValue(ref);
