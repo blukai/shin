@@ -150,6 +150,7 @@ unsafe fn create_program(
 struct Shader {
     program: gl::wrap::Program,
     u_projection_loc: gl::wrap::UniformLocation,
+    u_sampler_loc: gl::wrap::UniformLocation,
 }
 
 struct TextureFormatDesc {
@@ -260,9 +261,13 @@ impl GlRenderer {
                 let u_projection_loc = gl_api
                     .get_uniform_location(program, c"u_projection")
                     .context("could not get loc of u_projection")?;
+                let u_sampler_loc = gl_api
+                    .get_uniform_location(program, c"u_sampler")
+                    .context("could not get loc of u_sampler")?;
                 Shader {
                     program,
                     u_projection_loc,
+                    u_sampler_loc,
                 }
             };
             let shader_r8 = {
@@ -275,9 +280,13 @@ impl GlRenderer {
                 let u_projection_loc = gl_api
                     .get_uniform_location(program, c"u_projection")
                     .context("could not get loc of u_projection")?;
+                let u_sampler_loc = gl_api
+                    .get_uniform_location(program, c"u_sampler")
+                    .context("could not get loc of u_sampler")?;
                 Shader {
                     program,
                     u_projection_loc,
+                    u_sampler_loc,
                 }
             };
 
@@ -380,9 +389,35 @@ impl GlRenderer {
                             .context("could not create texture")?;
                         gl_api.bind_texture(gl::TEXTURE_2D, Some(texture));
 
+                        // NOTE: it seems like these parameters are getting stored to a texture
+                        // that is currently bound.
+                        //   people on the internet are saying this, but i coudn't find a
+                        //   definitive proof really.
+                        //
+                        //   > glTexParameter specifies the texture parameters for the active
+                        //   texture unit, specified by calling glActiveTexture.
+                        //   - https://registry.khronos.org/OpenGL-Refpages/gl4/html/glTexParameter.xhtml
+                        //
+                        //   but i do not call glActiveTexture here, and it works. very confusing.
+
                         // NOTE: this fixes tilting when rendering bitmaps. see
                         // https://stackoverflow.com/questions/15983607/opengl-texture-tilted.
                         gl_api.pixel_storei(gl::UNPACK_ALIGNMENT, format_desc.block_size);
+
+                        // NOTE: without those params you can't see shit in this mist
+                        //
+                        // NOTE: to deal with min and mag filters, etc. - you might want to
+                        // consider introducing SamplerDescriptor and TextureViewDescriptor
+                        gl_api.tex_parameteri(
+                            gl::TEXTURE_2D,
+                            gl::TEXTURE_MIN_FILTER,
+                            gl::NEAREST as _,
+                        );
+                        gl_api.tex_parameteri(
+                            gl::TEXTURE_2D,
+                            gl::TEXTURE_MAG_FILTER,
+                            gl::NEAREST as _,
+                        );
 
                         gl_api.tex_image_2d(
                             gl::TEXTURE_2D,
@@ -425,7 +460,10 @@ impl GlRenderer {
                     }
                 }
                 sx::TextureCommandKind::Delete => {
-                    let texture = self.get_texture(command.handle);
+                    let texture = self
+                        .textures
+                        .remove(&command.handle)
+                        .unwrap_or_else(|| panic!("invalid handle: {:?}", &command.handle));
                     unsafe { gl_api.delete_texture(texture.gl_handle) };
                 }
             }
@@ -465,8 +503,18 @@ impl GlRenderer {
                 0,
                 physical_size.x as gl::GLsizei,
                 physical_size.y as gl::GLsizei,
-            )
-        };
+            );
+
+            gl_api.enable(gl::BLEND);
+            // TODO: do i need this func_add?
+            gl_api.blend_equation(gl::FUNC_ADD);
+            gl_api.blend_func_separate(
+                gl::SRC_ALPHA,
+                gl::ONE_MINUS_SRC_ALPHA,
+                gl::ONE,
+                gl::ONE_MINUS_SRC_ALPHA,
+            );
+        }
 
         unsafe {
             gl_api.bind_buffer(gl::ARRAY_BUFFER, Some(self.vbo));
@@ -474,17 +522,9 @@ impl GlRenderer {
             gl_api.bind_vertex_array(Some(self.vao));
         }
 
-        // NOTE: without those params you can't see shit in this mist
-        //
-        // NOTE: to deal with min and mag filters, etc. - you might want to
-        // consider introducing SamplerDescriptor and TextureViewDescriptor
-        unsafe {
-            gl_api.tex_parameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as _);
-            gl_api.tex_parameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as _);
-        }
-
         for it in draw_data {
             unsafe {
+                // TODO: should probably do buffer_sub_data here?
                 gl_api.buffer_data(
                     gl::ARRAY_BUFFER,
                     (it.vertices.len() * size_of::<sx::Vertex>()) as gl::GLsizeiptr,
@@ -532,11 +572,6 @@ impl GlRenderer {
                     },
                 );
 
-                unsafe {
-                    gl_api.active_texture(gl::TEXTURE0);
-                    gl_api.bind_texture(gl::TEXTURE_2D, Some(texture_gl_handle));
-                };
-
                 let shader = match texture_format {
                     TextureFormat::Rgba8Unorm => &self.shader_rgba8,
                     TextureFormat::R8Unorm => &self.shader_r8,
@@ -554,18 +589,14 @@ impl GlRenderer {
                             gl::FALSE,
                             projection_matrix.as_ptr().cast(),
                         );
-
-                        gl_api.enable(gl::BLEND);
-                        // TODO: do i need this func_add?
-                        gl_api.blend_equation(gl::FUNC_ADD);
-                        gl_api.blend_func_separate(
-                            gl::SRC_ALPHA,
-                            gl::ONE_MINUS_SRC_ALPHA,
-                            gl::ONE,
-                            gl::ONE_MINUS_SRC_ALPHA,
-                        );
                     }
                 }
+
+                unsafe {
+                    gl_api.active_texture(gl::TEXTURE0);
+                    gl_api.bind_texture(gl::TEXTURE_2D, Some(texture_gl_handle));
+                    gl_api.uniform_1i(shader.u_sampler_loc, 0);
+                };
 
                 unsafe {
                     gl_api.draw_elements(
@@ -581,6 +612,10 @@ impl GlRenderer {
                 }
             }
         }
+
+        // NOTE: unset current shader to make sure that state for the next iteration will be
+        // up-to-date.
+        self.active_program = None;
 
         Ok(())
     }

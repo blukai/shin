@@ -93,17 +93,18 @@ fn rasterize_glyph(
             (None, None) => {
                 let mut texture_packer =
                     TexturePacker::new(TEXTURE_WIDTH, TEXTURE_HEIGHT, TEXTURE_GAP);
+                let texture_handle = texture_service.create(TextureDesc {
+                    format: TextureFormat::R8Unorm,
+                    w: TEXTURE_WIDTH,
+                    h: TEXTURE_HEIGHT,
+                });
                 // NOTE: this unwrap is somewhat redundant because there's an assertion above that
                 // ensures that char size is <= texture size.
                 let packer_entry_idx = texture_packer.insert(width, height).unwrap();
                 let page_idx = texture_pages.len();
                 texture_pages.push(TexturePage {
                     texture_packer,
-                    texture_handle: texture_service.create(TextureDesc {
-                        format: TextureFormat::R8Unorm,
-                        w: TEXTURE_WIDTH,
-                        h: TEXTURE_HEIGHT,
-                    }),
+                    texture_handle,
                 });
                 (page_idx, packer_entry_idx)
             }
