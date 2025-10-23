@@ -378,10 +378,17 @@ impl Rect {
     }
 
     #[must_use]
-    pub fn contains(&self, point: Vec2) -> bool {
+    pub fn contains_point(&self, point: Vec2) -> bool {
         let x_in_bounds = (point.x >= self.min.x) & (point.x <= self.max.x);
         let y_in_bounds = (point.y >= self.min.y) & (point.y <= self.max.y);
         x_in_bounds & y_in_bounds
+    }
+
+    #[must_use]
+    pub fn contains_rect(&self, other: &Rect) -> bool {
+        let x_contains = (self.min.x <= other.min.x) & (self.max.x >= other.max.x);
+        let y_contains = (self.min.y <= other.min.y) & (self.max.y >= other.max.y);
+        x_contains & y_contains
     }
 
     #[must_use]
@@ -478,18 +485,38 @@ impl Rect {
 }
 
 #[test]
-fn test_rect_contains() {
+fn test_rect_contains_point() {
     let rect = Rect::new(Vec2::new(0.0, 0.0), Vec2::new(2.0, 2.0));
 
     let inside = Vec2::new(1.0, 1.0);
-    assert!(rect.contains(inside));
+    assert!(rect.contains_point(inside));
 
     // NOTE: contains is inclusive
     let on_edge = Vec2::new(2.0, 2.0);
-    assert!(rect.contains(on_edge));
+    assert!(rect.contains_point(on_edge));
 
     let outside = Vec2::new(3.0, 3.0);
-    assert!(!rect.contains(outside));
+    assert!(!rect.contains_point(outside));
+}
+
+#[test]
+fn test_rect_contains_rect() {
+    let rect = Rect::new(Vec2::new(0.0, 0.0), Vec2::new(2.0, 2.0));
+
+    let exact_same = rect;
+    assert!(rect.contains_rect(&exact_same));
+
+    let narrower = rect.inflate(-Vec2::new(0.5, 0.0));
+    assert!(rect.contains_rect(&narrower));
+
+    let wider = rect.inflate(Vec2::new(0.5, 0.0));
+    assert!(!rect.contains_rect(&wider));
+
+    let shorter = rect.inflate(-Vec2::new(0.0, 0.5));
+    assert!(rect.contains_rect(&shorter));
+
+    let taller = rect.inflate(Vec2::new(0.0, 0.5));
+    assert!(!rect.contains_rect(&taller));
 }
 
 #[test]
