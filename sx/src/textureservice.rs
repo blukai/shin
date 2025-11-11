@@ -3,8 +3,8 @@ use std::hash::{Hash, Hasher};
 use std::iter;
 use std::ops::Range;
 
-use nohash::{NoHash, NoHashMap};
-use rangealloc::RangeAlloc;
+use mars::nohash::{NoHash, NoHashMap};
+use mars::rangealloc::RangeAlloc;
 
 use crate::Externs;
 

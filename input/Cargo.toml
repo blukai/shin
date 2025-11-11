@@ -4,4 +4,5 @@ version = "0.0.0"
 edition.workspace = true
 
 [dependencies]
-nohash = { workspace = true }
+# my other repos
+mars = { workspace = true, features = ["nohash"] }

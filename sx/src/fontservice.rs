@@ -1,7 +1,7 @@
 use std::hash::{BuildHasherDefault, Hash};
 
 use ab_glyph::{Font as _, FontArc, ScaleFont as _};
-use nohash::NoHashMap;
+use mars::nohash::NoHashMap;
 
 use crate::{
     Rect, TextureDesc, TextureFormat, TextureHandle, TexturePacker, TextureRegion, TextureService,

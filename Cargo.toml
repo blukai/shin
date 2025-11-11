@@ -28,9 +28,7 @@ log = { version = "0.4" }
 raw-window-handle = { version = "0.6", features = ["std"] }
 winit = { version = "0.30" }
 # my other repos
-nohash = { path = "../dungers/nohash", package = "nohash" }
-rangealloc = { path = "../dungers/rangealloc", package = "rangealloc" }
-scopeguard = { path = "../dungers/scopeguard", package = "scopeguard" }
+mars = { package = "mars", path = "../mars" }
 # workspace
 dynlib = { path = "dynlib" }
 egl = { path = "egl" }
@@ -44,4 +42,3 @@ wayland-scanner = { path = "wayland-scanner" }
 window = { path = "window" }
 xkbcommon = { path = "xkbcommon" }
 xml = { path = "xml" }
-

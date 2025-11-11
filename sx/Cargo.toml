@@ -8,8 +8,5 @@ edition.workspace = true
 ab_glyph = { workspace = true }
 anyhow = { workspace = true }
 log = { workspace = true }
-# workspace
-nohash = { workspace = true }
-rangealloc = { workspace = true }
-scopeguard = { workspace = true }
-
+# my other repos
+mars = { workspace = true, features = ["scopeguard", "rangealloc"] }

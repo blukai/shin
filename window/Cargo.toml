@@ -13,8 +13,9 @@ input = { workspace = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 libc = { workspace = true }
+# my other repos
+mars = { workspace = true }
 # workspace
-nohash = { workspace = true }
 xkbcommon = { workspace = true }
 
 # workspace

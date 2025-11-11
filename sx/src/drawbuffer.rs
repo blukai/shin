@@ -1,7 +1,7 @@
 use std::ops::Range;
 use std::{array, mem};
 
-use scopeguard::ScopeGuard;
+use mars::scopeguard::ScopeGuard;
 
 use crate::{Externs, Rect, TextureFormat, TextureHandle, TextureHandleKind, Vec2};
 

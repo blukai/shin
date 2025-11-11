@@ -13,7 +13,7 @@ use input::{
     Button, ButtonState, CursorShape, GesturePhase, KeyState, KeyboardEvent, KeyboardEventKind,
     Keycode, PointerEvent, PointerEventKind, RawKey, Scancode, SurfaceId,
 };
-use nohash::{NoHash, NoHashMap};
+use mars::nohash::{NoHash, NoHashMap};
 use raw_window_handle as rwh;
 
 use crate::{ClipboardDataProvider, DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent};

@@ -329,7 +329,7 @@ dependencies = [
  "input",
  "js",
  "log",
- "nohash",
+ "mars",
  "raw-window-handle",
  "sx",
  "window",
@@ -429,7 +429,7 @@ dependencies = [
 name = "input"
 version = "0.0.0"
 dependencies = [
- "nohash",
+ "mars",
 ]
 
 [[package]]
@@ -523,6 +523,15 @@ name = "log"
 version = "0.4.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7a70ba024b9dc04c27ea2f0c0548feb474ec5c54bba33a7f72f873a39d07b24"
+
+[[package]]
+name = "mars"
+version = "0.0.0"
+dependencies = [
+ "nohash",
+ "rangealloc",
+ "scopeguard",
+]
 
 [[package]]
 name = "memchr"
@@ -1071,9 +1080,7 @@ dependencies = [
  "ab_glyph",
  "anyhow",
  "log",
- "nohash",
- "rangealloc",
- "scopeguard",
+ "mars",
 ]
 
 [[package]]
@@ -1436,7 +1443,7 @@ dependencies = [
  "js",
  "libc",
  "log",
- "nohash",
+ "mars",
  "raw-window-handle",
  "wayland",
  "winit",

@@ -1,6 +1,6 @@
 use std::hash::{Hash, Hasher};
 
-use nohash::{NoHash, NoHashMap};
+use mars::nohash::{NoHash, NoHashMap};
 
 // TODO: events must carry device id in addition to surface id.
 //   (on device id) maybe you want to let people play split screen with with different controllers

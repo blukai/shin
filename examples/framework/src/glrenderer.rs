@@ -4,7 +4,7 @@ use std::ptr::null;
 
 use anyhow::{Context as _, anyhow};
 use gl::wrap::Adapter;
-use nohash::NoHashMap;
+use mars::nohash::NoHashMap;
 use sx::TextureFormat;
 
 // NOTE: some kind of naming conventions for shader things
