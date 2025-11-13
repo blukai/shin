@@ -13,7 +13,7 @@ pub use texturepacker::*;
 pub use textureservice::*;
 
 pub trait Externs {
-    type TextureHandle: fmt::Debug + Clone;
+    type TextureHandle: fmt::Debug + Clone + PartialEq + Eq;
 }
 
 /// use this in tests.

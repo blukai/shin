@@ -522,93 +522,92 @@ impl GlRenderer {
             gl_api.bind_vertex_array(Some(self.vao));
         }
 
-        for it in draw_data {
+        for layer in draw_data {
             unsafe {
                 // TODO: should probably do buffer_sub_data here?
                 gl_api.buffer_data(
                     gl::ARRAY_BUFFER,
-                    (it.vertices.len() * size_of::<sx::Vertex>()) as gl::GLsizeiptr,
-                    it.vertices.as_ptr().cast(),
+                    (layer.vertices.len() * size_of::<sx::Vertex>()) as gl::GLsizeiptr,
+                    layer.vertices.as_ptr().cast(),
                     gl::STREAM_DRAW,
                 );
                 gl_api.buffer_data(
                     gl::ELEMENT_ARRAY_BUFFER,
-                    (it.indices.len() * size_of::<u32>()) as gl::GLsizeiptr,
-                    it.indices.as_ptr().cast(),
+                    (layer.indices.len() * size_of::<u32>()) as gl::GLsizeiptr,
+                    layer.indices.as_ptr().cast(),
                     gl::STREAM_DRAW,
                 );
             }
 
-            for sx::DrawCommand {
-                clip,
-                index_range,
-                texture,
-            } in it.commands.iter()
-            {
-                if let Some(clip_rect) = clip {
-                    let physical_clip_rect = clip_rect.scale(scale_factor);
-                    let x = physical_clip_rect.min.x as i32;
-                    let y = physical_size.y as i32 - physical_clip_rect.max.y as i32;
-                    let w = physical_clip_rect.width() as i32;
-                    let h = physical_clip_rect.height() as i32;
-
-                    unsafe {
-                        gl_api.enable(gl::SCISSOR_TEST);
-                        gl_api.scissor(x, y, w, h);
-                    };
-                }
-
-                let (texture_gl_handle, texture_format) = texture.as_ref().map_or_else(
-                    || {
-                        let t = &self.default_white_texture;
-                        (t.gl_handle, t.format)
-                    },
-                    |tex_kind| match tex_kind {
-                        sx::TextureHandleKind::Internal(handle) => {
-                            let t = self.get_texture(*handle);
-                            (t.gl_handle, t.format)
+            for command in layer.commands.iter() {
+                match command {
+                    sx::DrawDataCommand::SetScissor(Some(scissor_rect)) => {
+                        let physical_scissor_rect = scissor_rect.scale(scale_factor);
+                        let x = physical_scissor_rect.min.x as i32;
+                        let y = physical_size.y as i32 - physical_scissor_rect.max.y as i32;
+                        let w = physical_scissor_rect.width() as i32;
+                        let h = physical_scissor_rect.height() as i32;
+                        unsafe {
+                            gl_api.enable(gl::SCISSOR_TEST);
+                            gl_api.scissor(x, y, w, h);
                         }
-                        sx::TextureHandleKind::External { handle, format } => (*handle, *format),
-                    },
-                );
-
-                let shader = match texture_format {
-                    TextureFormat::Rgba8Unorm => &self.shader_rgba8,
-                    TextureFormat::R8Unorm => &self.shader_r8,
-                };
-                if self.active_program != Some(shader.program) {
-                    self.active_program = Some(shader.program);
-
-                    unsafe {
-                        gl_api.use_program(Some(shader.program));
-
-                        // TODO: is there such thing as uniform buffer objects (ubo)?
-                        gl_api.uniform_matrix_4fv(
-                            shader.u_projection_loc,
-                            1,
-                            gl::FALSE,
-                            projection_matrix.as_ptr().cast(),
-                        );
                     }
-                }
+                    sx::DrawDataCommand::SetScissor(None) => unsafe {
+                        gl_api.disable(gl::SCISSOR_TEST);
+                    },
+                    sx::DrawDataCommand::Draw {
+                        index_range,
+                        texture,
+                    } => {
+                        let (texture_gl_handle, texture_format) = match texture {
+                            Some(sx::TextureHandleKind::Internal(internal_handle)) => {
+                                let t = self.get_texture(*internal_handle);
+                                (t.gl_handle, t.format)
+                            }
+                            Some(sx::TextureHandleKind::External { handle, format }) => {
+                                (*handle, *format)
+                            }
+                            None => {
+                                let t = &self.default_white_texture;
+                                (t.gl_handle, t.format)
+                            }
+                        };
 
-                unsafe {
-                    gl_api.active_texture(gl::TEXTURE0);
-                    gl_api.bind_texture(gl::TEXTURE_2D, Some(texture_gl_handle));
-                    gl_api.uniform_1i(shader.u_sampler_loc, 0);
-                };
+                        let shader = match texture_format {
+                            TextureFormat::Rgba8Unorm => &self.shader_rgba8,
+                            TextureFormat::R8Unorm => &self.shader_r8,
+                        };
+                        if self.active_program != Some(shader.program) {
+                            self.active_program = Some(shader.program);
 
-                unsafe {
-                    gl_api.draw_elements(
-                        gl::TRIANGLES,
-                        (index_range.end - index_range.start) as gl::GLsizei,
-                        gl::UNSIGNED_INT,
-                        (index_range.start * size_of::<u32>() as u32) as *const c_void,
-                    )
-                };
+                            unsafe {
+                                gl_api.use_program(Some(shader.program));
 
-                if clip.is_some() {
-                    unsafe { gl_api.disable(gl::SCISSOR_TEST) };
+                                // TODO: is there such thing as uniform buffer objects (ubo)?
+                                gl_api.uniform_matrix_4fv(
+                                    shader.u_projection_loc,
+                                    1,
+                                    gl::FALSE,
+                                    projection_matrix.as_ptr().cast(),
+                                );
+                            }
+                        }
+
+                        unsafe {
+                            gl_api.active_texture(gl::TEXTURE0);
+                            gl_api.bind_texture(gl::TEXTURE_2D, Some(texture_gl_handle));
+                            gl_api.uniform_1i(shader.u_sampler_loc, 0);
+                        };
+
+                        unsafe {
+                            gl_api.draw_elements(
+                                gl::TRIANGLES,
+                                index_range.len() as gl::GLsizei,
+                                gl::UNSIGNED_INT,
+                                (index_range.start * size_of::<u32>() as u32) as *const c_void,
+                            )
+                        };
+                    }
                 }
             }
         }

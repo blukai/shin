@@ -256,21 +256,20 @@ pub struct Vertex {
 }
 
 #[derive(Debug)]
-pub struct DrawCommand<E: Externs> {
-    // TODO: maybe don't store clip rect within the command, but instead make it possible to group
-    // commands with attributes or something.
-    pub clip: Option<Rect>,
-    pub index_range: Range<u32>,
-    pub texture: Option<TextureHandleKind<E>>,
+pub enum DrawDataCommand<E: Externs> {
+    SetScissor(Option<Rect>),
+    Draw {
+        index_range: Range<u32>,
+        texture: Option<TextureHandleKind<E>>,
+    },
 }
 
 #[derive(Debug)]
 pub struct DrawData<E: Externs> {
     pub vertices: Vec<Vertex>,
-    bounds: Rect,
     pub indices: Vec<u32>,
     pending_indices: usize,
-    pub commands: Vec<DrawCommand<E>>,
+    pub commands: Vec<DrawDataCommand<E>>,
 }
 
 // @BlindDerive
@@ -278,7 +277,6 @@ impl<E: Externs> Default for DrawData<E> {
     fn default() -> Self {
         Self {
             vertices: Vec::new(),
-            bounds: Rect::new(Vec2::ZERO, Vec2::ZERO),
             indices: Vec::new(),
             pending_indices: 0,
             commands: Vec::new(),
@@ -289,20 +287,16 @@ impl<E: Externs> Default for DrawData<E> {
 impl<E: Externs> DrawData<E> {
     fn clear(&mut self) {
         self.vertices.clear();
-        self.bounds = Rect::new(Vec2::ZERO, Vec2::ZERO);
         self.indices.clear();
         assert_eq!(self.pending_indices, 0);
         self.commands.clear();
     }
 
+    fn set_scissor(&mut self, rect: Option<Rect>) {
+        self.commands.push(DrawDataCommand::SetScissor(rect));
+    }
+
     fn push_vertex(&mut self, vertex: Vertex) {
-        if self.vertices.is_empty() {
-            self.bounds.min = vertex.position;
-            self.bounds.max = vertex.position;
-        } else {
-            self.bounds.min = self.bounds.min.min(vertex.position);
-            self.bounds.max = self.bounds.max.max(vertex.position);
-        }
         self.vertices.push(vertex);
     }
 
@@ -313,12 +307,11 @@ impl<E: Externs> DrawData<E> {
         self.pending_indices += 3;
     }
 
-    fn commit_primitive(&mut self, clip: Option<Rect>, texture: Option<TextureHandleKind<E>>) {
+    fn commit_primitive(&mut self, texture: Option<TextureHandleKind<E>>) {
         assert!(self.pending_indices > 0);
         let start_index = (self.indices.len() - self.pending_indices) as u32;
         let end_index = self.indices.len() as u32;
-        self.commands.push(DrawCommand {
-            clip,
+        self.commands.push(DrawDataCommand::Draw {
             index_range: start_index..end_index,
             texture,
         });
@@ -326,10 +319,10 @@ impl<E: Externs> DrawData<E> {
     }
 }
 
+// NOTE: both iters point to the same memory.
 pub struct DrawLayerDrain<'a, E: Externs> {
-    hand_off_iter: slice::Iter<'a, DrawData<E>>,
-    clear_iter: slice::IterMut<'a, DrawData<E>>,
-    // NOTE: both iters point to the same memory.
+    drop_iter: slice::IterMut<'a, DrawData<E>>,
+    next_iter: slice::Iter<'a, DrawData<E>>,
 }
 
 impl<'a, E: Externs> Iterator for DrawLayerDrain<'a, E> {
@@ -337,13 +330,13 @@ impl<'a, E: Externs> Iterator for DrawLayerDrain<'a, E> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.hand_off_iter.next()
+        self.next_iter.next()
     }
 }
 
 impl<'a, E: Externs> Drop for DrawLayerDrain<'a, E> {
     fn drop(&mut self) {
-        while let Some(layer) = self.clear_iter.next() {
+        while let Some(layer) = self.drop_iter.next() {
             layer.clear();
         }
     }
@@ -365,7 +358,7 @@ impl DrawLayer {
 
 #[derive(Debug)]
 pub struct DrawBuffer<E: Externs> {
-    clip: Option<Rect>,
+    scissor_rect: Option<Rect>,
     layer: DrawLayer,
     layers: [DrawData<E>; DrawLayer::MAX],
 }
@@ -374,7 +367,7 @@ pub struct DrawBuffer<E: Externs> {
 impl<E: Externs> Default for DrawBuffer<E> {
     fn default() -> Self {
         Self {
-            clip: None,
+            scissor_rect: None,
             layer: DrawLayer::default(),
             layers: Default::default(),
         }
@@ -382,17 +375,21 @@ impl<E: Externs> Default for DrawBuffer<E> {
 }
 
 impl<E: Externs> DrawBuffer<E> {
-    pub fn clip_scope_guard<'a>(
+    pub fn scissor_scope_guard<'a>(
         &'a mut self,
         rect: Rect,
     ) -> ScopeGuard<&'a mut Self, impl FnOnce(&'a mut Self)> {
-        let next = if let Some(prev) = self.clip {
+        let next = if let Some(prev) = self.scissor_rect {
             rect.clamp(prev)
         } else {
             rect
         };
-        let prev = self.clip.replace(next);
-        ScopeGuard::new_with_data(self, move |this| this.clip = prev)
+        let prev = self.scissor_rect.replace(next);
+        self.layer_mut().set_scissor(Some(next));
+        ScopeGuard::new_with_data(self, move |this| {
+            this.scissor_rect = prev;
+            this.layer_mut().set_scissor(prev);
+        })
     }
 
     pub fn layer_scope_guard<'a>(
@@ -414,7 +411,6 @@ impl<E: Externs> DrawBuffer<E> {
         // makes sense only for shapes that need an outline (/ need to be stroked).
         assert!(matches!(line.stroke.alignment, StrokeAlignment::Center));
 
-        let clip = self.clip;
         let draw_data = self.layer_mut();
         let idx = draw_data.vertices.len() as u32;
 
@@ -453,11 +449,10 @@ impl<E: Externs> DrawBuffer<E> {
         // bottom right -> bottom left -> top left
         draw_data.push_triangle(idx + 2, idx + 3, idx + 0);
 
-        draw_data.commit_primitive(clip, None);
+        draw_data.commit_primitive(None);
     }
 
     fn push_rect_filled(&mut self, coords: Rect, fill: Fill<E>) {
-        let clip = self.clip;
         let draw_data = self.layer_mut();
         let idx = draw_data.vertices.len() as u32;
 
@@ -513,7 +508,7 @@ impl<E: Externs> DrawBuffer<E> {
         // bottom right -> bottom left -> top left
         draw_data.push_triangle(idx + 2, idx + 3, idx + 0);
 
-        draw_data.commit_primitive(clip, texture);
+        draw_data.commit_primitive(texture);
     }
 
     fn push_rect_stroked(&mut self, coords: Rect, stroke: Stroke) {
@@ -570,11 +565,11 @@ impl<E: Externs> DrawBuffer<E> {
     }
 
     pub fn drain_layers<'a>(&'a mut self) -> DrawLayerDrain<'a, E> {
-        let ptr = self.layers.as_mut_ptr();
         DrawLayerDrain {
-            hand_off_iter: self.layers.iter(),
-            // SAFETY: clear_iter will only be touched on drop.
-            clear_iter: unsafe { slice::from_raw_parts_mut(ptr, self.layers.len()) }.iter_mut(),
+            // SAFETY: drop_iter will only be touched on drop. next_iter is incapable of mutating
+            // layers.
+            drop_iter: unsafe { &mut *(self as *mut Self) }.layers.iter_mut(),
+            next_iter: self.layers.iter(),
         }
     }
 }
