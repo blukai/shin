@@ -540,12 +540,12 @@ impl GlRenderer {
             }
 
             for sx::DrawCommand {
-                clip_rect,
+                clip,
                 index_range,
                 texture,
             } in it.commands.iter()
             {
-                if let Some(clip_rect) = clip_rect {
+                if let Some(clip_rect) = clip {
                     let physical_clip_rect = clip_rect.scale(scale_factor);
                     let x = physical_clip_rect.min.x as i32;
                     let y = physical_size.y as i32 - physical_clip_rect.max.y as i32;
@@ -607,7 +607,7 @@ impl GlRenderer {
                     )
                 };
 
-                if clip_rect.is_some() {
+                if clip.is_some() {
                     unsafe { gl_api.disable(gl::SCISSOR_TEST) };
                 }
             }

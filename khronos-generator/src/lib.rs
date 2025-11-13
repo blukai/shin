@@ -881,7 +881,6 @@ fn null_fn_ptr_panic() -> ! {{
 
 pub struct Sym<T> {{
     ptr: *mut T,
-    _marker: std::marker::PhantomData<T>,
 }}
 
 impl<T> Sym<T> {{
@@ -892,7 +891,6 @@ impl<T> Sym<T> {{
             }} else {{
                 ptr as *mut T
             }},
-            _marker: std::marker::PhantomData,
         }}
     }}
 

@@ -1,5 +1,5 @@
 use std::ops::Range;
-use std::{array, mem};
+use std::{mem, slice};
 
 use mars::scopeguard::ScopeGuard;
 
@@ -259,26 +259,11 @@ pub struct Vertex {
 pub struct DrawCommand<E: Externs> {
     // TODO: maybe don't store clip rect within the command, but instead make it possible to group
     // commands with attributes or something.
-    pub clip_rect: Option<Rect>,
+    pub clip: Option<Rect>,
     pub index_range: Range<u32>,
     pub texture: Option<TextureHandleKind<E>>,
 }
 
-// TODO: split DrawData into buffers and commands
-//
-//   bounds accumulator will need to live next to commands.
-//
-//   when lending new draw buffers make sure that the lended draw buffer will be pushing indices
-//   and vertices into central buffers that it'll be referencing (possibly will need an Rc and a
-//   RefCell, but i really don't want an Rc).
-//
-//   OR maybe there needs to be a centeral draw buffer only for storage / allocation; it'll not be
-//   possible to push shapes into it. its purpose will be to hand-out other kind of draw buffer
-//   that'll be for drawing.
-//   not 100%, but i think this will make it easier for something higher order to start scopes
-//   (clip, layer, etc.).
-//   but perhaps RefCell + RefMut::map_split can do well here; and ownership semantics will be
-//   clear.
 #[derive(Debug)]
 pub struct DrawData<E: Externs> {
     pub vertices: Vec<Vertex>,
@@ -328,16 +313,39 @@ impl<E: Externs> DrawData<E> {
         self.pending_indices += 3;
     }
 
-    fn commit_primitive(&mut self, clip_rect: Option<Rect>, texture: Option<TextureHandleKind<E>>) {
+    fn commit_primitive(&mut self, clip: Option<Rect>, texture: Option<TextureHandleKind<E>>) {
         assert!(self.pending_indices > 0);
         let start_index = (self.indices.len() - self.pending_indices) as u32;
         let end_index = self.indices.len() as u32;
         self.commands.push(DrawCommand {
-            clip_rect,
+            clip,
             index_range: start_index..end_index,
             texture,
         });
         self.pending_indices = 0;
+    }
+}
+
+pub struct DrawLayerDrain<'a, E: Externs> {
+    hand_off_iter: slice::Iter<'a, DrawData<E>>,
+    clear_iter: slice::IterMut<'a, DrawData<E>>,
+    // NOTE: both iters point to the same memory.
+}
+
+impl<'a, E: Externs> Iterator for DrawLayerDrain<'a, E> {
+    type Item = &'a DrawData<E>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.hand_off_iter.next()
+    }
+}
+
+impl<'a, E: Externs> Drop for DrawLayerDrain<'a, E> {
+    fn drop(&mut self) {
+        while let Some(layer) = self.clear_iter.next() {
+            layer.clear();
+        }
     }
 }
 
@@ -348,7 +356,7 @@ impl<E: Externs> DrawData<E> {
 #[derive(Debug, Default, Clone, Copy)]
 pub enum DrawLayer {
     #[default]
-    Primary,
+    Base,
 }
 
 impl DrawLayer {
@@ -357,45 +365,37 @@ impl DrawLayer {
 
 #[derive(Debug)]
 pub struct DrawBuffer<E: Externs> {
-    clip_rect: Option<Rect>,
+    clip: Option<Rect>,
     layer: DrawLayer,
     layers: [DrawData<E>; DrawLayer::MAX],
-    stagers: Vec<Self>,
 }
 
 // @BlindDerive
 impl<E: Externs> Default for DrawBuffer<E> {
     fn default() -> Self {
         Self {
-            clip_rect: None,
+            clip: None,
             layer: DrawLayer::default(),
-            layers: array::from_fn(|_| DrawData::default()),
-            stagers: Vec::default(),
+            layers: Default::default(),
         }
     }
 }
 
 impl<E: Externs> DrawBuffer<E> {
-    pub fn clear(&mut self) {
-        self.layers
-            .iter_mut()
-            .for_each(|draw_data| draw_data.clear());
-    }
-
-    pub fn clip_scope<'a>(
+    pub fn clip_scope_guard<'a>(
         &'a mut self,
         rect: Rect,
     ) -> ScopeGuard<&'a mut Self, impl FnOnce(&'a mut Self)> {
-        let next = if let Some(prev) = self.clip_rect {
+        let next = if let Some(prev) = self.clip {
             rect.clamp(prev)
         } else {
             rect
         };
-        let prev = self.clip_rect.replace(next);
-        ScopeGuard::new_with_data(self, move |this| this.clip_rect = prev)
+        let prev = self.clip.replace(next);
+        ScopeGuard::new_with_data(self, move |this| this.clip = prev)
     }
 
-    pub fn layer_scope<'a>(
+    pub fn layer_scope_guard<'a>(
         &'a mut self,
         layer: DrawLayer,
     ) -> ScopeGuard<&'a mut Self, impl FnOnce(&'a mut Self)> {
@@ -404,54 +404,8 @@ impl<E: Externs> DrawBuffer<E> {
         ScopeGuard::new_with_data(self, move |this| this.layer = prev)
     }
 
-    /// returns an instance of self with inherited clip rect and layer.
-    pub fn lend<const N: usize>(&mut self) -> [Self; N] {
-        array::from_fn(|_| {
-            let mut ret = self.stagers.pop().unwrap_or_else(|| Self::default());
-            ret.clear();
-            ret.clip_rect = self.clip_rect;
-            ret.layer = self.layer;
-            ret
-        })
-    }
-
-    /// extends self from other instance that most likely was handed-out by [`Self::lend`].
-    /// the other instance will not be discarded, but will be stored for future lending.
-    pub fn extend<I: IntoIterator<Item = Self>>(&mut self, others: I) {
-        // TODO: central allocator / storage
-        //   see other TODO comment next to DrawData struct.
-
-        for mut other in others {
-            for (src, dst) in other.layers.iter_mut().zip(self.layers.iter_mut()) {
-                let base_vertex = dst.vertices.len() as u32;
-                let base_index = dst.indices.len() as u32;
-                dst.vertices.extend(src.vertices.drain(..));
-                dst.indices
-                    .extend(src.indices.drain(..).map(|it| it + base_vertex));
-                dst.commands
-                    .extend(src.commands.drain(..).map(|it| DrawCommand {
-                        index_range: it.index_range.start + base_index
-                            ..it.index_range.end + base_index,
-                        ..it
-                    }));
-            }
-            self.stagers.push(other);
-        }
-    }
-
-    pub fn stage_scope<'a, const N: usize>(
-        &'a mut self,
-    ) -> ScopeGuard<[Self; N], impl FnOnce([Self; N])> {
-        ScopeGuard::new_with_data(self.lend(), |stagers| self.extend(stagers))
-    }
-
     #[inline(always)]
-    fn draw_data(&self) -> &DrawData<E> {
-        &self.layers[self.layer as usize]
-    }
-
-    #[inline(always)]
-    fn draw_data_mut(&mut self) -> &mut DrawData<E> {
+    fn layer_mut(&mut self) -> &mut DrawData<E> {
         &mut self.layers[self.layer as usize]
     }
 
@@ -460,8 +414,8 @@ impl<E: Externs> DrawBuffer<E> {
         // makes sense only for shapes that need an outline (/ need to be stroked).
         assert!(matches!(line.stroke.alignment, StrokeAlignment::Center));
 
-        let clip_rect = self.clip_rect;
-        let draw_data = self.draw_data_mut();
+        let clip = self.clip;
+        let draw_data = self.layer_mut();
         let idx = draw_data.vertices.len() as u32;
 
         let [a, b] = line.points;
@@ -499,12 +453,12 @@ impl<E: Externs> DrawBuffer<E> {
         // bottom right -> bottom left -> top left
         draw_data.push_triangle(idx + 2, idx + 3, idx + 0);
 
-        draw_data.commit_primitive(clip_rect, None);
+        draw_data.commit_primitive(clip, None);
     }
 
     fn push_rect_filled(&mut self, coords: Rect, fill: Fill<E>) {
-        let clip_rect = self.clip_rect;
-        let draw_data = self.draw_data_mut();
+        let clip = self.clip;
+        let draw_data = self.layer_mut();
         let idx = draw_data.vertices.len() as u32;
 
         let (color, texture, tex_coords) = if let Some(fill_texture) = fill.texture {
@@ -559,7 +513,7 @@ impl<E: Externs> DrawBuffer<E> {
         // bottom right -> bottom left -> top left
         draw_data.push_triangle(idx + 2, idx + 3, idx + 0);
 
-        draw_data.commit_primitive(clip_rect, texture);
+        draw_data.commit_primitive(clip, texture);
     }
 
     fn push_rect_stroked(&mut self, coords: Rect, stroke: Stroke) {
@@ -615,33 +569,12 @@ impl<E: Externs> DrawBuffer<E> {
         }
     }
 
-    pub fn bounds(&self) -> Rect {
-        self.draw_data().bounds
-    }
-
-    // TODO: would it make any sense to offload transforms to gpu
-    //   apply this translation in vertex shader?
-    //   i imagine this would be very similar to what's happening with clip rect except we'll need
-    //   to set a uniform. should be easy.
-    //
-    // TODO: maybe clarity what this function exactly does
-    //   applies translation to all vertices on the current layer.
-    //   it can't really be the same as clip_scope, etc because for what i currently want to use
-    //   translations i know deltas only after i push shapes into draw buffer.
-    pub fn translate(&mut self, delta: Vec2) {
-        let draw_data = self.draw_data_mut();
-        draw_data.vertices.iter_mut().for_each(|vertex| {
-            vertex.position += delta;
-        });
-        draw_data.bounds = draw_data.bounds.translate(delta);
-        draw_data.commands.iter_mut().for_each(|command| {
-            if let Some(ref mut clip_rect) = command.clip_rect {
-                *clip_rect = clip_rect.translate(delta);
-            }
-        });
-    }
-
-    pub fn iter_draw_data<'a>(&'a self) -> impl Iterator<Item = &'a DrawData<E>> {
-        self.layers.iter()
+    pub fn drain_layers<'a>(&'a mut self) -> DrawLayerDrain<'a, E> {
+        let ptr = self.layers.as_mut_ptr();
+        DrawLayerDrain {
+            hand_off_iter: self.layers.iter(),
+            // SAFETY: clear_iter will only be touched on drop.
+            clear_iter: unsafe { slice::from_raw_parts_mut(ptr, self.layers.len()) }.iter_mut(),
+        }
     }
 }

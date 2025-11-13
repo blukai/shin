@@ -168,7 +168,6 @@ impl Context {
         });
         self.input.handle_events(events);
 
-        self.draw_buffer.clear();
         self.font_service
             .remove_unused_font_instances(&mut self.texture_service);
 
@@ -226,7 +225,7 @@ impl Context {
             .render(
                 logical_size,
                 scale_factor,
-                self.draw_buffer.iter_draw_data(),
+                self.draw_buffer.drain_layers(),
                 &self.gl_context.api,
             )
             .context("could not render")?;
