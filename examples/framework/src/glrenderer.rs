@@ -209,6 +209,87 @@ unsafe fn create_default_white_texture(gl_api: &gl::wrap::Api) -> anyhow::Result
     }
 }
 
+struct Framebuffer {
+    width: u32,
+    height: u32,
+    color_renderbuffer: gl::wrap::Renderbuffer,
+    depth_renderbuffer: gl::wrap::Renderbuffer,
+    framebuffer: gl::wrap::Framebuffer,
+}
+
+fn create_framebuffer(
+    gl_api: &gl::wrap::Api,
+    width: u32,
+    height: u32,
+) -> anyhow::Result<Framebuffer> {
+    // TODO: scopeguard to cleanup created resources if something fails
+    //   via checkpoint-based gl allocator
+
+    unsafe {
+        let color_renderbuffer = gl_api
+            .create_renderbuffer()
+            .context("could not create renderbuffer")?;
+        gl_api.bind_renderbuffer(gl::RENDERBUFFER, Some(color_renderbuffer));
+        gl_api.renderbuffer_storage(
+            gl::RENDERBUFFER,
+            gl::RGBA8,
+            width as gl::GLint,
+            height as gl::GLint,
+        );
+        gl_api.bind_renderbuffer(gl::RENDERBUFFER, None);
+
+        let depth_renderbuffer = gl_api
+            .create_renderbuffer()
+            .context("could not create renderbuffer")?;
+        gl_api.bind_renderbuffer(gl::RENDERBUFFER, Some(depth_renderbuffer));
+        gl_api.renderbuffer_storage(
+            gl::RENDERBUFFER,
+            gl::DEPTH_COMPONENT,
+            width as gl::GLint,
+            height as gl::GLint,
+        );
+        gl_api.bind_renderbuffer(gl::RENDERBUFFER, None);
+
+        let framebuffer = gl_api
+            .create_framebuffer()
+            .context("could not create framebuffer")?;
+        gl_api.bind_framebuffer(gl::FRAMEBUFFER, Some(framebuffer));
+        gl_api.framebuffer_renderbuffer(
+            gl::FRAMEBUFFER,
+            gl::COLOR_ATTACHMENT0,
+            gl::RENDERBUFFER,
+            Some(color_renderbuffer),
+        );
+        gl_api.framebuffer_renderbuffer(
+            gl::FRAMEBUFFER,
+            gl::DEPTH_ATTACHMENT,
+            gl::RENDERBUFFER,
+            Some(depth_renderbuffer),
+        );
+        let framebuffer_status = gl_api.check_framebuffer_status(gl::FRAMEBUFFER);
+        if framebuffer_status != gl::FRAMEBUFFER_COMPLETE {
+            return Err(anyhow!("framebuffer error: {framebuffer_status}"));
+        }
+        gl_api.bind_framebuffer(gl::FRAMEBUFFER, None);
+
+        Ok(Framebuffer {
+            width,
+            height,
+            color_renderbuffer,
+            depth_renderbuffer,
+            framebuffer,
+        })
+    }
+}
+
+fn delete_framebuffer(framebuffer: Framebuffer, gl_api: &gl::wrap::Api) {
+    unsafe {
+        gl_api.delete_renderbuffer(framebuffer.color_renderbuffer);
+        gl_api.delete_renderbuffer(framebuffer.depth_renderbuffer);
+        gl_api.delete_framebuffer(framebuffer.framebuffer);
+    }
+}
+
 fn compute_orthographic_projection_matrix(
     left: f32,
     right: f32,
@@ -232,6 +313,8 @@ fn compute_orthographic_projection_matrix(
 }
 
 pub struct GlRenderer {
+    framebuffer: Option<Framebuffer>,
+
     shader_rgba8: Shader,
     shader_r8: Shader,
     active_program: Option<gl::wrap::Program>,
@@ -250,6 +333,9 @@ impl sx::Externs for GlRenderer {
 
 impl GlRenderer {
     pub fn new(gl_api: &gl::wrap::Api) -> anyhow::Result<Self> {
+        // TODO: scopeguard to cleanup created resources if something fails
+        //   via checkpoint-based gl allocator
+
         unsafe {
             let shader_rgba8 = {
                 let program = create_program(
@@ -336,6 +422,8 @@ impl GlRenderer {
             };
 
             Ok(Self {
+                framebuffer: None,
+
                 shader_rgba8,
                 shader_r8,
                 active_program: None,
@@ -352,13 +440,18 @@ impl GlRenderer {
     }
 
     // TODO: figure out how to invoke this xd.
-    pub fn deinit(self, gl_api: &gl::wrap::Api) {
+    pub fn deinit(mut self, gl_api: &gl::wrap::Api) {
         unsafe {
+            if let Some(framebuffer) = self.framebuffer.take() {
+                delete_framebuffer(framebuffer, gl_api);
+            }
+
             gl_api.delete_program(self.shader_rgba8.program);
             gl_api.delete_program(self.shader_r8.program);
 
             gl_api.delete_buffer(self.vbo);
             gl_api.delete_buffer(self.ebo);
+            gl_api.delete_buffer(self.vao);
 
             gl_api.delete_texture(self.default_white_texture.gl_handle);
             for (_, texture) in self.textures.iter() {
@@ -491,13 +584,31 @@ impl GlRenderer {
             1.0,
         );
 
+        if let Some(framebuffer) =
+            self.framebuffer
+                .take_if(|Framebuffer { width, height, .. }| {
+                    *width != physical_size.x as u32 || *height != physical_size.y as u32
+                })
+        {
+            delete_framebuffer(framebuffer, gl_api);
+        }
+        if self.framebuffer.is_none() {
+            self.framebuffer = Some(create_framebuffer(
+                gl_api,
+                physical_size.x as u32,
+                physical_size.y as u32,
+            )?);
+        }
+        let Some(framebuffer) = self.framebuffer.as_ref() else {
+            unreachable!();
+        };
+
         unsafe {
-            // NOTE: draw buffer needs to be specififed.
-            //   without i don't see anything being rendered on nvidia gpu,
-            //   but on amd gpu it's fine.
-            //
-            // TODO: might want to try creating own frame buffer?
-            gl_api.draw_buffer(gl::BACK);
+            gl_api.bind_framebuffer(gl::FRAMEBUFFER, Some(framebuffer.framebuffer));
+
+            gl_api.clear_color(0.0, 0.0, 0.0, 1.0);
+            gl_api.clear(gl::COLOR_BUFFER_BIT);
+
             gl_api.viewport(
                 0,
                 0,
@@ -615,6 +726,38 @@ impl GlRenderer {
         // NOTE: unset current shader to make sure that state for the next iteration will be
         // up-to-date.
         self.active_program = None;
+
+        Ok(())
+    }
+
+    pub fn render_to_screen(&self, gl_api: &gl::wrap::Api) -> anyhow::Result<()> {
+        let Some(framebuffer) = self.framebuffer.as_ref() else {
+            return Ok(());
+        };
+
+        unsafe {
+            gl_api.bind_framebuffer(gl::DRAW_FRAMEBUFFER, None);
+            // NOTE: draw buffer needs to be specififed.
+            //   without i don't see anything being rendered on nvidia gpu,
+            //   but on amd gpu it's fine.
+            gl_api.draw_buffer(gl::BACK);
+
+            gl_api.bind_framebuffer(gl::READ_FRAMEBUFFER, Some(framebuffer.framebuffer));
+            gl_api.read_buffer(gl::COLOR_ATTACHMENT0);
+
+            gl_api.blit_framebuffer(
+                0,
+                0,
+                framebuffer.width as gl::GLint,
+                framebuffer.height as gl::GLint,
+                0,
+                0,
+                framebuffer.width as gl::GLint,
+                framebuffer.height as gl::GLint,
+                gl::COLOR_BUFFER_BIT,
+                gl::NEAREST,
+            );
+        }
 
         Ok(())
     }

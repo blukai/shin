@@ -13,33 +13,43 @@ use crate::libgl as gl;
 // this specific case) long methods into multiple lines. it's just inconvenient.
 #[rustfmt::skip]
 pub trait Adapter {
-    type Buffer: Clone + Copy;
-    type Program: Clone + Copy;
-    type Shader: Clone + Copy;
-    type Texture: Clone + Copy;
-    type UniformLocation: Clone + Copy;
-    type VertexArray: Clone + Copy;
+    type Buffer: Clone;
+    type Framebuffer: Clone;
+    type Program: Clone;
+    type Renderbuffer: Clone;
+    type Shader: Clone;
+    type Texture: Clone;
+    type UniformLocation: Clone;
+    type VertexArray: Clone;
 
     unsafe fn active_texture(&self, texture: gl::GLenum);
     unsafe fn attach_shader(&self, program: Self::Program, shader: Self::Shader);
     unsafe fn bind_attrib_location(&self, program: Self::Program, index: gl::GLuint, name: &CStr);
     unsafe fn bind_buffer(&self, target: gl::GLenum, buffer: Option<Self::Buffer>);
+    unsafe fn bind_framebuffer(&self, target: gl::GLenum, framebuffer: Option<Self::Framebuffer>);
+    unsafe fn bind_renderbuffer(&self, target: gl::GLenum, renderbuffer: Option<Self::Renderbuffer>);
     unsafe fn bind_texture(&self, target: gl::GLenum, texture: Option<Self::Texture>);
     unsafe fn bind_vertex_array(&self, array: Option<Self::VertexArray>);
     unsafe fn blend_equation(&self, mode: gl::GLenum);
     unsafe fn blend_func_separate(&self, sfactor_rgb: gl::GLenum, dfactor_rgb: gl::GLenum, sfactor_alpha: gl::GLenum, dfactor_alpha: gl::GLenum);
+    unsafe fn blit_framebuffer(&self, src_x0: gl::GLint, src_y0: gl::GLint, src_x1: gl::GLint, src_y1: gl::GLint, dst_x0: gl::GLint, dst_y0: gl::GLint, dst_x1: gl::GLint, dst_y1: gl::GLint, mask: gl::GLbitfield, filter: gl::GLenum);
     // TODO: buffer_data can be rustified.
     unsafe fn buffer_data(&self, target: gl::GLenum, size: gl::GLsizeiptr, data: *const c_void, usage: gl::GLenum);
+    unsafe fn check_framebuffer_status(&self, target: gl::GLenum) -> gl::GLenum;
     unsafe fn clear(&self, mask: gl::GLbitfield);
     unsafe fn clear_color(&self, red: gl::GLfloat, green: gl::GLfloat, blue: gl::GLfloat, alpha: gl::GLfloat);
     unsafe fn compile_shader(&self, shader: Self::Shader);
     unsafe fn create_buffer(&self) -> Option<Self::Buffer>;
+    unsafe fn create_framebuffer(&self) -> Option<Self::Framebuffer>;
     unsafe fn create_program(&self) -> Option<Self::Program>;
+    unsafe fn create_renderbuffer(&self) -> Option<Self::Renderbuffer>;
     unsafe fn create_shader(&self, r#type: gl::GLenum) -> Option<Self::Shader>;
     unsafe fn create_texture(&self) -> Option<Self::Texture>;
     unsafe fn create_vertex_array(&self) -> Option<Self::VertexArray>;
     unsafe fn delete_buffer(&self, buffer: Self::Buffer);
+    unsafe fn delete_framebuffer(&self, framebuffer: Self::Framebuffer);
     unsafe fn delete_program(&self, program: Self::Program);
+    unsafe fn delete_renderbuffer(&self, renderbuffer: Self::Renderbuffer);
     unsafe fn delete_shader(&self, shader: Self::Shader);
     unsafe fn delete_texture(&self, texture: Self::Texture);
     unsafe fn detach_shader(&self, program: Self::Program, shader: Self::Shader);
@@ -48,6 +58,8 @@ pub trait Adapter {
     unsafe fn draw_elements(&self, mode: gl::GLenum, count: gl::GLsizei, r#type: gl::GLenum, indices: *const c_void);
     unsafe fn enable(&self, cap: gl::GLenum);
     unsafe fn enable_vertex_attrib_array(&self, index: gl::GLuint);
+    unsafe fn framebuffer_renderbuffer(&self, target: gl::GLenum, attachment: gl::GLenum, renderbuffertarget: gl::GLenum, renderbuffer: Option<Self::Renderbuffer>);
+    unsafe fn framebuffer_texture_2d(&self, target: gl::GLenum, attachment: gl::GLenum, textarget: gl::GLenum, texture: Option<Self::Texture>, level: gl::GLint);
     unsafe fn get_attrib_location(&self, program: Self::Program, name: &CStr) -> Option<gl::GLint>;
     unsafe fn get_error(&self) -> Option<gl::GLenum>;
     // TODO: consider making get_program_info_log to not allocate, but instead accept a resizable
@@ -66,7 +78,9 @@ pub trait Adapter {
     unsafe fn get_uniform_location(&self, program: Self::Program, name: &CStr) -> Option<Self::UniformLocation>;
     unsafe fn link_program(&self, program: Self::Program);
     unsafe fn pixel_storei(&self, pname: gl::GLenum, param: gl::GLint);
+    unsafe fn read_buffer(&self, src: gl::GLenum);
     unsafe fn read_pixels(&self, x: gl::GLint, y: gl::GLint, width: gl::GLsizei, height: gl::GLsizei, format: gl::GLenum, r#type: gl::GLenum, pixels: *mut c_void);
+    unsafe fn renderbuffer_storage(&self, target: gl::GLenum, internalformat: gl::GLenum, width: gl::GLsizei, height: gl::GLsizei);
     unsafe fn scissor(&self, x: gl::GLint, y: gl::GLint, width: gl::GLsizei, height: gl::GLsizei);
     unsafe fn shader_source(&self, shader: Self::Shader, source: &str);
     unsafe fn tex_image_2d(&self, target: gl::GLenum, level: gl::GLint, internalformat: gl::GLint, width: gl::GLsizei, height: gl::GLsizei, border: gl::GLint, format: gl::GLenum, r#type: gl::GLenum, pixels: *const c_void);
@@ -105,7 +119,9 @@ mod gl46 {
 
     impl Adapter for Api {
         type Buffer = gl::GLuint;
+        type Framebuffer = gl::GLuint;
         type Program = gl::GLuint;
+        type Renderbuffer = gl::GLuint;
         type Shader = gl::GLuint;
         type Texture = gl::GLuint;
         type UniformLocation = gl::GLuint;
@@ -137,6 +153,24 @@ mod gl46 {
         }
 
         #[inline]
+        unsafe fn bind_framebuffer(
+            &self,
+            target: gl::GLenum,
+            framebuffer: Option<Self::Framebuffer>,
+        ) {
+            unsafe { self.api.BindFramebuffer(target, framebuffer.unwrap_or(0)) };
+        }
+
+        #[inline]
+        unsafe fn bind_renderbuffer(
+            &self,
+            target: gl::GLenum,
+            renderbuffer: Option<Self::Renderbuffer>,
+        ) {
+            unsafe { self.api.BindRenderbuffer(target, renderbuffer.unwrap_or(0)) };
+        }
+
+        #[inline]
         unsafe fn bind_texture(&self, target: gl::GLenum, texture: Option<Self::Texture>) {
             unsafe { self.api.BindTexture(target, texture.unwrap_or(0)) };
         }
@@ -162,6 +196,32 @@ mod gl46 {
             unsafe {
                 self.api
                     .BlendFuncSeparate(sfactor_rgb, dfactor_rgb, sfactor_alpha, dfactor_alpha)
+            };
+        }
+
+        #[inline]
+        unsafe fn check_framebuffer_status(&self, target: gl::GLenum) -> gl::GLenum {
+            unsafe { self.api.CheckFramebufferStatus(target) }
+        }
+
+        #[inline]
+        unsafe fn blit_framebuffer(
+            &self,
+            src_x0: gl::GLint,
+            src_y0: gl::GLint,
+            src_x1: gl::GLint,
+            src_y1: gl::GLint,
+            dst_x0: gl::GLint,
+            dst_y0: gl::GLint,
+            dst_x1: gl::GLint,
+            dst_y1: gl::GLint,
+            mask: gl::GLbitfield,
+            filter: gl::GLenum,
+        ) {
+            unsafe {
+                self.api.BlitFramebuffer(
+                    src_x0, src_y0, src_x1, src_y1, dst_x0, dst_y0, dst_x1, dst_y1, mask, filter,
+                )
             };
         }
 
@@ -205,9 +265,23 @@ mod gl46 {
         }
 
         #[inline]
+        unsafe fn create_framebuffer(&self) -> Option<Self::Framebuffer> {
+            let mut framebuffer: gl::GLuint = 0;
+            unsafe { self.api.GenFramebuffers(1, &mut framebuffer) };
+            (framebuffer > 0).then_some(framebuffer)
+        }
+
+        #[inline]
         unsafe fn create_program(&self) -> Option<Self::Program> {
             let program = unsafe { self.api.CreateProgram() };
             (program > 0).then_some(program)
+        }
+
+        #[inline]
+        unsafe fn create_renderbuffer(&self) -> Option<Self::Renderbuffer> {
+            let mut renderbuffer: gl::GLuint = 0;
+            unsafe { self.api.GenRenderbuffers(1, &mut renderbuffer) };
+            (renderbuffer > 0).then_some(renderbuffer)
         }
 
         #[inline]
@@ -236,8 +310,18 @@ mod gl46 {
         }
 
         #[inline]
+        unsafe fn delete_framebuffer(&self, framebuffer: Self::Framebuffer) {
+            unsafe { self.api.DeleteFramebuffers(1, &framebuffer) };
+        }
+
+        #[inline]
         unsafe fn delete_program(&self, program: Self::Program) {
             unsafe { self.api.DeleteProgram(program) };
+        }
+
+        #[inline]
+        unsafe fn delete_renderbuffer(&self, renderbuffer: Self::Renderbuffer) {
+            unsafe { self.api.DeleteRenderbuffers(1, &renderbuffer) };
         }
 
         #[inline]
@@ -284,6 +368,44 @@ mod gl46 {
         #[inline]
         unsafe fn enable_vertex_attrib_array(&self, index: gl::GLuint) {
             unsafe { self.api.EnableVertexAttribArray(index) };
+        }
+
+        #[inline]
+        unsafe fn framebuffer_renderbuffer(
+            &self,
+            target: gl::GLenum,
+            attachment: gl::GLenum,
+            renderbuffertarget: gl::GLenum,
+            renderbuffer: Option<Self::Renderbuffer>,
+        ) {
+            unsafe {
+                self.api.FramebufferRenderbuffer(
+                    target,
+                    attachment,
+                    renderbuffertarget,
+                    renderbuffer.unwrap_or(0),
+                )
+            };
+        }
+
+        #[inline]
+        unsafe fn framebuffer_texture_2d(
+            &self,
+            target: gl::GLenum,
+            attachment: gl::GLenum,
+            textarget: gl::GLenum,
+            texture: Option<Self::Texture>,
+            level: gl::GLint,
+        ) {
+            unsafe {
+                self.api.FramebufferTexture2D(
+                    target,
+                    attachment,
+                    textarget,
+                    texture.unwrap_or(0),
+                    level,
+                )
+            };
         }
 
         #[inline]
@@ -389,6 +511,11 @@ mod gl46 {
         }
 
         #[inline]
+        unsafe fn read_buffer(&self, src: gl::GLenum) {
+            unsafe { self.api.ReadBuffer(src) };
+        }
+
+        #[inline]
         unsafe fn read_pixels(
             &self,
             x: gl::GLint,
@@ -402,6 +529,20 @@ mod gl46 {
             unsafe {
                 self.api
                     .ReadPixels(x, y, width, height, format, r#type, pixels)
+            };
+        }
+
+        #[inline]
+        unsafe fn renderbuffer_storage(
+            &self,
+            target: gl::GLenum,
+            internalformat: gl::GLenum,
+            width: gl::GLsizei,
+            height: gl::GLsizei,
+        ) {
+            unsafe {
+                self.api
+                    .RenderbufferStorage(target, internalformat, width, height)
             };
         }
 
@@ -1307,7 +1448,9 @@ pub use gl46::*;
 pub use webgl2::*;
 
 pub type Buffer = <Api as Adapter>::Buffer;
+pub type Framebuffer = <Api as Adapter>::Framebuffer;
 pub type Program = <Api as Adapter>::Program;
+pub type Renderbuffer = <Api as Adapter>::Renderbuffer;
 pub type Shader = <Api as Adapter>::Shader;
 pub type Texture = <Api as Adapter>::Texture;
 pub type UniformLocation = <Api as Adapter>::UniformLocation;

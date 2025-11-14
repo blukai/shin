@@ -1,4 +1,5 @@
 use std::ops::Range;
+use std::ptr::NonNull;
 use std::{mem, slice};
 
 use mars::scopeguard::ScopeGuard;
@@ -259,7 +260,10 @@ pub struct Vertex {
 pub enum DrawDataCommand<E: Externs> {
     SetScissor(Option<Rect>),
     Draw {
+        // TODO: can index range span many shapes that share same bindings (same texture)?
         index_range: Range<u32>,
+        // TODO: consider moving texture out of draw command into SetTexture command.
+        //   many rects may bind to the same texture.
         texture: Option<TextureHandleKind<E>>,
     },
 }
@@ -319,10 +323,9 @@ impl<E: Externs> DrawData<E> {
     }
 }
 
-// NOTE: both iters point to the same memory.
 pub struct DrawLayerDrain<'a, E: Externs> {
-    drop_iter: slice::IterMut<'a, DrawData<E>>,
-    next_iter: slice::Iter<'a, DrawData<E>>,
+    iter: slice::Iter<'a, DrawData<E>>,
+    ptr: NonNull<DrawBuffer<E>>,
 }
 
 impl<'a, E: Externs> Iterator for DrawLayerDrain<'a, E> {
@@ -330,15 +333,14 @@ impl<'a, E: Externs> Iterator for DrawLayerDrain<'a, E> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.next_iter.next()
+        self.iter.next()
     }
 }
 
 impl<'a, E: Externs> Drop for DrawLayerDrain<'a, E> {
     fn drop(&mut self) {
-        while let Some(layer) = self.drop_iter.next() {
-            layer.clear();
-        }
+        // SAFETY: we have exclusive access to draw buffer
+        unsafe { self.ptr.as_mut() }.clear();
     }
 }
 
@@ -406,52 +408,6 @@ impl<E: Externs> DrawBuffer<E> {
         &mut self.layers[self.layer as usize]
     }
 
-    pub fn push_line(&mut self, line: LineShape) {
-        // NOTE: line's stroke may only be centered. specifying outside/inside stroke alignment
-        // makes sense only for shapes that need an outline (/ need to be stroked).
-        assert!(matches!(line.stroke.alignment, StrokeAlignment::Center));
-
-        let draw_data = self.layer_mut();
-        let idx = draw_data.vertices.len() as u32;
-
-        let [a, b] = line.points;
-        let Stroke { width, color, .. } = line.stroke;
-
-        let offset = compute_line_width_offset(a, b, width);
-
-        // top left
-        draw_data.push_vertex(Vertex {
-            position: a + offset,
-            tex_coord: Vec2::new(0.0, 0.0),
-            color,
-        });
-        // top right
-        draw_data.push_vertex(Vertex {
-            position: b + offset,
-            tex_coord: Vec2::new(1.0, 0.0),
-            color,
-        });
-        // bottom right
-        draw_data.push_vertex(Vertex {
-            position: b - offset,
-            tex_coord: Vec2::new(1.0, 1.0),
-            color,
-        });
-        // bottom left
-        draw_data.push_vertex(Vertex {
-            position: a - offset,
-            tex_coord: Vec2::new(0.0, 1.0),
-            color,
-        });
-
-        // top left -> top right -> bottom right
-        draw_data.push_triangle(idx + 0, idx + 1, idx + 2);
-        // bottom right -> bottom left -> top left
-        draw_data.push_triangle(idx + 2, idx + 3, idx + 0);
-
-        draw_data.commit_primitive(None);
-    }
-
     fn push_rect_filled(&mut self, coords: Rect, fill: Fill<E>) {
         let draw_data = self.layer_mut();
         let idx = draw_data.vertices.len() as u32;
@@ -511,6 +467,21 @@ impl<E: Externs> DrawBuffer<E> {
         draw_data.commit_primitive(texture);
     }
 
+    pub fn push_line(&mut self, line: LineShape) {
+        // NOTE: line's stroke may only be centered.
+        //   specifying outside/inside stroke alignment makes sense only for shapes that need an
+        //   outline (/ need to be stroked).
+        assert!(matches!(line.stroke.alignment, StrokeAlignment::Center));
+
+        let [a, b] = line.points;
+        let Stroke { width, color, .. } = line.stroke;
+        let offset = compute_line_width_offset(a, b, width);
+        self.push_rect_filled(
+            Rect::new(a + offset, b - offset),
+            Fill::new_with_color(color),
+        );
+    }
+
     fn push_rect_stroked(&mut self, coords: Rect, stroke: Stroke) {
         let half_width = stroke.width * 0.5;
         let coords = match stroke.alignment {
@@ -564,12 +535,16 @@ impl<E: Externs> DrawBuffer<E> {
         }
     }
 
+    pub fn clear(&mut self) {
+        for layer in &mut self.layers {
+            layer.clear();
+        }
+    }
+
     pub fn drain_layers<'a>(&'a mut self) -> DrawLayerDrain<'a, E> {
         DrawLayerDrain {
-            // SAFETY: drop_iter will only be touched on drop. next_iter is incapable of mutating
-            // layers.
-            drop_iter: unsafe { &mut *(self as *mut Self) }.layers.iter_mut(),
-            next_iter: self.layers.iter(),
+            ptr: unsafe { NonNull::new_unchecked(self) },
+            iter: self.layers.iter(),
         }
     }
 }

@@ -1,7 +1,6 @@
 use std::iter;
 
 use anyhow::{Context as _, anyhow};
-use gl::wrap::Adapter as _;
 use raw_window_handle as rwh;
 use window::{Event, Window, WindowAttrs, WindowEvent};
 
@@ -89,9 +88,6 @@ struct Context {
     default_font_handle: sx::FontHandle,
     draw_buffer: sx::DrawBuffer<GlRenderer>,
     gl_renderer: GlRenderer,
-    //
-    // TODO: std::time::Instante is not available on wasm targets.
-    // prev_time: Option<std::time::Instant>,
 }
 
 impl Context {
@@ -146,27 +142,27 @@ impl Context {
             default_font_handle,
             draw_buffer: sx::DrawBuffer::default(),
             gl_renderer,
-            // prev_time: None,
         })
     }
 
     fn iterate(&mut self) -> anyhow::Result<()> {
-        // let now = std::time::Instant::now();
-        // let prev_time = self.prev_time.replace(now);
-        // let dt = prev_time.map_or(0.0, |prev_time| (now - prev_time).as_secs_f32());
-
         self.window.pump_events()?;
-        let events = iter::from_fn(|| self.window.pop_event()).filter_map(|event| match event {
-            Event::Window(window_event) => {
-                if matches!(window_event, WindowEvent::CloseRequested) {
-                    self.close_requested = true;
+
+        let input_events =
+            iter::from_fn(|| self.window.pop_event()).filter_map(|event| match event {
+                Event::Window(window_event) => {
+                    match window_event {
+                        WindowEvent::CloseRequested => {
+                            self.close_requested = true;
+                        }
+                        _ => {}
+                    }
+                    None
                 }
-                None
-            }
-            Event::Pointer(pointer_event) => Some(input::Event::Pointer(pointer_event)),
-            Event::Keyboard(keyboard_event) => Some(input::Event::Keyboard(keyboard_event)),
-        });
-        self.input.handle_events(events);
+                Event::Pointer(pointer_event) => Some(input::Event::Pointer(pointer_event)),
+                Event::Keyboard(keyboard_event) => Some(input::Event::Keyboard(keyboard_event)),
+            });
+        self.input.handle_events(input_events);
 
         self.font_service
             .remove_unused_font_instances(&mut self.texture_service);
@@ -187,9 +183,6 @@ impl Context {
             physical_size.y as u32,
         )?;
 
-        unsafe { self.gl_context.api.clear_color(0.0, 0.0, 0.4, 1.0) };
-        unsafe { self.gl_context.api.clear(gl::COLOR_BUFFER_BIT) };
-
         let font_instance = self.font_service.get_font_instance_mut(sx::FontDesc {
             handle: self.default_font_handle,
             pt_size: 16.0,
@@ -197,16 +190,6 @@ impl Context {
         });
 
         let mut text_pos = sx::Vec2::splat(24.0);
-
-        // draw_text(
-        //     &format!("frame time: {dt:.6}, fps: {}", 1.0 / dt),
-        //     font_instance,
-        //     sx::Rgba8::WHITE,
-        //     text_pos,
-        //     &mut self.texture_service,
-        //     &mut self.draw_buffer,
-        // );
-        // text_pos.y += font_instance.height();
 
         draw_text(
             "hello sailor!",
@@ -218,18 +201,15 @@ impl Context {
         );
         text_pos.y += font_instance.height();
 
+        let texture_commands = self.texture_service.drain_comands();
         self.gl_renderer
-            .handle_texture_commands(self.texture_service.drain_comands(), &self.gl_context.api)
-            .context("could not update textures")?;
-        self.gl_renderer
-            .render(
-                logical_size,
-                scale_factor,
-                self.draw_buffer.drain_layers(),
-                &self.gl_context.api,
-            )
-            .context("could not render")?;
+            .handle_texture_commands(texture_commands, &self.gl_context.api)?;
 
+        let draw_data = self.draw_buffer.drain_layers();
+        self.gl_renderer
+            .render(logical_size, scale_factor, draw_data, &self.gl_context.api)?;
+
+        self.gl_renderer.render_to_screen(&self.gl_context.api)?;
         self.gl_context.swap_window_buffers(raw_window_handle)?;
 
         Ok(())
