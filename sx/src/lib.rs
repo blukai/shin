@@ -1,5 +1,3 @@
-use std::fmt;
-
 mod drawbuffer;
 mod fontservice;
 mod geometry;
@@ -11,16 +9,3 @@ pub use fontservice::*;
 pub use geometry::*;
 pub use texturepacker::*;
 pub use textureservice::*;
-
-pub trait Externs {
-    type TextureHandle: fmt::Debug + Clone + PartialEq + Eq;
-}
-
-/// use this in tests.
-pub struct UnitExterns;
-
-impl Externs for UnitExterns {
-    type TextureHandle = ();
-}
-
-// TODO: so many things derive Debug. almost none need it!

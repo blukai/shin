@@ -4,7 +4,7 @@ use std::{mem, slice};
 
 use mars::scopeguard::ScopeGuard;
 
-use crate::{Externs, Rect, TextureFormat, TextureHandle, TextureHandleKind, Vec2};
+use crate::{Rect, TextureHandle, Vec2};
 
 // TODO: consider offloading vertex generation and stuff for the gpu (or maybe for software
 // renderer?) to the renderer. accumulate shapes, not verticies.
@@ -98,33 +98,25 @@ fn test_rgba8_f32_conversions() {
 }
 
 #[derive(Debug, Clone)]
-pub struct FillTexture<E: Externs> {
-    pub texture: TextureHandleKind<E>,
+pub struct FillTexture {
+    pub texture: TextureHandle,
     pub coords: Rect,
 }
 
-impl<E: Externs> FillTexture<E> {
-    pub fn new(texture: TextureHandleKind<E>, coords: Rect) -> Self {
+impl FillTexture {
+    pub fn new(texture: TextureHandle, coords: Rect) -> Self {
         Self { texture, coords }
-    }
-
-    pub fn new_internal(handle: TextureHandle, coords: Rect) -> Self {
-        Self::new(TextureHandleKind::Internal(handle), coords)
-    }
-
-    pub fn new_external(handle: E::TextureHandle, format: TextureFormat, coords: Rect) -> Self {
-        Self::new(TextureHandleKind::External { handle, format }, coords)
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct Fill<E: Externs> {
+pub struct Fill {
     pub color: Rgba8,
-    pub texture: Option<FillTexture<E>>,
+    pub texture: Option<FillTexture>,
 }
 
-impl<E: Externs> Fill<E> {
-    pub fn new(color: Rgba8, texture: FillTexture<E>) -> Self {
+impl Fill {
+    pub fn new(color: Rgba8, texture: FillTexture) -> Self {
         Self {
             color,
             texture: Some(texture),
@@ -170,14 +162,14 @@ impl Stroke {
 }
 
 #[derive(Debug)]
-pub struct RectShape<E: Externs> {
+pub struct RectShape {
     pub coords: Rect,
-    pub fill: Option<Fill<E>>,
+    pub fill: Option<Fill>,
     pub stroke: Option<Stroke>,
 }
 
-impl<E: Externs> RectShape<E> {
-    pub fn new(coords: Rect, fill: Fill<E>, stroke: Stroke) -> Self {
+impl RectShape {
+    pub fn new(coords: Rect, fill: Fill, stroke: Stroke) -> Self {
         Self {
             coords,
             fill: Some(fill),
@@ -185,7 +177,7 @@ impl<E: Externs> RectShape<E> {
         }
     }
 
-    pub fn new_with_fill(coords: Rect, fill: Fill<E>) -> Self {
+    pub fn new_with_fill(coords: Rect, fill: Fill) -> Self {
         Self {
             coords,
             fill: Some(fill),
@@ -257,38 +249,26 @@ pub struct Vertex {
 }
 
 #[derive(Debug)]
-pub enum DrawDataCommand<E: Externs> {
+pub enum DrawDataCommand {
     SetScissor(Option<Rect>),
     Draw {
         // TODO: can index range span many shapes that share same bindings (same texture)?
         index_range: Range<u32>,
         // TODO: consider moving texture out of draw command into SetTexture command.
         //   many rects may bind to the same texture.
-        texture: Option<TextureHandleKind<E>>,
+        texture: Option<TextureHandle>,
     },
 }
 
-#[derive(Debug)]
-pub struct DrawData<E: Externs> {
+#[derive(Debug, Default)]
+pub struct DrawData {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
     pending_indices: usize,
-    pub commands: Vec<DrawDataCommand<E>>,
+    pub commands: Vec<DrawDataCommand>,
 }
 
-// @BlindDerive
-impl<E: Externs> Default for DrawData<E> {
-    fn default() -> Self {
-        Self {
-            vertices: Vec::new(),
-            indices: Vec::new(),
-            pending_indices: 0,
-            commands: Vec::new(),
-        }
-    }
-}
-
-impl<E: Externs> DrawData<E> {
+impl DrawData {
     fn clear(&mut self) {
         self.vertices.clear();
         self.indices.clear();
@@ -311,7 +291,7 @@ impl<E: Externs> DrawData<E> {
         self.pending_indices += 3;
     }
 
-    fn commit_primitive(&mut self, texture: Option<TextureHandleKind<E>>) {
+    fn commit_primitive(&mut self, texture: Option<TextureHandle>) {
         assert!(self.pending_indices > 0);
         let start_index = (self.indices.len() - self.pending_indices) as u32;
         let end_index = self.indices.len() as u32;
@@ -323,13 +303,13 @@ impl<E: Externs> DrawData<E> {
     }
 }
 
-pub struct DrawLayerDrain<'a, E: Externs> {
-    iter: slice::Iter<'a, DrawData<E>>,
-    ptr: NonNull<DrawBuffer<E>>,
+pub struct DrawLayerDrain<'a> {
+    iter: slice::Iter<'a, DrawData>,
+    ptr: NonNull<DrawBuffer>,
 }
 
-impl<'a, E: Externs> Iterator for DrawLayerDrain<'a, E> {
-    type Item = &'a DrawData<E>;
+impl<'a> Iterator for DrawLayerDrain<'a> {
+    type Item = &'a DrawData;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -337,7 +317,7 @@ impl<'a, E: Externs> Iterator for DrawLayerDrain<'a, E> {
     }
 }
 
-impl<'a, E: Externs> Drop for DrawLayerDrain<'a, E> {
+impl<'a> Drop for DrawLayerDrain<'a> {
     fn drop(&mut self) {
         // SAFETY: we have exclusive access to draw buffer
         unsafe { self.ptr.as_mut() }.clear();
@@ -358,25 +338,14 @@ impl DrawLayer {
     pub const MAX: usize = 1;
 }
 
-#[derive(Debug)]
-pub struct DrawBuffer<E: Externs> {
+#[derive(Debug, Default)]
+pub struct DrawBuffer {
     scissor_rect: Option<Rect>,
     layer: DrawLayer,
-    layers: [DrawData<E>; DrawLayer::MAX],
+    layers: [DrawData; DrawLayer::MAX],
 }
 
-// @BlindDerive
-impl<E: Externs> Default for DrawBuffer<E> {
-    fn default() -> Self {
-        Self {
-            scissor_rect: None,
-            layer: DrawLayer::default(),
-            layers: Default::default(),
-        }
-    }
-}
-
-impl<E: Externs> DrawBuffer<E> {
+impl DrawBuffer {
     pub fn scissor_scope_guard<'a>(
         &'a mut self,
         rect: Rect,
@@ -404,11 +373,11 @@ impl<E: Externs> DrawBuffer<E> {
     }
 
     #[inline(always)]
-    fn layer_mut(&mut self) -> &mut DrawData<E> {
+    fn layer_mut(&mut self) -> &mut DrawData {
         &mut self.layers[self.layer as usize]
     }
 
-    fn push_rect_filled(&mut self, coords: Rect, fill: Fill<E>) {
+    fn push_rect_filled(&mut self, coords: Rect, fill: Fill) {
         let draw_data = self.layer_mut();
         let idx = draw_data.vertices.len() as u32;
 
@@ -526,7 +495,7 @@ impl<E: Externs> DrawBuffer<E> {
         ));
     }
 
-    pub fn push_rect(&mut self, rect: RectShape<E>) {
+    pub fn push_rect(&mut self, rect: RectShape) {
         if let Some(fill) = rect.fill {
             self.push_rect_filled(rect.coords, fill);
         }
@@ -541,7 +510,7 @@ impl<E: Externs> DrawBuffer<E> {
         }
     }
 
-    pub fn drain_layers<'a>(&'a mut self) -> DrawLayerDrain<'a, E> {
+    pub fn drain_layers<'a>(&'a mut self) -> DrawLayerDrain<'a> {
         DrawLayerDrain {
             ptr: unsafe { NonNull::new_unchecked(self) },
             iter: self.layers.iter(),

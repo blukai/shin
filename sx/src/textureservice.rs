@@ -6,8 +6,6 @@ use std::ops::Range;
 use mars::nohash::{NoHash, NoHashMap};
 use mars::rangealloc::RangeAlloc;
 
-use crate::Externs;
-
 // TODO: consider using word "image" instead of "texture"
 //   but that makes naming of a thing like TexturePacker not so simple, idk.
 //   the word texture doesn't make a lot of sense to me in context of images or graphics really.
@@ -44,6 +42,7 @@ pub struct TextureHandle {
     id: u32,
 }
 
+// TODO: can Hash be just derived for TextureHandle and not implemented manually?
 impl Hash for TextureHandle {
     fn hash<H: Hasher>(&self, state: &mut H) {
         state.write_u32(self.id);
@@ -51,15 +50,6 @@ impl Hash for TextureHandle {
 }
 
 impl NoHash for TextureHandle {}
-
-#[derive(Debug, Clone)]
-pub enum TextureHandleKind<E: Externs> {
-    Internal(TextureHandle),
-    External {
-        handle: E::TextureHandle,
-        format: TextureFormat,
-    },
-}
 
 #[derive(Debug, Clone)]
 pub struct TextureRegion {

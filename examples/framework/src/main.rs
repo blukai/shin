@@ -51,13 +51,13 @@ impl Logger {
     }
 }
 
-fn draw_text<E: sx::Externs>(
+fn draw_text(
     text: &str,
     font_instance: &mut sx::FontInstance,
     fg: sx::Rgba8,
     position: sx::Vec2,
     texture_service: &mut sx::TextureService,
-    draw_buffer: &mut sx::DrawBuffer<E>,
+    draw_buffer: &mut sx::DrawBuffer,
 ) {
     let font_ascent = font_instance.ascent();
     let mut x_offset: f32 = position.x;
@@ -70,7 +70,7 @@ fn draw_text<E: sx::Externs>(
                 .translate(sx::Vec2::new(x_offset, position.y + font_ascent)),
             sx::Fill::new(
                 fg,
-                sx::FillTexture::new_internal(glyph.texture_handle(), glyph.texture_coords()),
+                sx::FillTexture::new(glyph.texture_handle(), glyph.texture_coords()),
             ),
         ));
         x_offset += glyph_advance_width;
@@ -86,7 +86,7 @@ struct Context {
     texture_service: sx::TextureService,
     font_service: sx::FontService,
     default_font_handle: sx::FontHandle,
-    draw_buffer: sx::DrawBuffer<GlRenderer>,
+    draw_buffer: sx::DrawBuffer,
     gl_renderer: GlRenderer,
 }
 

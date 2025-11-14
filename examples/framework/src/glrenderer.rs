@@ -327,10 +327,6 @@ pub struct GlRenderer {
     textures: NoHashMap<sx::TextureHandle, Texture>,
 }
 
-impl sx::Externs for GlRenderer {
-    type TextureHandle = gl::wrap::Texture;
-}
-
 impl GlRenderer {
     pub fn new(gl_api: &gl::wrap::Api) -> anyhow::Result<Self> {
         // TODO: scopeguard to cleanup created resources if something fails
@@ -564,16 +560,13 @@ impl GlRenderer {
         Ok(())
     }
 
-    pub fn render<'a, E: sx::Externs + 'a>(
+    pub fn render<'a>(
         &mut self,
         logical_size: sx::Vec2,
         scale_factor: f32,
-        draw_data: impl Iterator<Item = &'a sx::DrawData<E>>,
+        draw_data: impl Iterator<Item = &'a sx::DrawData>,
         gl_api: &gl::wrap::Api,
-    ) -> anyhow::Result<()>
-    where
-        E: sx::Externs<TextureHandle = <Self as sx::Externs>::TextureHandle>,
-    {
+    ) -> anyhow::Result<()> {
         let physical_size = logical_size * scale_factor;
         let projection_matrix = compute_orthographic_projection_matrix(
             0.0,
@@ -671,12 +664,9 @@ impl GlRenderer {
                         texture,
                     } => {
                         let (texture_gl_handle, texture_format) = match texture {
-                            Some(sx::TextureHandleKind::Internal(internal_handle)) => {
-                                let t = self.get_texture(*internal_handle);
+                            Some(handle) => {
+                                let t = self.get_texture(*handle);
                                 (t.gl_handle, t.format)
-                            }
-                            Some(sx::TextureHandleKind::External { handle, format }) => {
-                                (*handle, *format)
                             }
                             None => {
                                 let t = &self.default_white_texture;
