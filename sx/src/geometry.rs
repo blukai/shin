@@ -349,7 +349,7 @@ impl Rect {
 
     #[inline]
     #[must_use]
-    pub fn from_center_half_size(center: Vec2, size: f32) -> Self {
+    pub fn from_center_size(center: Vec2, size: f32) -> Self {
         let radius = Vec2::splat(size / 2.0);
         Self::new(center - radius, center + radius)
     }
@@ -374,7 +374,7 @@ impl Rect {
 
     #[must_use]
     pub fn center(&self) -> Vec2 {
-        (self.min + self.max) / 2.0
+        self.min + self.size() * 0.5
     }
 
     #[must_use]
