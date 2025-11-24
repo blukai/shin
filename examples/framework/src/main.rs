@@ -1,10 +1,11 @@
 use std::iter;
+use std::mem::MaybeUninit;
 
 use anyhow::{Context as _, anyhow};
+use example_framework::{GlContext, GlRenderer};
+use mars::alloc::TempAllocator;
 use raw_window_handle as rwh;
 use window::{Event, Window, WindowAttrs, WindowEvent};
-
-use example_framework::{GlContext, GlRenderer};
 
 const DEFAULT_FONT_DATA: &[u8] = include_bytes!("../fixtures/JetBrainsMono-Regular.ttf");
 
@@ -64,15 +65,16 @@ fn draw_text(
     for ch in text.chars() {
         let glyph = font_instance.get_or_rasterize_glyph(ch, texture_service);
         let glyph_advance_width = glyph.advance_width();
-        draw_buffer.push_rect(sx::RectShape::new_with_fill(
-            glyph
-                .bounds()
-                .translate(sx::Vec2::new(x_offset, position.y + font_ascent)),
-            sx::Fill::new(
-                fg,
+        draw_buffer.push_rect(
+            sx::RectShape::new(
+                glyph
+                    .bounds()
+                    .translate(sx::Vec2::new(x_offset, position.y + font_ascent)),
+            )
+            .with_fill(Some(sx::Fill::new(fg).with_texture(Some(
                 sx::FillTexture::new(glyph.texture_handle(), glyph.texture_coords()),
-            ),
-        ));
+            )))),
+        );
         x_offset += glyph_advance_width;
     }
 }
@@ -91,7 +93,7 @@ struct Context {
 }
 
 impl Context {
-    fn new() -> anyhow::Result<Self> {
+    fn new(temp: &TempAllocator<'_>) -> anyhow::Result<Self> {
         let window =
             window::create_window(WindowAttrs::default()).context("could not create window")?;
 
@@ -129,7 +131,7 @@ impl Context {
             .register_font_slice(DEFAULT_FONT_DATA)
             .context("default font is invalid")?;
         let gl_renderer =
-            GlRenderer::new(&gl_context.api).context("could not create gl renderer")?;
+            GlRenderer::new(&gl_context.api, temp).context("could not create gl renderer")?;
 
         Ok(Self {
             window,
@@ -147,7 +149,6 @@ impl Context {
 
     fn iterate(&mut self) -> anyhow::Result<()> {
         self.window.pump_events()?;
-
         let input_events =
             iter::from_fn(|| self.window.pop_event()).filter_map(|event| match event {
                 Event::Window(window_event) => {
@@ -167,16 +168,15 @@ impl Context {
         self.font_service
             .remove_unused_font_instances(&mut self.texture_service);
 
+        let logical_size = sx::U32Vec2::from(self.window.logical_size()).as_vec2();
+        let scale_factor = self.window.scale_factor() as f32;
+        let physical_size = logical_size * scale_factor;
+
         let raw_window_handle = self
             .window
             .window_handle()
             .context("window handle is unavailable")?
             .as_raw();
-
-        let logical_size = sx::U32Vec2::from(self.window.logical_size()).as_vec2();
-        let scale_factor = self.window.scale_factor() as f32;
-        let physical_size = logical_size * scale_factor;
-
         self.gl_context.make_window_current(
             raw_window_handle,
             physical_size.x as u32,
@@ -188,18 +188,14 @@ impl Context {
             pt_size: 16.0,
             scale_factor,
         });
-
-        let mut text_pos = sx::Vec2::splat(24.0);
-
         draw_text(
             "hello sailor!",
             font_instance,
             sx::Rgba8::WHITE,
-            text_pos,
+            sx::Vec2::splat(24.0),
             &mut self.texture_service,
             &mut self.draw_buffer,
         );
-        text_pos.y += font_instance.height();
 
         let texture_commands = self.texture_service.drain_comands();
         self.gl_renderer
@@ -253,17 +249,22 @@ fn main() {
         js::throw_str(&panic_info.to_string());
     }));
 
+    let mut temp_data = MaybeUninit::<[u8; 10 << 10]>::uninit();
+    let temp = TempAllocator::new(unsafe { temp_data.assume_init_mut() });
+
     Logger::init();
 
-    let mut ctx = Context::new().expect("could not create app");
+    let mut ctx = Context::new(&temp).expect("could not create app");
 
     #[cfg(not(target_family = "wasm"))]
     while !ctx.close_requested {
+        temp.reset();
         ctx.iterate().expect("iteration failure");
     }
 
     #[cfg(target_family = "wasm")]
     request_animation_frame_loop(move || {
+        temp.reset();
         ctx.iterate().expect("iteration failure");
     });
 }

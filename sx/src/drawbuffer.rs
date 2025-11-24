@@ -1,13 +1,14 @@
 use std::ops::Range;
 use std::ptr::NonNull;
-use std::{mem, slice};
+use std::slice;
 
 use mars::scopeguard::ScopeGuard;
 
 use crate::{Rect, Rgba8, TextureHandle, Vec2};
 
-// TODO: consider offloading vertex generation and stuff for the gpu (or maybe for software
-// renderer?) to the renderer. accumulate shapes, not verticies.
+// TODO: consider offloading vertex generation and stuff to the gpu
+//   (or maybe for software renderer?) to the renderer.
+//   maybe accumulate shapes, not verticies.
 
 #[derive(Debug, Clone)]
 pub struct FillTexture {
@@ -28,25 +29,24 @@ pub struct Fill {
 }
 
 impl Fill {
-    pub fn new(color: Rgba8, texture: FillTexture) -> Self {
-        Self {
-            color,
-            texture: Some(texture),
-        }
-    }
-
-    pub fn new_with_color(color: Rgba8) -> Self {
+    pub fn new(color: Rgba8) -> Self {
         Self {
             color,
             texture: None,
         }
     }
+
+    pub fn with_texture(mut self, texture: Option<FillTexture>) -> Self {
+        self.texture = texture;
+        self
+    }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub enum StrokeAlignment {
     Inside,
     Outside,
+    #[default]
     Center,
 }
 
@@ -58,12 +58,12 @@ pub struct Stroke {
 }
 
 impl Stroke {
-    // NOTE: in majority of cases alignment is `Center`.
+    // NOTE: alignment is omitted because in major majority of cases it's center (the default).
     pub fn new(width: f32, color: Rgba8) -> Self {
         Self {
             width,
             color,
-            alignment: StrokeAlignment::Center,
+            alignment: StrokeAlignment::default(),
         }
     }
 
@@ -81,28 +81,22 @@ pub struct RectShape {
 }
 
 impl RectShape {
-    pub fn new(coords: Rect, fill: Fill, stroke: Stroke) -> Self {
+    pub fn new(coords: Rect) -> Self {
         Self {
             coords,
-            fill: Some(fill),
-            stroke: Some(stroke),
-        }
-    }
-
-    pub fn new_with_fill(coords: Rect, fill: Fill) -> Self {
-        Self {
-            coords,
-            fill: Some(fill),
+            fill: None,
             stroke: None,
         }
     }
 
-    pub fn new_with_stroke(coords: Rect, stroke: Stroke) -> Self {
-        Self {
-            coords,
-            fill: None,
-            stroke: Some(stroke),
-        }
+    pub fn with_fill(mut self, fill: Option<Fill>) -> Self {
+        self.fill = fill;
+        self
+    }
+
+    pub fn with_stroke(mut self, stroke: Option<Stroke>) -> Self {
+        self.stroke = stroke;
+        self
     }
 }
 
@@ -160,36 +154,72 @@ pub struct Vertex {
     pub color: Rgba8,
 }
 
+// TODO: shader service or something?
+//   user must be able to provide custom shaders
+//   it must be possible to provide custom params(uniforms).
+//     maybe take a look at fyrox's PropertyGroup thing.
+
 #[derive(Debug)]
-pub enum DrawDataCommand {
-    SetScissor(Option<Rect>),
-    Draw {
-        // TODO: can index range span many shapes that share same bindings (same texture)?
-        index_range: Range<u32>,
-        // TODO: consider moving texture out of draw command into SetTexture command.
-        //   many rects may bind to the same texture.
-        texture: Option<TextureHandle>,
-    },
+pub struct DrawCommand {
+    // TODO: can index range span many shapes that share same bindings (same texture)?
+    pub index_range: Range<u32>,
+    pub texture: Option<TextureHandle>,
+    pub scissor: Option<Rect>,
 }
 
 #[derive(Debug, Default)]
 pub struct DrawData {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
+    pub commands: Vec<DrawCommand>,
+
     pending_indices: usize,
-    pub commands: Vec<DrawDataCommand>,
+    active_texture: Option<TextureHandle>,
+    active_scissor: Option<Rect>,
 }
 
 impl DrawData {
     fn clear(&mut self) {
+        assert_eq!(self.pending_indices, 0);
+
         self.vertices.clear();
         self.indices.clear();
-        assert_eq!(self.pending_indices, 0);
         self.commands.clear();
+
+        self.active_texture = None;
+        self.active_scissor = None;
     }
 
-    fn set_scissor(&mut self, rect: Option<Rect>) {
-        self.commands.push(DrawDataCommand::SetScissor(rect));
+    fn flush(&mut self) {
+        if self.pending_indices == 0 {
+            return;
+        }
+
+        let start_index = (self.indices.len() - self.pending_indices) as u32;
+        let end_index = self.indices.len() as u32;
+        self.commands.push(DrawCommand {
+            index_range: start_index..end_index,
+            texture: self.active_texture,
+            scissor: self.active_scissor,
+        });
+
+        self.pending_indices = 0;
+    }
+
+    fn set_texture(&mut self, texture: Option<TextureHandle>) {
+        if self.active_texture == texture {
+            return;
+        }
+        self.flush();
+        self.active_texture = texture;
+    }
+
+    fn set_scissor(&mut self, scissor: Option<Rect>) {
+        if self.active_scissor == scissor {
+            return;
+        }
+        self.flush();
+        self.active_scissor = scissor;
     }
 
     fn push_vertex(&mut self, vertex: Vertex) {
@@ -202,21 +232,10 @@ impl DrawData {
         self.indices.push(ni);
         self.pending_indices += 3;
     }
-
-    fn commit_primitive(&mut self, texture: Option<TextureHandle>) {
-        assert!(self.pending_indices > 0);
-        let start_index = (self.indices.len() - self.pending_indices) as u32;
-        let end_index = self.indices.len() as u32;
-        self.commands.push(DrawDataCommand::Draw {
-            index_range: start_index..end_index,
-            texture,
-        });
-        self.pending_indices = 0;
-    }
 }
 
 pub struct DrawLayerDrain<'a> {
-    iter: slice::Iter<'a, DrawData>,
+    iter: slice::IterMut<'a, DrawData>,
     ptr: NonNull<DrawBuffer>,
 }
 
@@ -225,7 +244,11 @@ impl<'a> Iterator for DrawLayerDrain<'a> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next()
+        self.iter.next().map(|layer| {
+            layer.flush();
+            let layer: &_ = layer;
+            layer
+        })
     }
 }
 
@@ -252,26 +275,34 @@ impl DrawLayer {
 
 #[derive(Debug, Default)]
 pub struct DrawBuffer {
-    scissor_rect: Option<Rect>,
     layer: DrawLayer,
     layers: [DrawData; DrawLayer::MAX],
 }
 
 impl DrawBuffer {
+    #[inline(always)]
+    fn layer_mut(&mut self) -> &mut DrawData {
+        &mut self.layers[self.layer as usize]
+    }
+
     pub fn scissor_scope_guard<'a>(
         &'a mut self,
         rect: Rect,
     ) -> ScopeGuard<&'a mut Self, impl FnOnce(&'a mut Self)> {
-        let next = if let Some(prev) = self.scissor_rect {
+        let draw_data = self.layer_mut();
+
+        let prev = draw_data.active_scissor;
+        let next = if let Some(prev) = prev {
             rect.clamp(prev)
         } else {
             rect
         };
-        let prev = self.scissor_rect.replace(next);
-        self.layer_mut().set_scissor(Some(next));
+
+        draw_data.set_scissor(Some(next));
+
+        let layer = self.layer;
         ScopeGuard::new_with_data(self, move |this| {
-            this.scissor_rect = prev;
-            this.layer_mut().set_scissor(prev);
+            this.layers[layer as usize].set_scissor(prev);
         })
     }
 
@@ -282,11 +313,6 @@ impl DrawBuffer {
         let prev = self.layer;
         self.layer = layer;
         ScopeGuard::new_with_data(self, move |this| this.layer = prev)
-    }
-
-    #[inline(always)]
-    fn layer_mut(&mut self) -> &mut DrawData {
-        &mut self.layers[self.layer as usize]
     }
 
     fn push_rect_filled(&mut self, coords: Rect, fill: Fill) {
@@ -302,6 +328,7 @@ impl DrawBuffer {
         } else {
             (fill.color, None, None)
         };
+        draw_data.set_texture(texture);
 
         // top left
         draw_data.push_vertex(Vertex {
@@ -344,8 +371,6 @@ impl DrawBuffer {
         draw_data.push_triangle(idx + 0, idx + 1, idx + 2);
         // bottom right -> bottom left -> top left
         draw_data.push_triangle(idx + 2, idx + 3, idx + 0);
-
-        draw_data.commit_primitive(texture);
     }
 
     pub fn push_line(&mut self, line: LineShape) {
@@ -357,10 +382,7 @@ impl DrawBuffer {
         let [a, b] = line.points;
         let Stroke { width, color, .. } = line.stroke;
         let offset = compute_line_width_offset(a, b, width);
-        self.push_rect_filled(
-            Rect::new(a + offset, b - offset),
-            Fill::new_with_color(color),
-        );
+        self.push_rect_filled(Rect::new(a + offset, b - offset), Fill::new(color));
     }
 
     fn push_rect_stroked(&mut self, coords: Rect, stroke: Stroke) {
@@ -425,7 +447,7 @@ impl DrawBuffer {
     pub fn drain_layers<'a>(&'a mut self) -> DrawLayerDrain<'a> {
         DrawLayerDrain {
             ptr: unsafe { NonNull::new_unchecked(self) },
-            iter: self.layers.iter(),
+            iter: self.layers.iter_mut(),
         }
     }
 }

@@ -32,6 +32,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloc"
+version = "0.0.0"
+dependencies = [
+ "allocator-api2",
+ "scopeguard",
+]
+
+[[package]]
+name = "allocator-api2"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c583acf993cf4245c4acb0a2cc2ab1f9cc097de73411bb6d3647ff6af2b1013d"
+
+[[package]]
 name = "android-activity"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -205,6 +219,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
 dependencies = [
  "crossbeam-utils",
+]
+
+[[package]]
+name = "containers"
+version = "0.0.0"
+dependencies = [
+ "alloc",
+ "scopeguard",
 ]
 
 [[package]]
@@ -528,6 +550,8 @@ checksum = "a7a70ba024b9dc04c27ea2f0c0548feb474ec5c54bba33a7f72f873a39d07b24"
 name = "mars"
 version = "0.0.0"
 dependencies = [
+ "alloc",
+ "containers",
  "nohash",
  "rangealloc",
  "scopeguard",
