@@ -67,9 +67,8 @@ impl GlContextEgl {
             #[rustfmt::skip]
             let context_attrs = [
                 egl::CONTEXT_MAJOR_VERSION as _, 3,
-                // TODO: can't get gl 3.3 working AND core profile, figure out why.
-                // CONTEXT_MINOR_VERSION as _, 3,
-                // CONTEXT_OPENGL_PROFILE_MASK as _, CONTEXT_OPENGL_CORE_PROFILE_BIT,
+                egl::CONTEXT_MINOR_VERSION as _, 3,
+                egl::CONTEXT_OPENGL_PROFILE_MASK as _, egl::CONTEXT_OPENGL_CORE_PROFILE_BIT,
                 egl::NONE as _,
             ];
             egl_connection.create_context(

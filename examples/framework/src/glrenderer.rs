@@ -1,17 +1,53 @@
 use std::ffi::c_void;
+use std::fmt::Write as _;
 use std::mem::offset_of;
 use std::ptr::null;
 
 use anyhow::{Context as _, anyhow};
 use gl::wrap::Adapter;
+use mars::alloc::{Allocator, TempAllocator};
+use mars::containers::memory::GrowableMemory;
+use mars::containers::string::{FixedString, GrowableString};
+use mars::containers::vector::FixedGrowableVector;
 use mars::nohash::NoHashMap;
+use mars::scopeguard::ScopeGuard;
 use sx::TextureFormat;
+
+// const SHADER_DEFINE_LEN: usize = 32;
+// const SHADER_UNIFORM_LEN: usize = 32;
+//
+// // pub enum ShaderStage {
+// //     Vertex,
+// //     Fragment,
+// // }
+// //
+// struct ShaderSource<'a> {
+//     source: &'a str,
+//     defines: &'a [(&'a str, Option<&'a str>)],
+// }
+//
+// enum ShaderUniformType {
+//     Float,
+//     Vec2,
+// }
+//
+// struct ShaderUniform {
+//     name: FixedString<{ SHADER_UNIFORM_LEN }>,
+//     ty: ShaderUniformType,
+// }
+//
+// struct PipelineDesc<'a, A: Allocator> {
+//     vertex_source: ShaderSource<'a>,
+//     fragment_source: ShaderSource<'a>,
+//     uniforms: FixedGrowableVector<ShaderUniform, 16, A>,
+// }
 
 // NOTE: some kind of naming conventions for shader things
 //   - `a_` for attributes
 //   - `v_` for vertex-to-fragment outputs
 //   - `u_` for uniforms
-//   - `fragColor` for fragment output
+
+// TODO: maybe ubo
 
 const A_POSITION_LOC: gl::GLuint = 0;
 const A_TEX_COORD_LOC: gl::GLuint = 1;
@@ -19,9 +55,9 @@ const A_COLOR_LOC: gl::GLuint = 2;
 
 const SHADER: &str = "
 #if defined(VERTEX_SHADER)
-in vec2 a_position;
-in vec2 a_tex_coord;
-in vec4 a_color;
+layout(location = 0) in vec2 a_position;
+layout(location = 1) in vec2 a_tex_coord;
+layout(location = 2) in vec4 a_color;
 
 uniform mat4 u_projection;
 
@@ -41,50 +77,114 @@ in vec4 v_color;
 
 uniform sampler2D u_sampler;
 
-out vec4 fragColor;
+#if defined(ROUNDED_RECT)
+uniform vec2 u_rect_center;
+uniform vec2 u_rect_half_size;
+uniform float u_rect_corner_radius;
+
+// https://www.shadertoy.com/view/WtdSDs
+// https://iquilezles.org/articles/distfunctions2d/
+float rounded_rect_sdf(vec2 position, vec2 half_size, float radius) {
+    return length(max(abs(position) - half_size + radius, 0.0)) - radius;
+}
+#endif
+
+out vec4 FragColor;
 
 void main() {
+    FragColor = v_color;
+
     vec4 texture_sample = texture(u_sampler, v_tex_coord);
 #if defined(TEXTURE_FORMAT_R8)
-    fragColor = vec4(v_color.rgb, v_color.a * texture_sample.r);
-#else // TEXTURE_FORMAT_RGBA8 is the default
-    fragColor = v_color * texture_sample;
+    FragColor.a *= texture_sample.r;
+#elif defined(TEXTURE_FORMAT_RGBA8)
+    FragColor *= texture_sample;
+#endif
+
+#if defined(ROUNDED_RECT)
+    float distance = rounded_rect_sdf(gl_FragCoord.xy - u_rect_center, u_rect_half_size, u_rect_corner_radius);
+    float smoothed_alpha = 1.0 - smoothstep(0.0, 1.0, distance);
+    FragColor.a *= smoothed_alpha;
 #endif
 }
 #endif
 ";
 
-fn prefix_vertex_shader(shader: &str) -> String {
-    let mut ret = String::new();
-
-    if cfg!(target_family = "wasm") {
-        ret.push_str("#version 300 es\n");
-        ret.push_str("precision mediump float;\n");
-    } else {
-        ret.push_str("#version 330 core\n");
-    }
-
-    ret.push_str("#define VERTEX_SHADER\n");
-
-    ret.push_str(shader);
-    ret
+// https://wikis.khronos.org/opengl/Type_Qualifier_(GLSL)#Precision_qualifiers
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GlslEsPrecision {
+    High,
+    Medium,
+    Low,
 }
 
-fn prefix_fragment_shader(shader: &str, tex_format: sx::TextureFormat) -> String {
-    let mut ret = String::new();
+impl GlslEsPrecision {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::High => "highp",
+            Self::Medium => "mediump",
+            Self::Low => "lowp",
+        }
+    }
+}
 
-    if cfg!(target_family = "wasm") {
-        ret.push_str("#version 300 es\n");
-        ret.push_str("precision mediump float;\n");
-    } else {
-        ret.push_str("#version 330 core\n");
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GlslProfile {
+    Core,
+    Compatibility,
+    Es {
+        float_precision: Option<GlslEsPrecision>,
+        int_precision: Option<GlslEsPrecision>,
+    },
+}
+
+// #version number profile_opt
+// https://registry.khronos.org/OpenGL/specs/gl/GLSLangSpec.4.60.pdf
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GlslVersion(u16, GlslProfile);
+
+fn prefix_shader<A: Allocator>(
+    shader: &str,
+    version: GlslVersion,
+    defines: &[&str],
+    alloc: A,
+) -> GrowableString<A> {
+    // NOTE: 128 is an approx amortization for prefix
+    let mut ret = GrowableString::new_in(GrowableMemory::new_with_cap_in(
+        shader.len() + SHADER_DEFINE_LEN * defines.len() + 128,
+        alloc,
+    ));
+
+    match version {
+        GlslVersion(version, GlslProfile::Core) => {
+            ret.write_fmt(format_args!("#version {version} core\n"))
+                .unwrap();
+        }
+        GlslVersion(_version, GlslProfile::Compatibility) => {
+            unimplemented!()
+        }
+        GlslVersion(
+            version,
+            GlslProfile::Es {
+                float_precision,
+                int_precision,
+            },
+        ) => {
+            ret.write_fmt(format_args!("#version {version} es\n"))
+                .unwrap();
+            if let Some(p) = float_precision {
+                ret.write_fmt(format_args!("precision {} float;\n", p.as_str()))
+                    .unwrap();
+            }
+            if let Some(p) = int_precision {
+                ret.write_fmt(format_args!("precision {} int;\n", p.as_str()))
+                    .unwrap();
+            }
+        }
     }
 
-    ret.push_str("#define FRAGMENT_SHADER\n");
-
-    match tex_format {
-        sx::TextureFormat::Rgba8Unorm => ret.push_str("#define TEXTURE_FORMAT_RGBA8\n"),
-        sx::TextureFormat::R8Unorm => ret.push_str("#define TEXTURE_FORMAT_R8\n"),
+    for key in defines {
+        ret.write_fmt(format_args!("#define {key}\n")).unwrap();
     }
 
     ret.push_str(shader);
@@ -147,8 +247,12 @@ unsafe fn create_program(
     }
 }
 
+// TODO: ShaderUniform { name: ArrayString, type: .. }
+// TODO: shader uniform locations (hash table probably?)
+
 struct Shader {
     program: gl::wrap::Program,
+
     u_projection_loc: gl::wrap::UniformLocation,
     u_sampler_loc: gl::wrap::UniformLocation,
 }
@@ -317,7 +421,7 @@ pub struct GlRenderer {
 
     shader_rgba8: Shader,
     shader_r8: Shader,
-    active_program: Option<gl::wrap::Program>,
+    shader_rgba8_rounded_rect: Shader,
 
     vbo: gl::wrap::Buffer,
     ebo: gl::wrap::Buffer,
@@ -328,18 +432,38 @@ pub struct GlRenderer {
 }
 
 impl GlRenderer {
-    pub fn new(gl_api: &gl::wrap::Api) -> anyhow::Result<Self> {
+    pub fn new(gl_api: &gl::wrap::Api, temp: &TempAllocator<'_>) -> anyhow::Result<Self> {
         // TODO: scopeguard to cleanup created resources if something fails
         //   via checkpoint-based gl allocator
 
+        let glsl_version = if cfg!(target_family = "wasm") {
+            GlslVersion(
+                300,
+                GlslProfile::Es {
+                    float_precision: Some(GlslEsPrecision::Medium),
+                    int_precision: None,
+                },
+            )
+        } else {
+            GlslVersion(330, GlslProfile::Core)
+        };
+
         unsafe {
             let shader_rgba8 = {
-                let program = create_program(
-                    gl_api,
-                    &prefix_vertex_shader(SHADER),
-                    &prefix_fragment_shader(SHADER, sx::TextureFormat::Rgba8Unorm),
-                )
-                .context("could not create rgba8 program")?;
+                let program = {
+                    let _scope_guard = temp.scope_guard();
+                    create_program(
+                        gl_api,
+                        &prefix_shader(SHADER, glsl_version, &["VERTEX_SHADER"], temp),
+                        &prefix_shader(
+                            SHADER,
+                            glsl_version,
+                            &["FRAGMENT_SHADER", "TEXTURE_FORMAT_RGBA8"],
+                            temp,
+                        ),
+                    )
+                    .context("could not create rgba8 program")?
+                };
                 let u_projection_loc = gl_api
                     .get_uniform_location(program, c"u_projection")
                     .context("could not get loc of u_projection")?;
@@ -352,13 +476,50 @@ impl GlRenderer {
                     u_sampler_loc,
                 }
             };
+
             let shader_r8 = {
-                let program = create_program(
-                    gl_api,
-                    &prefix_vertex_shader(SHADER),
-                    &prefix_fragment_shader(SHADER, sx::TextureFormat::R8Unorm),
-                )
-                .context("could not create r8 program")?;
+                let program = {
+                    let _scope_guard = temp.scope_guard();
+                    create_program(
+                        gl_api,
+                        &prefix_shader(SHADER, glsl_version, &["VERTEX_SHADER"], temp),
+                        &prefix_shader(
+                            SHADER,
+                            glsl_version,
+                            &["FRAGMENT_SHADER", "TEXTURE_FORMAT_R8"],
+                            temp,
+                        ),
+                    )
+                    .context("could not create r8 program")?
+                };
+                let u_projection_loc = gl_api
+                    .get_uniform_location(program, c"u_projection")
+                    .context("could not get loc of u_projection")?;
+                let u_sampler_loc = gl_api
+                    .get_uniform_location(program, c"u_sampler")
+                    .context("could not get loc of u_sampler")?;
+                Shader {
+                    program,
+                    u_projection_loc,
+                    u_sampler_loc,
+                }
+            };
+
+            let shader_rgba8_rounded_rect = {
+                let program = {
+                    let _scope_guard = temp.scope_guard();
+                    create_program(
+                        gl_api,
+                        &prefix_shader(SHADER, glsl_version, &["VERTEX_SHADER"], temp),
+                        &prefix_shader(
+                            SHADER,
+                            glsl_version,
+                            &["FRAGMENT_SHADER", "TEXTURE_FORMAT_RGBA8", "ROUNDED_RECT"],
+                            temp,
+                        ),
+                    )
+                    .context("could not create rgba8 program")?
+                };
                 let u_projection_loc = gl_api
                     .get_uniform_location(program, c"u_projection")
                     .context("could not get loc of u_projection")?;
@@ -422,7 +583,7 @@ impl GlRenderer {
 
                 shader_rgba8,
                 shader_r8,
-                active_program: None,
+                shader_rgba8_rounded_rect,
 
                 vbo,
                 ebo,
@@ -610,7 +771,6 @@ impl GlRenderer {
             );
 
             gl_api.enable(gl::BLEND);
-            // TODO: do i need this func_add?
             gl_api.blend_equation(gl::FUNC_ADD);
             gl_api.blend_func_separate(
                 gl::SRC_ALPHA,
@@ -618,9 +778,7 @@ impl GlRenderer {
                 gl::ONE,
                 gl::ONE_MINUS_SRC_ALPHA,
             );
-        }
 
-        unsafe {
             gl_api.bind_buffer(gl::ARRAY_BUFFER, Some(self.vbo));
             gl_api.bind_buffer(gl::ELEMENT_ARRAY_BUFFER, Some(self.ebo));
             gl_api.bind_vertex_array(Some(self.vao));
@@ -643,79 +801,98 @@ impl GlRenderer {
                 );
             }
 
-            for command in layer.commands.iter() {
-                match command {
-                    sx::DrawDataCommand::SetScissor(Some(scissor_rect)) => {
-                        let physical_scissor_rect = scissor_rect.scale(scale_factor);
-                        let x = physical_scissor_rect.min.x as i32;
-                        let y = physical_size.y as i32 - physical_scissor_rect.max.y as i32;
-                        let w = physical_scissor_rect.width() as i32;
-                        let h = physical_scissor_rect.height() as i32;
-                        unsafe {
-                            gl_api.enable(gl::SCISSOR_TEST);
-                            gl_api.scissor(x, y, w, h);
-                        }
+            // TODO: drain commands (not iter by ref)
+            for sx::DrawCommand {
+                index_range,
+                texture,
+                scissor,
+                params,
+            } in layer.commands.iter()
+            {
+                let _maybe_scissor_guard = scissor.map(|logical_rect| {
+                    let physical_rect = logical_rect.scale(scale_factor);
+                    let x = physical_rect.min.x as i32;
+                    let y = physical_size.y as i32 - physical_rect.max.y as i32;
+                    let w = physical_rect.width() as i32;
+                    let h = physical_rect.height() as i32;
+                    unsafe {
+                        gl_api.enable(gl::SCISSOR_TEST);
+                        gl_api.scissor(x, y, w, h);
                     }
-                    sx::DrawDataCommand::SetScissor(None) => unsafe {
-                        gl_api.disable(gl::SCISSOR_TEST);
-                    },
-                    sx::DrawDataCommand::Draw {
-                        index_range,
-                        texture,
-                    } => {
-                        let (texture_gl_handle, texture_format) = match texture {
-                            Some(handle) => {
-                                let t = self.get_texture(*handle);
-                                (t.gl_handle, t.format)
-                            }
-                            None => {
-                                let t = &self.default_white_texture;
-                                (t.gl_handle, t.format)
-                            }
-                        };
+                    ScopeGuard::new(|| unsafe { gl_api.disable(gl::SCISSOR_TEST) })
+                });
 
-                        let shader = match texture_format {
-                            TextureFormat::Rgba8Unorm => &self.shader_rgba8,
-                            TextureFormat::R8Unorm => &self.shader_r8,
-                        };
-                        if self.active_program != Some(shader.program) {
-                            self.active_program = Some(shader.program);
-
-                            unsafe {
-                                gl_api.use_program(Some(shader.program));
-
-                                // TODO: is there such thing as uniform buffer objects (ubo)?
-                                gl_api.uniform_matrix_4fv(
-                                    shader.u_projection_loc,
-                                    1,
-                                    gl::FALSE,
-                                    projection_matrix.as_ptr().cast(),
-                                );
-                            }
-                        }
-
-                        unsafe {
-                            gl_api.active_texture(gl::TEXTURE0);
-                            gl_api.bind_texture(gl::TEXTURE_2D, Some(texture_gl_handle));
-                            gl_api.uniform_1i(shader.u_sampler_loc, 0);
-                        };
-
-                        unsafe {
-                            gl_api.draw_elements(
-                                gl::TRIANGLES,
-                                index_range.len() as gl::GLsizei,
-                                gl::UNSIGNED_INT,
-                                (index_range.start * size_of::<u32>() as u32) as *const c_void,
-                            )
-                        };
+                let (texture_gl_handle, texture_format) = match texture {
+                    Some(handle) => {
+                        let t = self.get_texture(*handle);
+                        (t.gl_handle, t.format)
                     }
+                    None => {
+                        let t = &self.default_white_texture;
+                        (t.gl_handle, t.format)
+                    }
+                };
+
+                let shader = match (texture_format, params) {
+                    (TextureFormat::Rgba8Unorm, None) => &self.shader_rgba8,
+                    (TextureFormat::R8Unorm, None) => &self.shader_r8,
+                    (TextureFormat::Rgba8Unorm, Some(sx::DrawParams::RoundedRect { .. })) => {
+                        &self.shader_rgba8_rounded_rect
+                    }
+                    other => unimplemented!("no shader for {other:?}"),
+                };
+
+                unsafe {
+                    gl_api.use_program(Some(shader.program));
+                    gl_api.uniform_matrix_4fv(
+                        shader.u_projection_loc,
+                        1,
+                        gl::FALSE,
+                        projection_matrix.as_ptr().cast(),
+                    );
+                    gl_api.uniform_1i(shader.u_sampler_loc, 0);
+
+                    // NOCOMMIT
+                    if let Some(sx::DrawParams::RoundedRect {
+                        center,
+                        half_size,
+                        corner_radius,
+                    }) = params
+                    {
+                        // NOTE: everything on the cpu is in logical pixels.
+                        //   maybe this is bad and needs to change.
+                        //   maybe everything should be in physical pixels right away on the cpu.
+                        let center = *center * scale_factor;
+                        let half_size = *half_size * scale_factor;
+                        let corner_radius = *corner_radius * scale_factor;
+
+                        let u_rect_center_loc = gl_api
+                            .get_uniform_location(shader.program, c"u_rect_center")
+                            .context("could not get loc of u_rect_center")?;
+                        let u_rect_half_size_loc = gl_api
+                            .get_uniform_location(shader.program, c"u_rect_half_size")
+                            .context("could not get loc of u_rect_half_size")?;
+                        let u_rect_corner_radius_loc = gl_api
+                            .get_uniform_location(shader.program, c"u_rect_corner_radius")
+                            .context("could not get loc of u_rect_corner_radius")?;
+
+                        gl_api.uniform_2f(u_rect_center_loc, center.x, center.y);
+                        gl_api.uniform_2f(u_rect_half_size_loc, half_size.x, half_size.y);
+                        gl_api.uniform_1f(u_rect_corner_radius_loc, corner_radius);
+                    }
+
+                    gl_api.active_texture(gl::TEXTURE0);
+                    gl_api.bind_texture(gl::TEXTURE_2D, Some(texture_gl_handle));
+
+                    gl_api.draw_elements(
+                        gl::TRIANGLES,
+                        index_range.len() as gl::GLsizei,
+                        gl::UNSIGNED_INT,
+                        (index_range.start * size_of::<u32>() as u32) as *const c_void,
+                    );
                 }
             }
         }
-
-        // NOTE: unset current shader to make sure that state for the next iteration will be
-        // up-to-date.
-        self.active_program = None;
 
         Ok(())
     }

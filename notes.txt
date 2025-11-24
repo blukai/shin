@@ -17,10 +17,13 @@ see:
 - https://ntietz.com/blog/my-reference-was-dropped-why-is-the-compiler-complaining-about-multiple-borrows/
 
 TODO:
-  - super minimal rotating triangle example without sx
-  - figure out why i can't get anything happen with opengl 3.3 core profile
-  - figure out why everything is black on nvidia gpu
   - can i hash all the shapes that can be pushed into draw buffer and NOT draw
     if prev frame hash == next frame hash?
-  - i want to be able to attach custom shaders to probably sub-drawbuffers
-  - i want rounded corners
+  - i want to be able to attach custom shaders to shapes
+    game-engine custom shaders:
+      - https://docs.godotengine.org/en/stable/tutorials/shaders/visual_shaders.html
+      - https://docs.godotengine.org/en/stable/classes/class_material.html#class-material
+      - https://docs.unity3d.com/2022.3/Documentation/Manual/SL-VertexFragmentShaderExamples.html
+      - https://docs.unity3d.com/2022.3/Documentation/Manual/SL-Properties.html
+      - https://karolinamot.github.io/HLSL-and-ue5-blog/
+      - https://fyrox-book.github.io/rendering/shaders.html
