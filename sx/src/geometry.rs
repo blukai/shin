@@ -257,6 +257,12 @@ impl Vec2 {
     pub fn ge(self, rhs: Self) -> BVec2 {
         BVec2::new(self.x.ge(&rhs.x), self.y.ge(&rhs.y))
     }
+
+    #[inline]
+    #[must_use]
+    pub fn to_array(&self) -> [f32; 2] {
+        [self.x, self.y]
+    }
 }
 
 // ----
@@ -350,7 +356,7 @@ impl Rect {
     #[inline]
     #[must_use]
     pub fn from_center_size(center: Vec2, size: f32) -> Self {
-        let radius = Vec2::splat(size / 2.0);
+        let radius = Vec2::splat(size * 0.5);
         Self::new(center - radius, center + radius)
     }
 

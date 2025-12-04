@@ -1,14 +1,11 @@
 use std::ops::Range;
 use std::ptr::NonNull;
 use std::slice;
+use std::vec::Drain;
 
 use mars::scopeguard::ScopeGuard;
 
-use crate::{Rect, Rgba8, TextureHandle, Vec2};
-
-// TODO: consider offloading vertex generation and stuff to the gpu
-//   (or maybe for software renderer?) to the renderer.
-//   maybe accumulate shapes, not verticies.
+use crate::{Rect, Rgba8, ShaderUniformValue, ShaderUniforms, TextureHandle, Vec2};
 
 #[derive(Debug, Clone)]
 pub struct FillTexture {
@@ -78,6 +75,7 @@ pub struct RectShape {
     pub coords: Rect,
     pub fill: Option<Fill>,
     pub stroke: Option<Stroke>,
+    pub corner_radius: Option<f32>,
 }
 
 impl RectShape {
@@ -86,6 +84,7 @@ impl RectShape {
             coords,
             fill: None,
             stroke: None,
+            corner_radius: None,
         }
     }
 
@@ -96,6 +95,11 @@ impl RectShape {
 
     pub fn with_stroke(mut self, stroke: Option<Stroke>) -> Self {
         self.stroke = stroke;
+        self
+    }
+
+    pub fn with_corner_radius(mut self, corner_radius: Option<f32>) -> Self {
+        self.corner_radius = corner_radius;
         self
     }
 }
@@ -154,16 +158,10 @@ pub struct Vertex {
     pub color: Rgba8,
 }
 
-// TODO: shader service or something?
-//   user must be able to provide custom shaders
-//   it must be possible to provide custom params(uniforms).
-//     maybe take a look at fyrox's PropertyGroup thing.
-
 #[derive(Debug)]
 pub struct DrawCommand {
-    // TODO: can index range span many shapes that share same bindings (same texture)?
     pub index_range: Range<u32>,
-    pub texture: Option<TextureHandle>,
+    pub uniforms: Option<ShaderUniforms>,
     pub scissor: Option<Rect>,
 }
 
@@ -174,7 +172,7 @@ pub struct DrawData {
     pub commands: Vec<DrawCommand>,
 
     pending_indices: usize,
-    active_texture: Option<TextureHandle>,
+    active_uniforms: Option<ShaderUniforms>,
     active_scissor: Option<Rect>,
 }
 
@@ -186,7 +184,7 @@ impl DrawData {
         self.indices.clear();
         self.commands.clear();
 
-        self.active_texture = None;
+        self.active_uniforms = None;
         self.active_scissor = None;
     }
 
@@ -197,21 +195,22 @@ impl DrawData {
 
         let start_index = (self.indices.len() - self.pending_indices) as u32;
         let end_index = self.indices.len() as u32;
+
         self.commands.push(DrawCommand {
             index_range: start_index..end_index,
-            texture: self.active_texture,
+            uniforms: self.active_uniforms.clone(),
             scissor: self.active_scissor,
         });
 
         self.pending_indices = 0;
     }
 
-    fn set_texture(&mut self, texture: Option<TextureHandle>) {
-        if self.active_texture == texture {
+    fn set_uniforms(&mut self, uniforms: Option<ShaderUniforms>) {
+        if self.active_uniforms == uniforms {
             return;
         }
         self.flush();
-        self.active_texture = texture;
+        self.active_uniforms = uniforms;
     }
 
     fn set_scissor(&mut self, scissor: Option<Rect>) {
@@ -234,25 +233,35 @@ impl DrawData {
     }
 }
 
-pub struct DrawLayerDrain<'a> {
+pub struct DrawLayerFlush<'a> {
+    pub vertices: &'a [Vertex],
+    pub indices: &'a [u32],
+    // drain so that you can take ownership of values
+    pub commands: Drain<'a, DrawCommand>,
+}
+
+pub struct DrawLayersDrain<'a> {
     iter: slice::IterMut<'a, DrawData>,
     ptr: NonNull<DrawBuffer>,
 }
 
-impl<'a> Iterator for DrawLayerDrain<'a> {
-    type Item = &'a DrawData;
+impl<'a> Iterator for DrawLayersDrain<'a> {
+    type Item = DrawLayerFlush<'a>;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next().map(|layer| {
             layer.flush();
-            let layer: &_ = layer;
-            layer
+            DrawLayerFlush {
+                vertices: layer.vertices.as_slice(),
+                indices: layer.indices.as_slice(),
+                commands: layer.commands.drain(..),
+            }
         })
     }
 }
 
-impl<'a> Drop for DrawLayerDrain<'a> {
+impl<'a> Drop for DrawLayersDrain<'a> {
     fn drop(&mut self) {
         // SAFETY: we have exclusive access to draw buffer
         unsafe { self.ptr.as_mut() }.clear();
@@ -315,55 +324,54 @@ impl DrawBuffer {
         ScopeGuard::new_with_data(self, move |this| this.layer = prev)
     }
 
-    fn push_rect_filled(&mut self, coords: Rect, fill: Fill) {
+    fn push_rect_filled(&mut self, coords: Rect, fill: Fill, maybe_corner_radius: Option<f32>) {
         let draw_data = self.layer_mut();
         let idx = draw_data.vertices.len() as u32;
 
-        let (color, texture, tex_coords) = if let Some(fill_texture) = fill.texture {
-            (
-                fill.color,
-                Some(fill_texture.texture),
-                Some(fill_texture.coords),
-            )
-        } else {
-            (fill.color, None, None)
-        };
-        draw_data.set_texture(texture);
+        let mut uniforms = None::<ShaderUniforms>;
+        if let Some(ref fill_texture) = fill.texture {
+            use ShaderUniformValue as Value;
+            let u = uniforms.get_or_insert(ShaderUniforms::default());
+            u.set("u_texture", Value::Texture2D(fill_texture.texture))
+        }
+        if let Some(corner_radius) = maybe_corner_radius {
+            use ShaderUniformValue as Value;
+            let u = uniforms.get_or_insert(ShaderUniforms::default());
+            // TODO: uniform structs.
+            u.set("u_rect_center", Value::Vec2(coords.center()));
+            u.set("u_rect_half_size", Value::Vec2(coords.size() * 0.5));
+            u.set("u_rect_corner_radius", Value::Float(corner_radius));
+        }
+        draw_data.set_uniforms(uniforms);
+
+        let tex_coords = fill
+            .texture
+            .map(|texture| texture.coords)
+            .unwrap_or(Rect::new(Vec2::splat(0.0), Vec2::splat(1.0)));
+        let color = fill.color;
 
         // top left
         draw_data.push_vertex(Vertex {
             position: coords.top_left(),
-            tex_coord: tex_coords
-                .as_ref()
-                .map(|tc| tc.top_left())
-                .unwrap_or(Vec2::new(0.0, 0.0)),
+            tex_coord: tex_coords.top_left(),
             color,
         });
         // top right
         draw_data.push_vertex(Vertex {
             position: coords.top_right(),
-            tex_coord: tex_coords
-                .as_ref()
-                .map(|tc| tc.top_right())
-                .unwrap_or(Vec2::new(1.0, 0.0)),
+            tex_coord: tex_coords.top_right(),
             color,
         });
         // bottom right
         draw_data.push_vertex(Vertex {
             position: coords.bottom_right(),
-            tex_coord: tex_coords
-                .as_ref()
-                .map(|tc| tc.bottom_right())
-                .unwrap_or(Vec2::new(1.0, 1.0)),
+            tex_coord: tex_coords.bottom_right(),
             color,
         });
         // bottom left
         draw_data.push_vertex(Vertex {
             position: coords.bottom_left(),
-            tex_coord: tex_coords
-                .as_ref()
-                .map(|tc| tc.bottom_left())
-                .unwrap_or(Vec2::new(0.0, 1.0)),
+            tex_coord: tex_coords.bottom_left(),
             color,
         });
 
@@ -382,7 +390,7 @@ impl DrawBuffer {
         let [a, b] = line.points;
         let Stroke { width, color, .. } = line.stroke;
         let offset = compute_line_width_offset(a, b, width);
-        self.push_rect_filled(Rect::new(a + offset, b - offset), Fill::new(color));
+        self.push_rect_filled(Rect::new(a + offset, b - offset), Fill::new(color), None);
     }
 
     fn push_rect_stroked(&mut self, coords: Rect, stroke: Stroke) {
@@ -403,7 +411,7 @@ impl DrawBuffer {
         };
 
         // horizontal lines:
-        // expand to left and right
+        //   expand to left and right
         self.push_line(LineShape::new(
             Vec2::new(top_left.x - half_width, top_left.y),
             Vec2::new(top_right.x + half_width, top_right.y),
@@ -416,7 +424,7 @@ impl DrawBuffer {
         ));
 
         // vertical lines:
-        // shrink top and bottom
+        //   shrink top and bottom
         self.push_line(LineShape::new(
             Vec2::new(top_right.x, top_right.y + half_width),
             Vec2::new(bottom_right.x, bottom_right.y - half_width),
@@ -431,9 +439,10 @@ impl DrawBuffer {
 
     pub fn push_rect(&mut self, rect: RectShape) {
         if let Some(fill) = rect.fill {
-            self.push_rect_filled(rect.coords, fill);
+            self.push_rect_filled(rect.coords, fill, rect.corner_radius);
         }
         if let Some(stroke) = rect.stroke {
+            assert!(rect.corner_radius.is_none(), "TODO: rounded rect outlines");
             self.push_rect_stroked(rect.coords, stroke);
         }
     }
@@ -444,8 +453,8 @@ impl DrawBuffer {
         }
     }
 
-    pub fn drain_layers<'a>(&'a mut self) -> DrawLayerDrain<'a> {
-        DrawLayerDrain {
+    pub fn drain_layers<'a>(&'a mut self) -> DrawLayersDrain<'a> {
+        DrawLayersDrain {
             ptr: unsafe { NonNull::new_unchecked(self) },
             iter: self.layers.iter_mut(),
         }

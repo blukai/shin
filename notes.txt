@@ -21,9 +21,10 @@ TODO:
     if prev frame hash == next frame hash?
   - i want to be able to attach custom shaders to shapes
     game-engine custom shaders:
-      - https://docs.godotengine.org/en/stable/tutorials/shaders/visual_shaders.html
-      - https://docs.godotengine.org/en/stable/classes/class_material.html#class-material
+      - https://docs.godotengine.org/en/stable/tutorials/shaders/shader_reference/shading_language.html#uniforms
+      - https://docs.godotengine.org/en/stable/tutorials/shaders/shader_reference/shading_language.html#setting-uniforms-from-code
       - https://docs.unity3d.com/2022.3/Documentation/Manual/SL-VertexFragmentShaderExamples.html
       - https://docs.unity3d.com/2022.3/Documentation/Manual/SL-Properties.html
+      - https://docs.unity3d.com/Manual/SL-PragmaDirectives.html
       - https://karolinamot.github.io/HLSL-and-ue5-blog/
       - https://fyrox-book.github.io/rendering/shaders.html
