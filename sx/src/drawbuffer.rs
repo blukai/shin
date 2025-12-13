@@ -1,14 +1,11 @@
 use std::ops::Range;
 use std::ptr::NonNull;
 use std::slice;
+use std::vec::Drain;
 
 use mars::scopeguard::ScopeGuard;
 
 use crate::{Rect, Rgba8, TextureHandle, Vec2};
-
-// TODO: consider offloading vertex generation and stuff to the gpu
-//   (or maybe for software renderer?) to the renderer.
-//   maybe accumulate shapes, not verticies.
 
 #[derive(Debug, Clone)]
 pub struct FillTexture {
@@ -22,6 +19,7 @@ impl FillTexture {
     }
 }
 
+// TODO: gradient fill.
 #[derive(Debug, Clone)]
 pub struct Fill {
     pub color: Rgba8,
@@ -42,15 +40,17 @@ impl Fill {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub enum StrokeAlignment {
     Inside,
     Outside,
+    // TODO: consider changing default stroke alignment from center to outside.
+    // NOTE: center alignment wouldn't work well with 1px width.
     #[default]
     Center,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Stroke {
     pub width: f32,
     pub color: Rgba8,
@@ -77,7 +77,12 @@ impl Stroke {
 pub struct RectShape {
     pub coords: Rect,
     pub fill: Option<Fill>,
+    // TODO: i want to be able to specify rect stroke per-side.
+    //   top and left, or maybe only bottom, etc.
+    //   would that still be called "stroke"?
     pub stroke: Option<Stroke>,
+    // TODO: rect shape must support 4 distinct corner radii.
+    pub corner_radius: Option<f32>,
 }
 
 impl RectShape {
@@ -86,6 +91,7 @@ impl RectShape {
             coords,
             fill: None,
             stroke: None,
+            corner_radius: None,
         }
     }
 
@@ -98,11 +104,26 @@ impl RectShape {
         self.stroke = stroke;
         self
     }
+
+    pub fn with_corner_radius(mut self, corner_radius: Option<f32>) -> Self {
+        self.corner_radius = corner_radius;
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RectSdf {
+    pub center: Vec2,
+    pub size: Vec2,
+    pub corner_radius: Option<f32>,
+    pub stroke: Option<Stroke>,
 }
 
 #[derive(Debug)]
 pub struct LineShape {
     pub points: [Vec2; 2],
+    // TODO: line shape must not depend on stroke thing.
+    //   pull out width and color. drop alignment.
     pub stroke: Stroke,
 }
 
@@ -115,25 +136,9 @@ impl LineShape {
     }
 }
 
-/// computes the vertex position offset away the from center caused by line width.
-fn compute_line_width_offset(a: Vec2, b: Vec2, width: f32) -> Vec2 {
-    // direction defines how the line is oriented in space. it allows to know
-    // which way to move the vertices to create the desired thickness.
-    let dir = b - a;
-
-    // normalizing the direction vector converts it into a unit vector (length
-    // of 1). normalization ensures that the offset is proportional to the line
-    // width, regardless of the line's length.
-    let norm_dir = dir.normalize_or_zero();
-
-    // create a vector that points outward from the line. we want to move the
-    // vertices away from the center of the line, not along its length.
-    let perp = norm_dir.perp();
-
-    // to distribute the offset evenly on both sides of the line
-    let offset = perp * (width * 0.5);
-
-    offset
+#[derive(Debug, Clone, PartialEq)]
+pub enum SdfParams {
+    Rect(RectSdf),
 }
 
 // TODO: instancing (to enable batching (vertices will be able to exist in 0..1 coordinate space
@@ -154,17 +159,12 @@ pub struct Vertex {
     pub color: Rgba8,
 }
 
-// TODO: shader service or something?
-//   user must be able to provide custom shaders
-//   it must be possible to provide custom params(uniforms).
-//     maybe take a look at fyrox's PropertyGroup thing.
-
 #[derive(Debug)]
 pub struct DrawCommand {
-    // TODO: can index range span many shapes that share same bindings (same texture)?
     pub index_range: Range<u32>,
     pub texture: Option<TextureHandle>,
     pub scissor: Option<Rect>,
+    pub sdf_params: Option<SdfParams>,
 }
 
 #[derive(Debug, Default)]
@@ -176,6 +176,7 @@ pub struct DrawData {
     pending_indices: usize,
     active_texture: Option<TextureHandle>,
     active_scissor: Option<Rect>,
+    active_sdf_params: Option<SdfParams>,
 }
 
 impl DrawData {
@@ -186,8 +187,8 @@ impl DrawData {
         self.indices.clear();
         self.commands.clear();
 
-        self.active_texture = None;
         self.active_scissor = None;
+        self.active_sdf_params = None;
     }
 
     fn flush(&mut self) {
@@ -197,10 +198,12 @@ impl DrawData {
 
         let start_index = (self.indices.len() - self.pending_indices) as u32;
         let end_index = self.indices.len() as u32;
+
         self.commands.push(DrawCommand {
             index_range: start_index..end_index,
             texture: self.active_texture,
             scissor: self.active_scissor,
+            sdf_params: self.active_sdf_params.clone(),
         });
 
         self.pending_indices = 0;
@@ -222,6 +225,14 @@ impl DrawData {
         self.active_scissor = scissor;
     }
 
+    fn set_sdf_params(&mut self, sdf_params: Option<SdfParams>) {
+        if self.active_sdf_params == sdf_params {
+            return;
+        }
+        self.flush();
+        self.active_sdf_params = sdf_params;
+    }
+
     fn push_vertex(&mut self, vertex: Vertex) {
         self.vertices.push(vertex);
     }
@@ -234,25 +245,35 @@ impl DrawData {
     }
 }
 
-pub struct DrawLayerDrain<'a> {
+pub struct DrawLayerFlush<'a> {
+    pub vertices: &'a [Vertex],
+    pub indices: &'a [u32],
+    // drain so that you can take ownership of values
+    pub commands: Drain<'a, DrawCommand>,
+}
+
+pub struct DrawLayersDrain<'a> {
     iter: slice::IterMut<'a, DrawData>,
     ptr: NonNull<DrawBuffer>,
 }
 
-impl<'a> Iterator for DrawLayerDrain<'a> {
-    type Item = &'a DrawData;
+impl<'a> Iterator for DrawLayersDrain<'a> {
+    type Item = DrawLayerFlush<'a>;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next().map(|layer| {
             layer.flush();
-            let layer: &_ = layer;
-            layer
+            DrawLayerFlush {
+                vertices: layer.vertices.as_slice(),
+                indices: layer.indices.as_slice(),
+                commands: layer.commands.drain(..),
+            }
         })
     }
 }
 
-impl<'a> Drop for DrawLayerDrain<'a> {
+impl<'a> Drop for DrawLayersDrain<'a> {
     fn drop(&mut self) {
         // SAFETY: we have exclusive access to draw buffer
         unsafe { self.ptr.as_mut() }.clear();
@@ -317,53 +338,38 @@ impl DrawBuffer {
 
     fn push_rect_filled(&mut self, coords: Rect, fill: Fill) {
         let draw_data = self.layer_mut();
+        draw_data.set_texture(fill.texture.as_ref().map(|it| it.texture));
+
         let idx = draw_data.vertices.len() as u32;
 
-        let (color, texture, tex_coords) = if let Some(fill_texture) = fill.texture {
-            (
-                fill.color,
-                Some(fill_texture.texture),
-                Some(fill_texture.coords),
-            )
-        } else {
-            (fill.color, None, None)
-        };
-        draw_data.set_texture(texture);
+        let tex_coords = fill
+            .texture
+            .map(|texture| texture.coords)
+            .unwrap_or(Rect::new(Vec2::splat(0.0), Vec2::splat(1.0)));
+        let color = fill.color;
 
         // top left
         draw_data.push_vertex(Vertex {
             position: coords.top_left(),
-            tex_coord: tex_coords
-                .as_ref()
-                .map(|tc| tc.top_left())
-                .unwrap_or(Vec2::new(0.0, 0.0)),
+            tex_coord: tex_coords.top_left(),
             color,
         });
         // top right
         draw_data.push_vertex(Vertex {
             position: coords.top_right(),
-            tex_coord: tex_coords
-                .as_ref()
-                .map(|tc| tc.top_right())
-                .unwrap_or(Vec2::new(1.0, 0.0)),
+            tex_coord: tex_coords.top_right(),
             color,
         });
         // bottom right
         draw_data.push_vertex(Vertex {
             position: coords.bottom_right(),
-            tex_coord: tex_coords
-                .as_ref()
-                .map(|tc| tc.bottom_right())
-                .unwrap_or(Vec2::new(1.0, 1.0)),
+            tex_coord: tex_coords.bottom_right(),
             color,
         });
         // bottom left
         draw_data.push_vertex(Vertex {
             position: coords.bottom_left(),
-            tex_coord: tex_coords
-                .as_ref()
-                .map(|tc| tc.bottom_left())
-                .unwrap_or(Vec2::new(0.0, 1.0)),
+            tex_coord: tex_coords.bottom_left(),
             color,
         });
 
@@ -379,63 +385,70 @@ impl DrawBuffer {
         //   outline (/ need to be stroked).
         assert!(matches!(line.stroke.alignment, StrokeAlignment::Center));
 
+        // NOTE: there's no sdf params for line.
+        let draw_data = self.layer_mut();
+        draw_data.set_sdf_params(None);
+
+        // computes the vertex position offset away the from center caused by line width.
+        #[inline]
+        fn compute_line_width_offset(a: Vec2, b: Vec2, width: f32) -> Vec2 {
+            // direction defines how the line is oriented in space. it allows to know
+            // which way to move the vertices to create the desired width.
+            let dir = b - a;
+
+            // normalizing the direction vector converts it into a unit vector (length
+            // of 1). normalization ensures that the offset is proportional to the line
+            // width, regardless of the line's length.
+            let norm_dir = dir.normalize_or_zero();
+
+            // create a vector that points outward from the line. we want to move the
+            // vertices away from the center of the line, not along its length.
+            let perp = norm_dir.perp();
+
+            // to distribute the offset evenly on both sides of the line
+            let offset = perp * (width * 0.5);
+
+            offset
+        }
+
         let [a, b] = line.points;
         let Stroke { width, color, .. } = line.stroke;
         let offset = compute_line_width_offset(a, b, width);
         self.push_rect_filled(Rect::new(a + offset, b - offset), Fill::new(color));
     }
 
-    fn push_rect_stroked(&mut self, coords: Rect, stroke: Stroke) {
-        let half_width = stroke.width * 0.5;
-        let coords = match stroke.alignment {
-            StrokeAlignment::Inside => coords.inflate(-Vec2::splat(half_width)),
-            StrokeAlignment::Outside => coords.inflate(Vec2::splat(half_width)),
-            StrokeAlignment::Center => coords,
-        };
-        let top_left = coords.top_left();
-        let top_right = coords.top_right();
-        let bottom_right = coords.bottom_right();
-        let bottom_left = coords.bottom_left();
-
-        let stroke = Stroke {
-            alignment: StrokeAlignment::Center,
-            ..stroke
-        };
-
-        // horizontal lines:
-        // expand to left and right
-        self.push_line(LineShape::new(
-            Vec2::new(top_left.x - half_width, top_left.y),
-            Vec2::new(top_right.x + half_width, top_right.y),
-            stroke.clone(),
-        ));
-        self.push_line(LineShape::new(
-            Vec2::new(bottom_left.x - half_width, bottom_left.y),
-            Vec2::new(bottom_right.x + half_width, bottom_right.y),
-            stroke.clone(),
-        ));
-
-        // vertical lines:
-        // shrink top and bottom
-        self.push_line(LineShape::new(
-            Vec2::new(top_right.x, top_right.y + half_width),
-            Vec2::new(bottom_right.x, bottom_right.y - half_width),
-            stroke.clone(),
-        ));
-        self.push_line(LineShape::new(
-            Vec2::new(top_left.x, top_left.y + half_width),
-            Vec2::new(bottom_left.x, bottom_left.y - half_width),
-            stroke,
-        ));
-    }
-
     pub fn push_rect(&mut self, rect: RectShape) {
-        if let Some(fill) = rect.fill {
-            self.push_rect_filled(rect.coords, fill);
-        }
-        if let Some(stroke) = rect.stroke {
-            self.push_rect_stroked(rect.coords, stroke);
-        }
+        let RectShape {
+            mut coords,
+            fill,
+            stroke,
+            corner_radius,
+        } = rect;
+
+        let maybe_sdf_params = match (stroke, corner_radius) {
+            (None, None) => None,
+            (stroke, corner_radius) => {
+                if let Some(ref stroke) = stroke {
+                    coords = match stroke.alignment {
+                        StrokeAlignment::Inside => coords,
+                        StrokeAlignment::Outside => coords.inflate(Vec2::splat(stroke.width)),
+                        StrokeAlignment::Center => coords.inflate(Vec2::splat(stroke.width * 0.5)),
+                    };
+                }
+
+                Some(SdfParams::Rect(RectSdf {
+                    center: rect.coords.center(),
+                    size: rect.coords.size(),
+                    corner_radius,
+                    stroke,
+                }))
+            }
+        };
+        let draw_data = self.layer_mut();
+        draw_data.set_sdf_params(maybe_sdf_params);
+
+        let fill = fill.unwrap_or(Fill::new(Rgba8::TRANSPARENT));
+        self.push_rect_filled(coords, fill);
     }
 
     pub fn clear(&mut self) {
@@ -444,8 +457,8 @@ impl DrawBuffer {
         }
     }
 
-    pub fn drain_layers<'a>(&'a mut self) -> DrawLayerDrain<'a> {
-        DrawLayerDrain {
+    pub fn drain_layers<'a>(&'a mut self) -> DrawLayersDrain<'a> {
+        DrawLayersDrain {
             ptr: unsafe { NonNull::new_unchecked(self) },
             iter: self.layers.iter_mut(),
         }

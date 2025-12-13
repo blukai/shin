@@ -90,6 +90,7 @@ pub trait Adapter {
     unsafe fn uniform_1f(&self, location: Self::UniformLocation, v0: gl::GLfloat);
     unsafe fn uniform_1i(&self, location: Self::UniformLocation, v0: gl::GLint);
     unsafe fn uniform_2f(&self, location: Self::UniformLocation, v0: gl::GLfloat, v1: gl::GLfloat);
+    unsafe fn uniform_4f(&self, location: Self::UniformLocation, v0: gl::GLfloat, v1: gl::GLfloat, v2: gl::GLfloat, v3: gl::GLfloat);
     unsafe fn uniform_matrix_4fv(&self, location: Self::UniformLocation, count: gl::GLsizei, transpose: gl::GLboolean, value: *const gl::GLfloat);
     unsafe fn use_program(&self, program: Option<Self::Program>);
     unsafe fn vertex_attrib_pointer(&self, index: gl::GLuint, size: gl::GLint, r#type: gl::GLenum, normalized: gl::GLboolean, stride: gl::GLsizei, pointer: *const c_void);
@@ -650,6 +651,18 @@ mod gl46 {
             v1: gl::GLfloat,
         ) {
             unsafe { self.api.Uniform2f(location as gl::GLint, v0, v1) };
+        }
+
+        #[inline]
+        unsafe fn uniform_4f(
+            &self,
+            location: Self::UniformLocation,
+            v0: gl::GLfloat,
+            v1: gl::GLfloat,
+            v2: gl::GLfloat,
+            v3: gl::GLfloat,
+        ) {
+            unsafe { self.api.Uniform4f(location as gl::GLint, v0, v1, v2, v3) };
         }
 
         #[inline]

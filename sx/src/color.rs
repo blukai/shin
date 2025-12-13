@@ -12,6 +12,8 @@ pub struct Rgba8 {
 }
 
 impl Rgba8 {
+    pub const TRANSPARENT: Self = Self::new(255, 255, 255, 0);
+
     // https://en.wikipedia.org/wiki/Web_colors#Basic_colors
     pub const WHITE: Self = Self::new(255, 255, 255, 255);
     pub const SILVER: Self = Self::new(192, 192, 192, 255);
@@ -29,6 +31,7 @@ impl Rgba8 {
     pub const NAVY: Self = Self::new(0, 0, 128, 255);
     pub const FUCHSIA: Self = Self::new(255, 0, 255, 255);
     pub const PURPLE: Self = Self::new(128, 0, 128, 255);
+
     // the missing rubik's cube color xd
     pub const ORANGE: Self = Self::new(255, 165, 0, 255);
 

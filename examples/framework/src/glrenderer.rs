@@ -1,32 +1,42 @@
+use std::collections::hash_map;
 use std::ffi::c_void;
 use std::fmt::{self, Write as _};
+use std::hash::Hasher as _;
 use std::mem::offset_of;
 use std::ptr::null;
 
 use anyhow::{Context as _, anyhow};
 use gl::wrap::Adapter;
-use mars::alloc::{Allocator, TempAllocator};
+use mars::alloc::{self, Allocator, TempAllocator};
+use mars::fxhash::FxHasher;
 use mars::memory::GrowableMemory;
 use mars::nohash::NoHashMap;
 use mars::scopeguard::ScopeGuard;
-use mars::string::GrowableString;
-use sx::TextureFormat;
+use mars::sortedvector::SpillableSortedVectorMap;
+use mars::string::{GrowableString, String};
 
-const DEFINE_LEN: usize = 32;
+// TODO: maybe ubo
+// TODO: do i want to generate uniforms from shader desc?
+// TODO: do i want to generate vertex input state from what? primitive attributes or something?
+
+type ShaderUniformLocations = SpillableSortedVectorMap<
+    sx::ShaderUniformName,
+    gl::wrap::UniformLocation,
+    { sx::INITIAL_SHADER_UNIFORMS_CAP },
+    alloc::Global,
+>;
 
 // NOTE: some kind of naming conventions for shader things
 //   - `a_` for attributes
 //   - `v_` for vertex-to-fragment outputs
 //   - `u_` for uniforms
 
-// TODO: maybe ubo
-
 const A_POSITION_LOC: gl::GLuint = 0;
 const A_TEX_COORD_LOC: gl::GLuint = 1;
 const A_COLOR_LOC: gl::GLuint = 2;
 
 const SHADER: &str = "
-#if defined(VERTEX_SHADER)
+#if defined(SHADER_STAGE_VERTEX)
 layout(location = 0) in vec2 a_position;
 layout(location = 1) in vec2 a_tex_coord;
 layout(location = 2) in vec4 a_color;
@@ -43,106 +53,193 @@ void main() {
 }
 #endif
 
-#if defined(FRAGMENT_SHADER)
+#if defined(SHADER_STAGE_FRAGMENT)
 in vec2 v_tex_coord;
 in vec4 v_color;
 
 uniform sampler2D u_sampler;
+
+#if defined(SDF_RECT)
+uniform vec2 u_sdf_rect_center;
+uniform vec2 u_sdf_rect_size;
+uniform float u_sdf_rect_corner_radius;
+uniform float u_sdf_rect_stroke_width;
+uniform vec4 u_sdf_rect_stroke_color;
+uniform int u_sdf_rect_stroke_alignment; // -1 inside, 0 center, 1 outside
+
+// https://iquilezles.org/articles/distfunctions2d/
+float sd_rounded_box(vec2 p, vec2 b, vec4 r) {
+    r.xy = (p.x > 0.0) ? r.xy : r.zw;
+    r.x  = (p.y > 0.0) ? r.x  : r.y;
+    vec2 q = abs(p) - b + r.x;
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r.x;
+}
+
+// https://en.wikipedia.org/wiki/Alpha_compositing
+// https://www.w3.org/TR/compositing-1/#whatiscompositing
+vec4 composite_rgba(vec4 bg, vec4 fg) {
+    vec3 cs = fg.rgb;
+    float as = fg.a;
+    vec3 cb = bg.rgb;
+    float ab = bg.a;
+    vec3 co = cs * as + cb * ab * (1.0 - as);
+    float ao = as + ab * (1.0 - as);
+    return vec4(co / ao, ao);
+}
+
+vec4 composite_rgba_with_coverage(vec4 bg, float bg_cov, vec4 fg, float fg_cov) {
+    // effective alphas
+    bg.a *= bg_cov;
+    fg.a *= fg_cov;
+    return composite_rgba(bg, fg);
+}
+
+// returns (inner, outer) stroke parts where outer + inner = width.
+//   (16.0, -1.0) -> fully inner  ( 0.0, 16.0)
+//   (16.0,  0.0) -> centered     ( 8.0,  8.0)
+//   (16.0, +1.0) -> fully outer  (16.0,  0.0)
+vec2 split_stroke(float width, int alignment) {
+    float inner = width * 0.5 * (1.0 - float(alignment));
+    float outer = width * 0.5 * (1.0 + float(alignment));
+    return vec2(inner, outer);
+}
+
+vec4 sdf_rect(
+    vec2 frag_pos,
+    vec4 frag_color,
+    vec2 rect_center,
+    vec2 rect_size,
+    float corner_radius,
+    float stroke_width,
+    int stroke_alignment,
+    vec4 stroke_color
+) {
+    vec2 stroke_split = split_stroke(stroke_width, stroke_alignment);
+    float stroke_inner = stroke_split.x;
+    float stroke_outer = stroke_split.y;
+
+    vec2 p = frag_pos - rect_center;
+    vec2 b = rect_size * 0.5 + stroke_outer;
+    // TODO: maybe need to select specific corner's radius; this wont work with radii.
+    float r_zero_mask = float(int(corner_radius > 0.0));
+    float r = (corner_radius + stroke_outer) * r_zero_mask;
+
+    float stroke_dist_outer = sd_rounded_box(p, b, vec4(r));
+    // stroke_dist_outer(-32.5), stroke_outer(0.5) -> -32.0
+    float fill_dist = stroke_dist_outer + stroke_outer;
+    // fill_dist(-32.0), stroke_inner(0.5) -> -31.5
+    float stroke_dist_inner = fill_dist + stroke_inner;
+
+    // TODO: maybe better aa?
+    //   but don't use fwidth, it sucks.
+    //   also see https://mini.gmshaders.com/p/antialiasing
+    float aa = 0.5;
+    float fill_cov = 1.0 - smoothstep(-aa, aa, fill_dist);
+    float stroke_cov_inner = 1.0 - smoothstep(-aa, aa, stroke_dist_inner);
+    float stroke_cov_outer = 1.0 - smoothstep(-aa, aa, stroke_dist_outer);
+    float stroke_cov = stroke_cov_outer - stroke_cov_inner;
+
+    return composite_rgba_with_coverage(frag_color, fill_cov, stroke_color, stroke_cov);
+}
+#endif
 
 out vec4 FragColor;
 
 void main() {
     FragColor = v_color;
 
-    vec4 texture_sample = texture(u_sampler, v_tex_coord);
 #if defined(TEXTURE_FORMAT_R8)
-    FragColor.a *= texture_sample.r;
+    FragColor.a *= texture(u_sampler, v_tex_coord).r;
 #elif defined(TEXTURE_FORMAT_RGBA8)
-    FragColor *= texture_sample;
+    FragColor *= texture(u_sampler, v_tex_coord);
+#endif
+
+#if defined(SDF_RECT)
+    FragColor = sdf_rect(
+        gl_FragCoord.xy,
+        FragColor,
+        u_sdf_rect_center,
+        u_sdf_rect_size,
+        u_sdf_rect_corner_radius,
+        u_sdf_rect_stroke_width,
+        u_sdf_rect_stroke_alignment,
+        u_sdf_rect_stroke_color
+    );
 #endif
 }
 #endif
 ";
 
-// https://wikis.khronos.org/opengl/Type_Qualifier_(GLSL)#Precision_qualifiers
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum GlslEsPrecision {
-    High,
-    Medium,
-    Low,
-}
-
-impl GlslEsPrecision {
-    fn as_str(&self) -> &'static str {
-        match self {
-            Self::High => "highp",
-            Self::Medium => "mediump",
-            Self::Low => "lowp",
+const SHADER_SOURCE: sx::ShaderSource = sx::ShaderSource {
+    kind: sx::ShaderSourceKind::Static(SHADER),
+    desc: if cfg!(target_family = "wasm") {
+        sx::ShaderSourceDesc::Glsl {
+            version: 300,
+            profile: sx::GlslProfile::Es,
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum GlslProfile {
-    Core,
-    Compatibility,
-    Es {
-        float_precision: Option<GlslEsPrecision>,
-        int_precision: Option<GlslEsPrecision>,
+    } else {
+        sx::ShaderSourceDesc::Glsl {
+            version: 330,
+            profile: sx::GlslProfile::Core,
+        }
     },
+};
+
+fn hash_shader_desc(shader_desc: &sx::ShaderDesc) -> u64 {
+    // NOTE: source doesn't change. uniforms don't affect anything.
+    //   what we care about is defines.
+    let mut hasher = FxHasher::default();
+    for define in shader_desc
+        .vertex_stage
+        .defines
+        .0
+        .iter()
+        .chain(shader_desc.fragment_stage.defines.0.iter())
+    {
+        hasher.write(define.as_bytes())
+    }
+    hasher.finish()
 }
 
-// #version number profile_opt
-// https://registry.khronos.org/OpenGL/specs/gl/GLSLangSpec.4.60.pdf
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct GlslVersion(u16, GlslProfile);
-
-fn prefix_shader<A: Allocator>(
-    shader: &str,
-    version: GlslVersion,
-    defines: &[(&str, Option<&str>)],
+fn prefix_stage_source<A: Allocator>(
+    stage_desc: &sx::ShaderStageDesc,
     alloc: A,
 ) -> Result<GrowableString<A>, fmt::Error> {
-    // NOTE: 128 is an approx amortization for prefix
-    let mut ret = GrowableString::new_in(GrowableMemory::new_with_cap_in(
-        shader.len() + DEFINE_LEN * defines.len() + 128,
-        alloc,
-    ));
+    let sx::ShaderStageDesc {
+        source:
+            sx::ShaderSource {
+                kind: sx::ShaderSourceKind::Static(code),
+                desc: sx::ShaderSourceDesc::Glsl { version, profile },
+            },
+        defines,
+    } = stage_desc;
 
-    match version {
-        GlslVersion(version, GlslProfile::Core) => {
+    const APPROX_DEFINE_LEN: usize = 32;
+    const APPROX_EXTRA_CAP: usize = 128;
+    let mut ret = String::new_growable_in(alloc)
+        .with_cap(code.len() + defines.0.len() * APPROX_DEFINE_LEN + APPROX_EXTRA_CAP);
+
+    match (version, profile) {
+        (version, sx::GlslProfile::Core) => {
             ret.write_fmt(format_args!("#version {version} core\n"))?;
         }
-        GlslVersion(_version, GlslProfile::Compatibility) => {
+        (_version, sx::GlslProfile::Compatibility) => {
             unimplemented!()
         }
-        GlslVersion(
-            version,
-            GlslProfile::Es {
-                float_precision,
-                int_precision,
-            },
-        ) => {
+        (version, sx::GlslProfile::Es) => {
             ret.write_fmt(format_args!("#version {version} es\n"))?;
-            if let Some(p) = float_precision {
-                ret.write_fmt(format_args!("precision {} float;\n", p.as_str()))?;
-            }
-            if let Some(p) = int_precision {
-                ret.write_fmt(format_args!("precision {} int;\n", p.as_str()))?;
-            }
+            // NOTE: type can only be float or int.
+            //   see https://wikis.khronos.org/opengl/Type_Qualifier_(GLSL)#Precision_qualifiers
+            ret.write_fmt(format_args!("precision highp float;\n"))?;
+            ret.write_fmt(format_args!("precision highp int;\n"))?;
         }
     }
 
-    for (key, maybe_value) in defines {
-        assert!(key.len() <= DEFINE_LEN);
-        ret.write_fmt(format_args!("#define {key}"))?;
-        if let Some(value) = maybe_value {
-            ret.write_str(value)?;
-        }
-        ret.write_char('\n')?;
+    for define in defines.0.iter() {
+        ret.write_fmt(format_args!("#define {name}\n", name = define.as_str()))?;
     }
 
-    ret.push_str(shader);
+    ret.push_str(code);
     Ok(ret)
 }
 
@@ -202,14 +299,47 @@ unsafe fn create_program(
     }
 }
 
-// TODO: ShaderUniform { name: ArrayString, type: .. }
-// TODO: shader uniform locations (hash table probably?)
-
 struct Shader {
-    program: gl::wrap::Program,
+    gl_handle: gl::wrap::Program,
+    uniform_locations: ShaderUniformLocations,
+}
 
-    u_projection_loc: gl::wrap::UniformLocation,
-    u_sampler_loc: gl::wrap::UniformLocation,
+impl Shader {
+    fn new(
+        desc: &sx::ShaderDesc,
+        gl_api: &gl::wrap::Api,
+        temp: &TempAllocator<'_>,
+    ) -> anyhow::Result<Self> {
+        let program = unsafe {
+            let _temp_guard = temp.scope_guard();
+            create_program(
+                gl_api,
+                &prefix_stage_source(&desc.vertex_stage, temp)
+                    .context("could not prefix vertex shader")?,
+                &prefix_stage_source(&desc.fragment_stage, temp)
+                    .context("could not prefix fragment shader")?,
+            )
+            .context("could not create rgba8 program")?
+        };
+
+        let mut uniform_locations = ShaderUniformLocations::default();
+        for (name, _) in desc.uniforms.0.iter() {
+            if let Some(location) = {
+                let _temp_guard = temp.scope_guard();
+                let name = name
+                    .try_to_c_string_in(GrowableMemory::new_in(temp))
+                    .expect("could not convier uniform name to cstring");
+                unsafe { gl_api.get_uniform_location(program, name.as_c_str()) }
+            } {
+                uniform_locations.insert(name.clone(), location);
+            }
+        }
+
+        Ok(Shader {
+            gl_handle: program,
+            uniform_locations,
+        })
+    }
 }
 
 struct TextureFormatDesc {
@@ -220,15 +350,15 @@ struct TextureFormatDesc {
     block_size: gl::GLint,
 }
 
-fn describe_texture_format(format: TextureFormat) -> TextureFormatDesc {
+fn describe_texture_format(format: sx::TextureFormat) -> TextureFormatDesc {
     match format {
-        TextureFormat::Rgba8Unorm => TextureFormatDesc {
+        sx::TextureFormat::Rgba8Unorm => TextureFormatDesc {
             internal_format: gl::RGBA8 as _,
             format: gl::RGBA,
             ty: gl::UNSIGNED_BYTE,
             block_size: 4,
         },
-        TextureFormat::R8Unorm => TextureFormatDesc {
+        sx::TextureFormat::R8Unorm => TextureFormatDesc {
             internal_format: gl::R8 as _,
             format: gl::RED,
             ty: gl::UNSIGNED_BYTE,
@@ -239,32 +369,32 @@ fn describe_texture_format(format: TextureFormat) -> TextureFormatDesc {
 
 struct Texture {
     gl_handle: gl::wrap::Texture,
-    format: TextureFormat,
+    format: sx::TextureFormat,
 }
 
 unsafe fn create_default_white_texture(gl_api: &gl::wrap::Api) -> anyhow::Result<Texture> {
+    let format = sx::TextureFormat::R8Unorm;
+    let format_desc = describe_texture_format(format);
     unsafe {
-        let texture = gl_api
+        let gl_handle = gl_api
             .create_texture()
             .context("could not create texture")?;
-        gl_api.bind_texture(gl::TEXTURE_2D, Some(texture));
-
+        gl_api.bind_texture(gl::TEXTURE_2D, Some(gl_handle));
         gl_api.tex_image_2d(
             gl::TEXTURE_2D,
             0,
-            gl::RGBA8 as gl::GLint,
+            format_desc.internal_format,
             1,
             1,
             0,
-            gl::RGBA,
-            gl::UNSIGNED_BYTE,
-            [255_u8; 4].as_ptr().cast(),
+            format_desc.format,
+            format_desc.ty,
+            {
+                assert_eq!(format_desc.block_size, 1);
+                [255_u8; 1].as_ptr().cast()
+            },
         );
-
-        Ok(Texture {
-            gl_handle: texture,
-            format: TextureFormat::Rgba8Unorm,
-        })
+        Ok(Texture { gl_handle, format })
     }
 }
 
@@ -374,95 +504,22 @@ fn compute_orthographic_projection_matrix(
 pub struct GlRenderer {
     framebuffer: Option<Framebuffer>,
 
-    shader_rgba8: Shader,
-    shader_r8: Shader,
-
     vbo: gl::wrap::Buffer,
     ebo: gl::wrap::Buffer,
     vao: gl::wrap::VertexArray,
+
+    shaders: NoHashMap<u64, Shader>,
 
     default_white_texture: Texture,
     textures: NoHashMap<sx::TextureHandle, Texture>,
 }
 
 impl GlRenderer {
-    pub fn new(gl_api: &gl::wrap::Api, temp: &TempAllocator<'_>) -> anyhow::Result<Self> {
+    pub fn new(gl_api: &gl::wrap::Api) -> anyhow::Result<Self> {
         // TODO: scopeguard to cleanup created resources if something fails
         //   via checkpoint-based gl allocator
 
-        let glsl_version = if cfg!(target_family = "wasm") {
-            GlslVersion(
-                300,
-                GlslProfile::Es {
-                    float_precision: Some(GlslEsPrecision::Medium),
-                    int_precision: None,
-                },
-            )
-        } else {
-            GlslVersion(330, GlslProfile::Core)
-        };
-
         unsafe {
-            let shader_rgba8 = {
-                let program = {
-                    let _scope_guard = temp.scope_guard();
-                    create_program(
-                        gl_api,
-                        &prefix_shader(SHADER, glsl_version, &[("VERTEX_SHADER", None)], temp)
-                            .context("could not prefix vertex shader")?,
-                        &prefix_shader(
-                            SHADER,
-                            glsl_version,
-                            &[("FRAGMENT_SHADER", None), ("TEXTURE_FORMAT_RGBA8", None)],
-                            temp,
-                        )
-                        .context("could not prefix fragment shader")?,
-                    )
-                    .context("could not create rgba8 program")?
-                };
-                let u_projection_loc = gl_api
-                    .get_uniform_location(program, c"u_projection")
-                    .context("could not get loc of u_projection")?;
-                let u_sampler_loc = gl_api
-                    .get_uniform_location(program, c"u_sampler")
-                    .context("could not get loc of u_sampler")?;
-                Shader {
-                    program,
-                    u_projection_loc,
-                    u_sampler_loc,
-                }
-            };
-
-            let shader_r8 = {
-                let program = {
-                    let _scope_guard = temp.scope_guard();
-                    create_program(
-                        gl_api,
-                        &prefix_shader(SHADER, glsl_version, &[("VERTEX_SHADER", None)], temp)
-                            .context("could not prefix vertex shader")?,
-                        &prefix_shader(
-                            SHADER,
-                            glsl_version,
-                            &[("FRAGMENT_SHADER", None), ("TEXTURE_FORMAT_R8", None)],
-                            temp,
-                        )
-                        .context("could not prefix fragment shader")?,
-                    )
-                    .context("could not create r8 program")?
-                };
-                let u_projection_loc = gl_api
-                    .get_uniform_location(program, c"u_projection")
-                    .context("could not get loc of u_projection")?;
-                let u_sampler_loc = gl_api
-                    .get_uniform_location(program, c"u_sampler")
-                    .context("could not get loc of u_sampler")?;
-                Shader {
-                    program,
-                    u_projection_loc,
-                    u_sampler_loc,
-                }
-            };
-
             let vbo = gl_api.create_buffer().context("could not create vbo")?;
             let ebo = gl_api.create_buffer().context("could not create ebo")?;
             let vao = {
@@ -511,12 +568,11 @@ impl GlRenderer {
             Ok(Self {
                 framebuffer: None,
 
-                shader_rgba8,
-                shader_r8,
-
                 vbo,
                 ebo,
                 vao,
+
+                shaders: NoHashMap::default(),
 
                 default_white_texture: create_default_white_texture(gl_api)
                     .context("could not create default white tex")?,
@@ -532,24 +588,19 @@ impl GlRenderer {
                 delete_framebuffer(framebuffer, gl_api);
             }
 
-            gl_api.delete_program(self.shader_rgba8.program);
-            gl_api.delete_program(self.shader_r8.program);
-
             gl_api.delete_buffer(self.vbo);
             gl_api.delete_buffer(self.ebo);
             gl_api.delete_buffer(self.vao);
+
+            for (_, shader) in self.shaders.iter() {
+                gl_api.delete_program(shader.gl_handle);
+            }
 
             gl_api.delete_texture(self.default_white_texture.gl_handle);
             for (_, texture) in self.textures.iter() {
                 gl_api.delete_texture(texture.gl_handle);
             }
         }
-    }
-
-    fn get_texture(&self, handle: sx::TextureHandle) -> &Texture {
-        self.textures
-            .get(&handle)
-            .unwrap_or_else(|| panic!("invalid handle: {handle:?}"))
     }
 
     pub fn handle_texture_commands<'a>(
@@ -621,7 +672,10 @@ impl GlRenderer {
                     );
                 }
                 sx::TextureCommandKind::Upload { region, buf } => {
-                    let texture = self.get_texture(command.handle);
+                    let texture = self
+                        .textures
+                        .get(&command.handle)
+                        .expect("invalud texture handle");
                     let format_desc = describe_texture_format(texture.format);
                     unsafe {
                         gl_api.bind_texture(gl::TEXTURE_2D, Some(texture.gl_handle));
@@ -654,15 +708,19 @@ impl GlRenderer {
         &mut self,
         logical_size: sx::Vec2,
         scale_factor: f32,
-        draw_data: impl Iterator<Item = &'a sx::DrawData>,
+        draw_layers: sx::DrawLayersDrain<'_>,
         gl_api: &gl::wrap::Api,
+        temp: &TempAllocator<'_>,
     ) -> anyhow::Result<()> {
         let physical_size = logical_size * scale_factor;
+        // NOTE: this is opengl-specific matrix. y is up.
+        //   glBlitFramebuffer flips whole thing.
+        //   this way is easier because there's no need to micromanage each uniform value, etc.
         let projection_matrix = compute_orthographic_projection_matrix(
             0.0,
             logical_size.x,
-            logical_size.y,
             0.0,
+            logical_size.y,
             -1.0,
             1.0,
         );
@@ -713,34 +771,45 @@ impl GlRenderer {
             gl_api.bind_vertex_array(Some(self.vao));
         }
 
-        for layer in draw_data {
+        for sx::DrawLayerFlush {
+            vertices,
+            indices,
+            commands,
+        } in draw_layers
+        {
             unsafe {
                 // TODO: should probably do buffer_sub_data here?
                 gl_api.buffer_data(
                     gl::ARRAY_BUFFER,
-                    (layer.vertices.len() * size_of::<sx::Vertex>()) as gl::GLsizeiptr,
-                    layer.vertices.as_ptr().cast(),
+                    (vertices.len() * size_of::<sx::Vertex>()) as gl::GLsizeiptr,
+                    vertices.as_ptr().cast(),
                     gl::STREAM_DRAW,
                 );
                 gl_api.buffer_data(
                     gl::ELEMENT_ARRAY_BUFFER,
-                    (layer.indices.len() * size_of::<u32>()) as gl::GLsizeiptr,
-                    layer.indices.as_ptr().cast(),
+                    (indices.len() * size_of::<u32>()) as gl::GLsizeiptr,
+                    indices.as_ptr().cast(),
                     gl::STREAM_DRAW,
                 );
             }
 
-            // TODO: drain commands (not iter by ref)
             for sx::DrawCommand {
                 index_range,
                 texture,
                 scissor,
-            } in layer.commands.iter()
+                sdf_params,
+            } in commands
             {
                 let _maybe_scissor_guard = scissor.map(|logical_rect| {
+                    // NOTE: scissor needs to be aware of y flip.
+                    //   projection matrix does not flip y, it's opengl-specific.
+                    //   glBlitFramebuffer flips y.
+                    //
+                    // NOTE: everything on the cpu is in @LogicalPixels.
+                    //   scissor rect needs to be scaled.
                     let physical_rect = logical_rect.scale(scale_factor);
                     let x = physical_rect.min.x as i32;
-                    let y = physical_size.y as i32 - physical_rect.max.y as i32;
+                    let y = physical_rect.min.y as i32;
                     let w = physical_rect.width() as i32;
                     let h = physical_rect.height() as i32;
                     unsafe {
@@ -750,35 +819,214 @@ impl GlRenderer {
                     ScopeGuard::new(|| unsafe { gl_api.disable(gl::SCISSOR_TEST) })
                 });
 
-                let (texture_gl_handle, texture_format) = match texture {
-                    Some(handle) => {
-                        let t = self.get_texture(*handle);
-                        (t.gl_handle, t.format)
-                    }
-                    None => {
-                        let t = &self.default_white_texture;
-                        (t.gl_handle, t.format)
-                    }
+                let mut shader_desc = sx::ShaderDesc {
+                    vertex_stage: sx::ShaderStageDesc {
+                        source: SHADER_SOURCE.clone(),
+                        defines: sx::ShaderDefines::default().with_iter(
+                            [sx::ShaderDefine::new_fixed().with_str("SHADER_STAGE_VERTEX")]
+                                .into_iter(),
+                        ),
+                    },
+                    fragment_stage: sx::ShaderStageDesc {
+                        source: SHADER_SOURCE.clone(),
+                        defines: sx::ShaderDefines::default().with_iter(
+                            [sx::ShaderDefine::new_fixed().with_str("SHADER_STAGE_FRAGMENT")]
+                                .into_iter(),
+                        ),
+                    },
+                    uniforms: sx::ShaderUniformDescs::default().with_iter(
+                        [
+                            (
+                                sx::ShaderUniformName::new_fixed().with_str("u_projection"),
+                                sx::ShaderUniformType::Mat4,
+                            ),
+                            (
+                                sx::ShaderUniformName::new_fixed().with_str("u_sampler"),
+                                sx::ShaderUniformType::Sampler2D,
+                            ),
+                        ]
+                        .into_iter(),
+                    ),
                 };
 
-                let shader = match texture_format {
-                    TextureFormat::Rgba8Unorm => &self.shader_rgba8,
-                    TextureFormat::R8Unorm => &self.shader_r8,
+                let texture = if let Some(handle) = texture {
+                    self.textures.get(&handle).expect("invalid handle")
+                } else {
+                    &self.default_white_texture
+                };
+                shader_desc
+                    .fragment_stage
+                    .defines
+                    .insert(
+                        sx::ShaderDefine::new_fixed().with_str(match texture.format {
+                            sx::TextureFormat::Rgba8Unorm => "TEXTURE_FORMAT_RGBA8",
+                            sx::TextureFormat::R8Unorm => "TEXTURE_FORMAT_R8",
+                        }),
+                    );
+
+                if let Some(sdf_params) = sdf_params.as_ref() {
+                    use sx::ShaderUniformType as Type;
+                    match sdf_params {
+                        sx::SdfParams::Rect(..) => {
+                            shader_desc.fragment_stage.defines.extend_from_iter(
+                                [sx::ShaderDefine::new_fixed().with_str("SDF_RECT")].into_iter(),
+                            );
+
+                            shader_desc.uniforms.extend_from_iter(
+                                [
+                                    (
+                                        sx::ShaderUniformName::new_fixed()
+                                            .with_str("u_sdf_rect_center"),
+                                        Type::Vec2,
+                                    ),
+                                    (
+                                        sx::ShaderUniformName::new_fixed()
+                                            .with_str("u_sdf_rect_size"),
+                                        Type::Vec2,
+                                    ),
+                                    (
+                                        sx::ShaderUniformName::new_fixed()
+                                            .with_str("u_sdf_rect_corner_radius"),
+                                        Type::Float,
+                                    ),
+                                    (
+                                        sx::ShaderUniformName::new_fixed()
+                                            .with_str("u_sdf_rect_stroke_width"),
+                                        Type::Float,
+                                    ),
+                                    (
+                                        sx::ShaderUniformName::new_fixed()
+                                            .with_str("u_sdf_rect_stroke_color"),
+                                        Type::Vec4,
+                                    ),
+                                    (
+                                        sx::ShaderUniformName::new_fixed()
+                                            .with_str("u_sdf_rect_stroke_alignment"),
+                                        Type::Int,
+                                    ),
+                                ]
+                                .into_iter(),
+                            );
+                        }
+                    }
+                }
+
+                let shader_key = hash_shader_desc(&shader_desc);
+                let shader = match self.shaders.entry(shader_key) {
+                    hash_map::Entry::Occupied(x) => x.into_mut(),
+                    hash_map::Entry::Vacant(x) => {
+                        let shader =
+                            Shader::new(&shader_desc, gl_api, temp).with_context(|| {
+                                // TODO: can i use temp alloc here? it needs to be send+sync for some
+                                // fucking reason.
+                                std::format!("could not create shader\n{shader_desc:?}")
+                            })?;
+                        x.insert(shader)
+                    }
                 };
 
                 unsafe {
-                    gl_api.use_program(Some(shader.program));
+                    gl_api.use_program(Some(shader.gl_handle));
 
-                    gl_api.uniform_matrix_4fv(
-                        shader.u_projection_loc,
-                        1,
-                        gl::FALSE,
-                        projection_matrix.as_ptr().cast(),
-                    );
-                    gl_api.uniform_1i(shader.u_sampler_loc, 0);
+                    // NOTE: everything on the cpu is in @LogicalPixels.
+                    //   uniforms that carry size/coord data must be scaled.
+                    //
+                    // NOTE: this is somewhat awkward,
+                    //   but still i prefer this loop over individual lookups for each loc.
+                    for (name, location) in shader.uniform_locations.0.iter() {
+                        match name.as_str() {
+                            "u_projection" => {
+                                gl_api.uniform_matrix_4fv(
+                                    *location,
+                                    1,
+                                    gl::FALSE,
+                                    projection_matrix.as_ptr().cast(),
+                                );
 
-                    gl_api.active_texture(gl::TEXTURE0);
-                    gl_api.bind_texture(gl::TEXTURE_2D, Some(texture_gl_handle));
+                                gl_api.active_texture(gl::TEXTURE0);
+                                gl_api.bind_texture(gl::TEXTURE_2D, Some(texture.gl_handle));
+                                gl_api.uniform_1i(*location, 0);
+                            }
+                            "u_sampler" => {
+                                gl_api.active_texture(gl::TEXTURE0);
+                                gl_api.bind_texture(gl::TEXTURE_2D, Some(texture.gl_handle));
+                                gl_api.uniform_1i(*location, 0);
+                            }
+
+                            "u_sdf_rect_center" => {
+                                let Some(sx::SdfParams::Rect(rect_sdf)) = sdf_params.as_ref()
+                                else {
+                                    unreachable!();
+                                };
+                                let center = rect_sdf.center * scale_factor;
+                                gl_api.uniform_2f(*location, center.x, center.y);
+                            }
+                            "u_sdf_rect_size" => {
+                                let Some(sx::SdfParams::Rect(rect_sdf)) = sdf_params.as_ref()
+                                else {
+                                    unreachable!();
+                                };
+                                let size = rect_sdf.size * scale_factor;
+                                gl_api.uniform_2f(*location, size.x, size.y);
+                            }
+                            "u_sdf_rect_corner_radius" => {
+                                let Some(sx::SdfParams::Rect(rect_sdf)) = sdf_params.as_ref()
+                                else {
+                                    unreachable!();
+                                };
+                                let corner_radius =
+                                    rect_sdf.corner_radius.unwrap_or(0.0) * scale_factor;
+                                gl_api.uniform_1f(*location, corner_radius);
+                            }
+                            "u_sdf_rect_stroke_width" => {
+                                let Some(sx::SdfParams::Rect(rect_sdf)) = sdf_params.as_ref()
+                                else {
+                                    unreachable!();
+                                };
+                                let stroke_width = if let Some(ref stroke) = rect_sdf.stroke {
+                                    stroke.width
+                                } else {
+                                    0.0
+                                } * scale_factor;
+                                gl_api.uniform_1f(*location, stroke_width);
+                            }
+                            "u_sdf_rect_stroke_color" => {
+                                let Some(sx::SdfParams::Rect(rect_sdf)) = sdf_params.as_ref()
+                                else {
+                                    unreachable!();
+                                };
+                                let c = if let Some(ref stroke) = rect_sdf.stroke {
+                                    stroke.color
+                                } else {
+                                    sx::Rgba8::TRANSPARENT
+                                }
+                                .to_f32_array();
+                                gl_api.uniform_4f(*location, c[0], c[1], c[2], c[3]);
+                            }
+                            "u_sdf_rect_stroke_alignment" => {
+                                let Some(sx::SdfParams::Rect(rect_sdf)) = sdf_params.as_ref()
+                                else {
+                                    unreachable!();
+                                };
+                                // NOTE: stroke alignment value convention must be in-sync with the
+                                // shader.
+                                let stroke_alignment = if let Some(ref stroke) = rect_sdf.stroke {
+                                    match stroke.alignment {
+                                        sx::StrokeAlignment::Inside => -1,
+                                        sx::StrokeAlignment::Outside => 1,
+                                        sx::StrokeAlignment::Center => 0,
+                                    }
+                                } else {
+                                    0
+                                };
+                                gl_api.uniform_1i(*location, stroke_alignment);
+                            }
+
+                            other => {
+                                log::warn!("uniform {other} was left unset");
+                            }
+                        }
+                    }
 
                     gl_api.draw_elements(
                         gl::TRIANGLES,
@@ -808,15 +1056,16 @@ impl GlRenderer {
             gl_api.bind_framebuffer(gl::READ_FRAMEBUFFER, Some(framebuffer.framebuffer));
             gl_api.read_buffer(gl::COLOR_ATTACHMENT0);
 
+            // NOTE: this flips y.
             gl_api.blit_framebuffer(
                 0,
                 0,
                 framebuffer.width as gl::GLint,
                 framebuffer.height as gl::GLint,
                 0,
-                0,
-                framebuffer.width as gl::GLint,
                 framebuffer.height as gl::GLint,
+                framebuffer.width as gl::GLint,
+                0,
                 gl::COLOR_BUFFER_BIT,
                 gl::NEAREST,
             );

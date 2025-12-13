@@ -93,7 +93,7 @@ struct Context {
 }
 
 impl Context {
-    fn new(temp: &TempAllocator<'_>) -> anyhow::Result<Self> {
+    fn new() -> anyhow::Result<Self> {
         let window =
             window::create_window(WindowAttrs::default()).context("could not create window")?;
 
@@ -130,8 +130,9 @@ impl Context {
         let default_font_handle = font_service
             .register_font_slice(DEFAULT_FONT_DATA)
             .context("default font is invalid")?;
+
         let gl_renderer =
-            GlRenderer::new(&gl_context.api, temp).context("could not create gl renderer")?;
+            GlRenderer::new(&gl_context.api).context("could not create gl renderer")?;
 
         Ok(Self {
             window,
@@ -147,7 +148,7 @@ impl Context {
         })
     }
 
-    fn iterate(&mut self) -> anyhow::Result<()> {
+    fn iterate(&mut self, temp: &TempAllocator<'_>) -> anyhow::Result<()> {
         self.window.pump_events()?;
         let input_events =
             iter::from_fn(|| self.window.pop_event()).filter_map(|event| match event {
@@ -183,27 +184,61 @@ impl Context {
             physical_size.y as u32,
         )?;
 
-        let font_instance = self.font_service.get_font_instance_mut(sx::FontDesc {
-            handle: self.default_font_handle,
-            pt_size: 16.0,
-            scale_factor,
-        });
-        draw_text(
-            "hello sailor!",
-            font_instance,
-            sx::Rgba8::WHITE,
-            sx::Vec2::splat(24.0),
-            &mut self.texture_service,
-            &mut self.draw_buffer,
-        );
+        {
+            let center_rect = sx::Rect::from_center_size(logical_size * 0.5, 64.0);
+            self.draw_buffer.push_rect(
+                sx::RectShape::new(center_rect).with_fill(Some(sx::Fill::new(sx::Rgba8::MAROON))),
+            );
+
+            let other_rect = center_rect
+                .inflate(-sx::Vec2::splat(8.0))
+                .translate(sx::Vec2::splat(16.0));
+            self.draw_buffer.push_rect(
+                sx::RectShape::new(other_rect)
+                    .with_fill(Some(sx::Fill::new(sx::Rgba8::RED)))
+                    .with_corner_radius(Some(12.0))
+                    .with_stroke(Some(
+                        sx::Stroke::new(8.0, sx::Rgba8::WHITE.with_af(0.5))
+                            .with_alignment(sx::StrokeAlignment::Center),
+                    )),
+            );
+        }
+
+        {
+            let font_instance = self.font_service.get_font_instance_mut(sx::FontDesc {
+                handle: self.default_font_handle,
+                pt_size: 16.0,
+                scale_factor,
+            });
+            let text = "hello sailor!";
+            // NOTE: typical_advance_width works for centering monospace fonts.
+            //   for non-monospace font you would want to measure advance width of each char.
+            draw_text(
+                text,
+                font_instance,
+                sx::Rgba8::WHITE,
+                logical_size / 2.0
+                    - sx::Vec2::new(
+                        (text.len() as f32 * font_instance.typical_advance_width()) / 2.0,
+                        font_instance.height() / 2.0,
+                    ),
+                &mut self.texture_service,
+                &mut self.draw_buffer,
+            );
+        }
 
         let texture_commands = self.texture_service.drain_comands();
         self.gl_renderer
             .handle_texture_commands(texture_commands, &self.gl_context.api)?;
 
-        let draw_data = self.draw_buffer.drain_layers();
-        self.gl_renderer
-            .render(logical_size, scale_factor, draw_data, &self.gl_context.api)?;
+        let draw_layers = self.draw_buffer.drain_layers();
+        self.gl_renderer.render(
+            logical_size,
+            scale_factor,
+            draw_layers,
+            &self.gl_context.api,
+            temp,
+        )?;
 
         self.gl_renderer.render_to_screen(&self.gl_context.api)?;
         self.gl_context.swap_window_buffers(raw_window_handle)?;
@@ -249,17 +284,17 @@ fn main() {
         js::throw_str(&panic_info.to_string());
     }));
 
-    let mut temp_data = MaybeUninit::<[u8; 10 << 10]>::uninit();
+    let mut temp_data = MaybeUninit::<[u8; 40 << 10]>::uninit();
     let temp = TempAllocator::new(unsafe { temp_data.assume_init_mut() });
 
     Logger::init();
 
-    let mut ctx = Context::new(&temp).expect("could not create app");
+    let mut ctx = Context::new().expect("could not create app");
 
     #[cfg(not(target_family = "wasm"))]
     while !ctx.close_requested {
         temp.reset();
-        ctx.iterate().expect("iteration failure");
+        ctx.iterate(&temp).expect("iteration failure");
     }
 
     #[cfg(target_family = "wasm")]

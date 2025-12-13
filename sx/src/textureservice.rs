@@ -1,6 +1,4 @@
-use std::collections::VecDeque;
-use std::hash::{Hash, Hasher};
-use std::iter;
+use std::hash::Hash;
 use std::ops::Range;
 
 use mars::nohash::{NoHash, NoHashMap};
@@ -37,16 +35,9 @@ pub struct TextureDesc {
     pub h: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TextureHandle {
     id: u32,
-}
-
-// TODO: can Hash be just derived for TextureHandle and not implemented manually?
-impl Hash for TextureHandle {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        state.write_u32(self.id);
-    }
 }
 
 impl NoHash for TextureHandle {}
@@ -80,7 +71,7 @@ pub struct TextureService {
     range_alloc: RangeAlloc<usize>,
 
     descs: NoHashMap<TextureHandle, TextureDesc>,
-    commands: VecDeque<TextureCommand<(), Range<usize>>>,
+    commands: Vec<TextureCommand<(), Range<usize>>>,
 }
 
 impl TextureService {
@@ -91,7 +82,7 @@ impl TextureService {
         log::debug!("TextureService::create: ({handle:?}: {desc:?})");
 
         self.descs.insert(handle, desc);
-        self.commands.push_back(TextureCommand {
+        self.commands.push(TextureCommand {
             handle,
             kind: TextureCommandKind::Create { desc: () },
         });
@@ -128,7 +119,7 @@ impl TextureService {
                 self.range_alloc.allocate(buffer_size).unwrap()
             });
 
-        self.commands.push_back(TextureCommand {
+        self.commands.push(TextureCommand {
             handle,
             kind: TextureCommandKind::Upload {
                 region,
@@ -144,21 +135,17 @@ impl TextureService {
 
         let desc = self.descs.remove(&handle);
         assert!(desc.is_some());
-        self.commands.push_back(TextureCommand {
+        self.commands.push(TextureCommand {
             handle,
             kind: TextureCommandKind::Delete,
         });
     }
 
     pub fn drain_comands(&mut self) -> impl Iterator<Item = TextureCommand<&TextureDesc, &[u8]>> {
-        iter::from_fn(|| {
-            let TextureCommand {
-                handle,
-                kind: staging_kind,
-            } = self.commands.pop_front()?;
-            let ret_kind = match staging_kind {
+        self.commands.drain(..).map(|cmd| {
+            let kind = match cmd.kind {
                 TextureCommandKind::Create { desc: _ } => TextureCommandKind::Create {
-                    desc: self.descs.get(&handle).expect("invalid handle"),
+                    desc: self.descs.get(&cmd.handle).expect("invalid handle"),
                 },
                 TextureCommandKind::Upload {
                     region,
@@ -173,10 +160,10 @@ impl TextureService {
                 }
                 TextureCommandKind::Delete => TextureCommandKind::Delete,
             };
-            Some(TextureCommand {
-                handle,
-                kind: ret_kind,
-            })
+            TextureCommand {
+                handle: cmd.handle,
+                kind,
+            }
         })
     }
 }
