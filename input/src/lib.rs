@@ -1,14 +1,22 @@
-use std::hash::{Hash, Hasher};
+use std::{
+    collections::HashMap,
+    hash::{Hash, Hasher},
+};
 
-use mars::nohash::{NoHash, NoHashMap};
+use mars::nohash::{NoBuildHasher, NoHash};
 
 // TODO: events must carry device id in addition to surface id.
 //   (on device id) maybe you want to let people play split screen with with different controllers
 //   (event though i am absolutely clueless and never did own one).
-
+//
 // TODO: some kind of surface state
 //   must be able to do something like .just_resized(), .just_rescaled() or
 //   .scale_factor_just_changed() .. stuff like that.
+//
+// TODO: don't use hashmaps here.
+//   SortedArrayMap does perform better on small number of ints (see benchmark in mars repo).
+//   and is supposedly significantly more compact (although that's theoretic; i did not compare
+//   real numbners).
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SurfaceId(pub u64);
@@ -423,7 +431,7 @@ pub struct StateTracker<B>
 where
     B: Copy + Eq + NoHash,
 {
-    map: NoHashMap<B, StateFlags>,
+    map: HashMap<B, StateFlags, NoBuildHasher<B>>,
 }
 
 // @BlindDerive
@@ -433,7 +441,7 @@ where
 {
     fn default() -> Self {
         Self {
-            map: NoHashMap::default(),
+            map: HashMap::default(),
         }
     }
 }
@@ -568,7 +576,7 @@ pub struct PointerState {
     pub scroll_delta: Option<(f64, f64)>,
 
     pub buttons: StateTracker<Button>,
-    pub press_origins: NoHashMap<Button, (f64, f64)>,
+    pub press_origins: HashMap<Button, (f64, f64), NoBuildHasher<Button>>,
 }
 
 impl PointerState {

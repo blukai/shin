@@ -1,7 +1,10 @@
-use std::hash::{BuildHasherDefault, Hash};
+use std::{
+    collections::HashMap,
+    hash::{BuildHasherDefault, Hash},
+};
 
 use ab_glyph::{Font as _, FontArc, ScaleFont as _};
-use mars::nohash::NoHashMap;
+use mars::nohash::NoBuildHasher;
 
 use crate::{
     Rect, TextureDesc, TextureFormat, TextureHandle, TexturePacker, TextureRegion, TextureService,
@@ -200,7 +203,7 @@ pub struct FontInstance {
     // thuse it makes more sense for font instance to own texture pages and when font instance need
     // to be dropped - drop texture packers (and glyphs) along with it.
     texture_pages: Vec<TexturePage>,
-    glyphs: NoHashMap<u32, Glyph>,
+    glyphs: HashMap<u32, Glyph, NoBuildHasher<u32>>,
 
     px_scale: ab_glyph::PxScale,
     scale_factor: f32,
@@ -238,7 +241,7 @@ impl FontInstance {
         Self {
             texture_pages: Vec::default(),
             // NOTE: 128 is num of ascii code points.
-            glyphs: NoHashMap::with_capacity_and_hasher(128, BuildHasherDefault::default()),
+            glyphs: HashMap::with_capacity_and_hasher(128, BuildHasherDefault::default()),
 
             px_scale,
             scale_factor,
@@ -311,7 +314,7 @@ impl FontInstance {
 #[derive(Default)]
 pub struct FontService {
     fonts: Vec<FontArc>,
-    font_instances: NoHashMap<u64, FontInstance>,
+    font_instances: HashMap<u64, FontInstance, NoBuildHasher<u64>>,
 }
 
 impl FontService {

@@ -28,3 +28,5 @@ TODO:
       - https://docs.unity3d.com/Manual/SL-PragmaDirectives.html
       - https://karolinamot.github.io/HLSL-and-ue5-blog/
       - https://fyrox-book.github.io/rendering/shaders.html
+  - look into https://silverspaceship.com/inner/imgui/
+    + https://archive.org/details/GDM_September_2005/page/n35/mode/2up (page 35)

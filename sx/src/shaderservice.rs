@@ -2,7 +2,7 @@ use std::fmt;
 
 use mars::{
     alloc,
-    sortedvector::{SpillableSortedVectorMap, SpillableSortedVectorSet},
+    sortedarray::{SpillableSortedArrayMap, SpillableSortedArraySet},
     string::FixedString,
 };
 
@@ -16,7 +16,7 @@ pub const INITIAL_SHADER_DEFINES_CAP: usize = 16;
 
 pub type ShaderDefine = FixedString<MAX_SHADER_DEFINE_LEN>;
 pub type ShaderDefines =
-    SpillableSortedVectorSet<ShaderDefine, INITIAL_SHADER_DEFINES_CAP, alloc::Global>;
+    SpillableSortedArraySet<ShaderDefine, INITIAL_SHADER_DEFINES_CAP, alloc::Global>;
 
 // ----
 // shader uniforms
@@ -36,7 +36,7 @@ pub enum ShaderUniformValue {
     Texture2D(TextureHandle),
 }
 
-pub type ShaderUniforms = SpillableSortedVectorMap<
+pub type ShaderUniforms = SpillableSortedArrayMap<
     ShaderUniformName,
     ShaderUniformValue,
     INITIAL_SHADER_UNIFORMS_CAP,
@@ -53,7 +53,7 @@ pub enum ShaderUniformType {
     Sampler2D,
 }
 
-pub type ShaderUniformDescs = SpillableSortedVectorMap<
+pub type ShaderUniformDescs = SpillableSortedArrayMap<
     ShaderUniformName,
     ShaderUniformType,
     INITIAL_SHADER_UNIFORMS_CAP,

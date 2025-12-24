@@ -1,4 +1,4 @@
-use std::collections::hash_map;
+use std::collections::{HashMap, hash_map};
 use std::ffi::c_void;
 use std::fmt::{self, Write as _};
 use std::hash::Hasher as _;
@@ -10,16 +10,16 @@ use gl::wrap::Adapter;
 use mars::alloc::{self, Allocator, TempAllocator};
 use mars::fxhash::FxHasher;
 use mars::memory::GrowableMemory;
-use mars::nohash::NoHashMap;
+use mars::nohash::NoBuildHasher;
 use mars::scopeguard::ScopeGuard;
-use mars::sortedvector::SpillableSortedVectorMap;
+use mars::sortedarray::SpillableSortedArrayMap;
 use mars::string::{GrowableString, String};
 
 // TODO: maybe ubo
 // TODO: do i want to generate uniforms from shader desc?
 // TODO: do i want to generate vertex input state from what? primitive attributes or something?
 
-type ShaderUniformLocations = SpillableSortedVectorMap<
+type ShaderUniformLocations = SpillableSortedArrayMap<
     sx::ShaderUniformName,
     gl::wrap::UniformLocation,
     { sx::INITIAL_SHADER_UNIFORMS_CAP },
@@ -508,10 +508,10 @@ pub struct GlRenderer {
     ebo: gl::wrap::Buffer,
     vao: gl::wrap::VertexArray,
 
-    shaders: NoHashMap<u64, Shader>,
+    shaders: HashMap<u64, Shader, NoBuildHasher<u64>>,
 
     default_white_texture: Texture,
-    textures: NoHashMap<sx::TextureHandle, Texture>,
+    textures: HashMap<sx::TextureHandle, Texture, NoBuildHasher<sx::TextureHandle>>,
 }
 
 impl GlRenderer {
@@ -572,11 +572,11 @@ impl GlRenderer {
                 ebo,
                 vao,
 
-                shaders: NoHashMap::default(),
+                shaders: HashMap::default(),
 
                 default_white_texture: create_default_white_texture(gl_api)
                     .context("could not create default white tex")?,
-                textures: NoHashMap::default(),
+                textures: HashMap::default(),
             })
         }
     }

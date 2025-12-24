@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::{CStr, c_char, c_int, c_void};
 use std::hash::{Hash, Hasher};
 use std::io::{PipeReader, PipeWriter, Read as _};
@@ -13,7 +13,7 @@ use input::{
     Button, ButtonState, CursorShape, GesturePhase, KeyState, KeyboardEvent, KeyboardEventKind,
     Keycode, PointerEvent, PointerEventKind, RawKey, Scancode, SurfaceId,
 };
-use mars::nohash::{NoHash, NoHashMap};
+use mars::nohash::{NoBuildHasher, NoHash};
 use raw_window_handle as rwh;
 
 use crate::{ClipboardDataProvider, DEFAULT_LOGICAL_SIZE, Event, Window, WindowAttrs, WindowEvent};
@@ -429,7 +429,7 @@ impl NoHash for SerialType {}
 
 #[derive(Default)]
 struct SerialTracker {
-    map: NoHashMap<SerialType, u32>,
+    map: HashMap<SerialType, u32, NoBuildHasher<SerialType>>,
 }
 
 impl SerialTracker {

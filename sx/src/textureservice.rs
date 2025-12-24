@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use std::hash::Hash;
 use std::ops::Range;
 
-use mars::nohash::{NoHash, NoHashMap};
+use mars::nohash::{NoBuildHasher, NoHash};
 use mars::rangealloc::RangeAlloc;
 
 // TODO: consider using word "image" instead of "texture"
@@ -70,7 +71,7 @@ pub struct TextureService {
     buf: Vec<u8>,
     range_alloc: RangeAlloc<usize>,
 
-    descs: NoHashMap<TextureHandle, TextureDesc>,
+    descs: HashMap<TextureHandle, TextureDesc, NoBuildHasher<TextureHandle>>,
     commands: Vec<TextureCommand<(), Range<usize>>>,
 }
 

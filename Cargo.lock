@@ -395,10 +395,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aa9a19cbb55df58761df49b23516a86d432839add4af60fc256da840f66ed35b"
 
 [[package]]
-name = "fxhash"
-version = "0.0.0"
-
-[[package]]
 name = "gethostname"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -428,6 +424,10 @@ dependencies = [
  "khronos-generator",
  "log",
 ]
+
+[[package]]
+name = "hash"
+version = "0.0.0"
 
 [[package]]
 name = "hashbrown"
@@ -556,8 +556,7 @@ version = "0.0.0"
 dependencies = [
  "alloc",
  "containers",
- "fxhash",
- "nohash",
+ "hash",
  "rangealloc",
  "scopeguard",
 ]
@@ -606,10 +605,6 @@ checksum = "ee6cda3051665f1fb8d9e08fc35c96d5a244fb1be711a03b71118828afc9a873"
 dependencies = [
  "jni-sys",
 ]
-
-[[package]]
-name = "nohash"
-version = "0.0.0"
 
 [[package]]
 name = "num_enum"

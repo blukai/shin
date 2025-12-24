@@ -9,4 +9,4 @@ ab_glyph = { workspace = true }
 anyhow = { workspace = true }
 log = { workspace = true }
 # my other repos
-mars = { workspace = true, features = ["scopeguard", "rangealloc", "containers", "nohash"] }
+mars = { workspace = true, features = ["scopeguard", "rangealloc", "containers", "hash"] }
