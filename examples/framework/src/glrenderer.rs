@@ -8,8 +8,8 @@ use std::ptr::null;
 use anyhow::{Context as _, anyhow};
 use gl::wrap::Adapter;
 use mars::alloc::{self, Allocator, TempAllocator};
+use mars::arraymemory::GrowableArrayMemory;
 use mars::fxhash::FxHasher;
-use mars::memory::GrowableMemory;
 use mars::nohash::NoBuildHasher;
 use mars::scopeguard::ScopeGuard;
 use mars::sortedarray::SpillableSortedArrayMap;
@@ -311,7 +311,7 @@ impl Shader {
         temp: &TempAllocator<'_>,
     ) -> anyhow::Result<Self> {
         let program = unsafe {
-            let _temp_guard = temp.scope_guard();
+            let _guard = temp.checkpoint();
             create_program(
                 gl_api,
                 &prefix_stage_source(&desc.vertex_stage, temp)
@@ -325,9 +325,9 @@ impl Shader {
         let mut uniform_locations = ShaderUniformLocations::default();
         for (name, _) in desc.uniforms.0.iter() {
             if let Some(location) = {
-                let _temp_guard = temp.scope_guard();
+                let _guard = temp.checkpoint();
                 let name = name
-                    .try_to_c_string_in(GrowableMemory::new_in(temp))
+                    .try_to_c_string_in(GrowableArrayMemory::new_in(temp))
                     .expect("could not convier uniform name to cstring");
                 unsafe { gl_api.get_uniform_location(program, name.as_c_str()) }
             } {
@@ -538,7 +538,7 @@ impl GlRenderer {
                     gl::FLOAT,
                     gl::FALSE,
                     STRIDE,
-                    offset_of!(sx::Vertex, position) as *const c_void,
+                    offset_of!(sx::Vertex, pos) as *const c_void,
                 );
                 gl_api.enable_vertex_attrib_array(A_POSITION_LOC);
 
@@ -996,7 +996,15 @@ impl GlRenderer {
                                     unreachable!();
                                 };
                                 let c = if let Some(ref stroke) = rect_sdf.stroke {
-                                    stroke.color
+                                    match stroke.brush {
+                                        sx::Brush::Solid(color) => color,
+                                        // TODO: support texture brushes for sdf strokes.
+                                        //   you must split the main part of the rect, and render
+                                        //   stroke separately.
+                                        sx::Brush::Texture(sx::TextureBrush { .. }) => {
+                                            unimplemented!()
+                                        }
+                                    }
                                 } else {
                                     sx::Rgba8::TRANSPARENT
                                 }

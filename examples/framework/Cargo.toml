@@ -8,7 +8,7 @@ anyhow = { workspace = true }
 log = { workspace = true }
 raw-window-handle = { workspace = true }
 # my other repos
-mars = { workspace = true, features = ["containers", "hash"] }
+mars = { workspace = true, features = ["containers", "hash", "scopeguard"] }
 # workspace
 gl = { workspace = true }
 input = { workspace = true }
@@ -22,4 +22,3 @@ egl = { workspace = true }
 [target.'cfg(target_family = "wasm")'.dependencies]
 # workspace
 js = { workspace = true }
-

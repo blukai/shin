@@ -3,41 +3,44 @@ use std::ptr::NonNull;
 use std::slice;
 use std::vec::Drain;
 
-use mars::scopeguard::ScopeGuard;
-
 use crate::{Rect, Rgba8, TextureHandle, Vec2};
 
-#[derive(Debug, Clone)]
-pub struct FillTexture {
-    pub texture: TextureHandle,
+// TODO: i am not quite happy with the word "brush" here, but i got no better ideas atm; it's
+// better and more correct then "fill" that i used previously.
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextureBrush {
+    pub handle: TextureHandle,
     pub coords: Rect,
+    pub base_color: Rgba8,
 }
 
-impl FillTexture {
-    pub fn new(texture: TextureHandle, coords: Rect) -> Self {
-        Self { texture, coords }
-    }
-}
-
-// TODO: gradient fill.
-#[derive(Debug, Clone)]
-pub struct Fill {
-    pub color: Rgba8,
-    pub texture: Option<FillTexture>,
-}
-
-impl Fill {
-    pub fn new(color: Rgba8) -> Self {
+impl TextureBrush {
+    pub fn new(handle: TextureHandle) -> Self {
         Self {
-            color,
-            texture: None,
+            handle,
+            coords: Rect::new(Vec2::splat(0.0), Vec2::splat(1.0)),
+            base_color: Rgba8::WHITE,
         }
     }
 
-    pub fn with_texture(mut self, texture: Option<FillTexture>) -> Self {
-        self.texture = texture;
+    pub fn with_coords(mut self, coords: Rect) -> Self {
+        self.coords = coords;
         self
     }
+
+    pub fn with_base_color(mut self, base_color: Rgba8) -> Self {
+        self.base_color = base_color;
+        self
+    }
+}
+
+// TODO: shader brush
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Brush {
+    Solid(Rgba8),
+    Texture(TextureBrush),
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
@@ -53,17 +56,17 @@ pub enum StrokeAlignment {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stroke {
     pub width: f32,
-    pub color: Rgba8,
     pub alignment: StrokeAlignment,
+    pub brush: Brush,
 }
 
 impl Stroke {
     // NOTE: alignment is omitted because in major majority of cases it's center (the default).
-    pub fn new(width: f32, color: Rgba8) -> Self {
+    pub fn new(width: f32, brush: Brush) -> Self {
         Self {
             width,
-            color,
             alignment: StrokeAlignment::default(),
+            brush,
         }
     }
 
@@ -75,8 +78,8 @@ impl Stroke {
 
 #[derive(Debug)]
 pub struct RectShape {
-    pub coords: Rect,
-    pub fill: Option<Fill>,
+    pub rect: Rect,
+    pub brush: Option<Brush>,
     // TODO: i want to be able to specify rect stroke per-side.
     //   top and left, or maybe only bottom, etc.
     //   would that still be called "stroke"?
@@ -86,17 +89,17 @@ pub struct RectShape {
 }
 
 impl RectShape {
-    pub fn new(coords: Rect) -> Self {
+    pub fn new(rect: Rect) -> Self {
         Self {
-            coords,
-            fill: None,
+            rect,
+            brush: None,
             stroke: None,
             corner_radius: None,
         }
     }
 
-    pub fn with_fill(mut self, fill: Option<Fill>) -> Self {
-        self.fill = fill;
+    pub fn with_brush(mut self, brush: Option<Brush>) -> Self {
+        self.brush = brush;
         self
     }
 
@@ -111,6 +114,8 @@ impl RectShape {
     }
 }
 
+// TODO: get rid of RectSdf.
+//   you want composable shader brushes or something.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RectSdf {
     pub center: Vec2,
@@ -151,12 +156,12 @@ pub enum SdfParams {
 pub struct Vertex {
     /// screen pixel coordinates.
     /// 0, 0 is the top left corner of the screen.
-    pub position: Vec2,
+    pub pos: Vec2,
+    pub color: Rgba8,
     /// normalized texture coordinates.
     /// 0, 0 is the top left corner of the texture.
     /// 1, 1 is the bottom right corner of the texture.
     pub tex_coord: Vec2,
-    pub color: Rgba8,
 }
 
 #[derive(Debug)]
@@ -168,27 +173,25 @@ pub struct DrawCommand {
 }
 
 #[derive(Debug, Default)]
-pub struct DrawData {
+pub struct DrawLayerData {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
     pub commands: Vec<DrawCommand>,
-
-    pending_indices: usize,
-    active_texture: Option<TextureHandle>,
-    active_scissor: Option<Rect>,
-    active_sdf_params: Option<SdfParams>,
+    pending_indices: u32,
+    current_texture: Option<TextureHandle>,
+    current_scissor_rect: Option<Rect>,
+    current_sdf_params: Option<SdfParams>,
 }
 
-impl DrawData {
+impl DrawLayerData {
     fn clear(&mut self) {
-        assert_eq!(self.pending_indices, 0);
-
         self.vertices.clear();
         self.indices.clear();
         self.commands.clear();
-
-        self.active_scissor = None;
-        self.active_sdf_params = None;
+        assert_eq!(self.pending_indices, 0);
+        self.current_texture = None;
+        self.current_scissor_rect = None;
+        self.current_sdf_params = None;
     }
 
     fn flush(&mut self) {
@@ -196,45 +199,53 @@ impl DrawData {
             return;
         }
 
-        let start_index = (self.indices.len() - self.pending_indices) as u32;
         let end_index = self.indices.len() as u32;
-
+        let start_index = end_index - self.pending_indices;
         self.commands.push(DrawCommand {
             index_range: start_index..end_index,
-            texture: self.active_texture,
-            scissor: self.active_scissor,
-            sdf_params: self.active_sdf_params.clone(),
+            texture: self.current_texture,
+            scissor: self.current_scissor_rect,
+            sdf_params: self.current_sdf_params.clone(),
         });
 
         self.pending_indices = 0;
     }
 
     fn set_texture(&mut self, texture: Option<TextureHandle>) {
-        if self.active_texture == texture {
+        if self.current_texture == texture {
             return;
         }
         self.flush();
-        self.active_texture = texture;
+        self.current_texture = texture;
     }
 
-    fn set_scissor(&mut self, scissor: Option<Rect>) {
-        if self.active_scissor == scissor {
+    fn set_scissor_rect(&mut self, rect: Option<Rect>) {
+        let prev = self.current_scissor_rect;
+        let next = match (prev, rect) {
+            (Some(prev), Some(next)) => Some(next.clamp(prev)),
+            (_, next) => next,
+        };
+        if prev == next {
             return;
         }
         self.flush();
-        self.active_scissor = scissor;
+        self.current_scissor_rect = next;
     }
 
     fn set_sdf_params(&mut self, sdf_params: Option<SdfParams>) {
-        if self.active_sdf_params == sdf_params {
+        if self.current_sdf_params == sdf_params {
             return;
         }
         self.flush();
-        self.active_sdf_params = sdf_params;
+        self.current_sdf_params = sdf_params;
     }
 
-    fn push_vertex(&mut self, vertex: Vertex) {
-        self.vertices.push(vertex);
+    fn push_vertex(&mut self, pos: Vec2, color: Rgba8, tex_coord: Vec2) {
+        self.vertices.push(Vertex {
+            pos,
+            color,
+            tex_coord,
+        });
     }
 
     fn push_triangle(&mut self, zero: u32, ichi: u32, ni: u32) {
@@ -253,7 +264,7 @@ pub struct DrawLayerFlush<'a> {
 }
 
 pub struct DrawLayersDrain<'a> {
-    iter: slice::IterMut<'a, DrawData>,
+    iter: slice::IterMut<'a, DrawLayerData>,
     ptr: NonNull<DrawBuffer>,
 }
 
@@ -287,7 +298,7 @@ impl<'a> Drop for DrawLayersDrain<'a> {
 #[derive(Debug, Default, Clone, Copy)]
 pub enum DrawLayer {
     #[default]
-    Base,
+    Main,
 }
 
 impl DrawLayer {
@@ -297,81 +308,59 @@ impl DrawLayer {
 #[derive(Debug, Default)]
 pub struct DrawBuffer {
     layer: DrawLayer,
-    layers: [DrawData; DrawLayer::MAX],
+    layers: [DrawLayerData; DrawLayer::MAX],
 }
 
 impl DrawBuffer {
     #[inline(always)]
-    fn layer_mut(&mut self) -> &mut DrawData {
+    fn draw_data(&self) -> &DrawLayerData {
+        &self.layers[self.layer as usize]
+    }
+
+    #[inline(always)]
+    fn draw_data_mut(&mut self) -> &mut DrawLayerData {
         &mut self.layers[self.layer as usize]
     }
 
-    pub fn scissor_scope_guard<'a>(
-        &'a mut self,
-        rect: Rect,
-    ) -> ScopeGuard<&'a mut Self, impl FnOnce(&'a mut Self)> {
-        let draw_data = self.layer_mut();
+    // NOTE: you don't this to have methods that return ScopeGuard.
+    // that shit turned out to be very annoying for various reasons (related to rusts borrowing
+    // rules).
+    // if you want scope guard thing - you should implement it at application-level.
 
-        let prev = draw_data.active_scissor;
-        let next = if let Some(prev) = prev {
-            rect.clamp(prev)
-        } else {
-            rect
+    pub fn layer(&mut self) -> DrawLayer {
+        self.layer
+    }
+
+    pub fn set_layer(&mut self, layer: DrawLayer) {
+        self.layer = layer;
+    }
+
+    pub fn scissor_rect(&self) -> Option<Rect> {
+        self.draw_data().current_scissor_rect
+    }
+
+    pub fn set_scissor_rect(&mut self, rect: Option<Rect>) {
+        self.draw_data_mut().set_scissor_rect(rect)
+    }
+
+    fn push_rect_filled(&mut self, rect: Rect, brush: Brush) {
+        let (color, tex_coords, tex_handle) = match brush {
+            Brush::Solid(color) => (color, Rect::new(Vec2::splat(0.0), Vec2::splat(1.0)), None),
+            Brush::Texture(TextureBrush {
+                handle,
+                coords,
+                base_color,
+            }) => (base_color, coords, Some(handle)),
         };
 
-        draw_data.set_scissor(Some(next));
-
-        let layer = self.layer;
-        ScopeGuard::new_with_data(self, move |this| {
-            this.layers[layer as usize].set_scissor(prev);
-        })
-    }
-
-    pub fn layer_scope_guard<'a>(
-        &'a mut self,
-        layer: DrawLayer,
-    ) -> ScopeGuard<&'a mut Self, impl FnOnce(&'a mut Self)> {
-        let prev = self.layer;
-        self.layer = layer;
-        ScopeGuard::new_with_data(self, move |this| this.layer = prev)
-    }
-
-    fn push_rect_filled(&mut self, coords: Rect, fill: Fill) {
-        let draw_data = self.layer_mut();
-        draw_data.set_texture(fill.texture.as_ref().map(|it| it.texture));
-
+        let draw_data = self.draw_data_mut();
+        draw_data.set_texture(tex_handle);
         let idx = draw_data.vertices.len() as u32;
 
-        let tex_coords = fill
-            .texture
-            .map(|texture| texture.coords)
-            .unwrap_or(Rect::new(Vec2::splat(0.0), Vec2::splat(1.0)));
-        let color = fill.color;
-
-        // top left
-        draw_data.push_vertex(Vertex {
-            position: coords.top_left(),
-            tex_coord: tex_coords.top_left(),
-            color,
-        });
-        // top right
-        draw_data.push_vertex(Vertex {
-            position: coords.top_right(),
-            tex_coord: tex_coords.top_right(),
-            color,
-        });
-        // bottom right
-        draw_data.push_vertex(Vertex {
-            position: coords.bottom_right(),
-            tex_coord: tex_coords.bottom_right(),
-            color,
-        });
-        // bottom left
-        draw_data.push_vertex(Vertex {
-            position: coords.bottom_left(),
-            tex_coord: tex_coords.bottom_left(),
-            color,
-        });
+        draw_data.push_vertex(rect.top_left(), color, tex_coords.top_left());
+        draw_data.push_vertex(rect.top_right(), color, tex_coords.top_right());
+        draw_data.push_vertex(rect.bottom_right(), color, tex_coords.bottom_right());
+        draw_data.push_vertex(rect.bottom_left(), color, tex_coords.bottom_left());
 
         // top left -> top right -> bottom right
         draw_data.push_triangle(idx + 0, idx + 1, idx + 2);
@@ -379,14 +368,17 @@ impl DrawBuffer {
         draw_data.push_triangle(idx + 2, idx + 3, idx + 0);
     }
 
-    pub fn push_line(&mut self, line: LineShape) {
+    pub fn push_line(&mut self, line_shape: LineShape) {
         // NOTE: line's stroke may only be centered.
         //   specifying outside/inside stroke alignment makes sense only for shapes that need an
         //   outline (/ need to be stroked).
-        assert!(matches!(line.stroke.alignment, StrokeAlignment::Center));
+        assert!(matches!(
+            line_shape.stroke.alignment,
+            StrokeAlignment::Center
+        ));
 
         // NOTE: there's no sdf params for line.
-        let draw_data = self.layer_mut();
+        let draw_data = self.draw_data_mut();
         draw_data.set_sdf_params(None);
 
         // computes the vertex position offset away the from center caused by line width.
@@ -411,44 +403,42 @@ impl DrawBuffer {
             offset
         }
 
-        let [a, b] = line.points;
-        let Stroke { width, color, .. } = line.stroke;
+        let [a, b] = line_shape.points;
+        let Stroke { width, brush, .. } = line_shape.stroke;
         let offset = compute_line_width_offset(a, b, width);
-        self.push_rect_filled(Rect::new(a + offset, b - offset), Fill::new(color));
+        self.push_rect_filled(Rect::new(a + offset, b - offset), brush);
     }
 
-    pub fn push_rect(&mut self, rect: RectShape) {
+    pub fn push_rect(&mut self, rect_shape: RectShape) {
         let RectShape {
-            mut coords,
-            fill,
+            mut rect,
+            brush,
             stroke,
             corner_radius,
-        } = rect;
-
+        } = rect_shape;
         let maybe_sdf_params = match (stroke, corner_radius) {
             (None, None) => None,
             (stroke, corner_radius) => {
                 if let Some(ref stroke) = stroke {
-                    coords = match stroke.alignment {
-                        StrokeAlignment::Inside => coords,
-                        StrokeAlignment::Outside => coords.inflate(Vec2::splat(stroke.width)),
-                        StrokeAlignment::Center => coords.inflate(Vec2::splat(stroke.width * 0.5)),
+                    rect = match stroke.alignment {
+                        StrokeAlignment::Inside => rect,
+                        StrokeAlignment::Outside => rect.inflate(Vec2::splat(stroke.width)),
+                        StrokeAlignment::Center => rect.inflate(Vec2::splat(stroke.width * 0.5)),
                     };
                 }
-
                 Some(SdfParams::Rect(RectSdf {
-                    center: rect.coords.center(),
-                    size: rect.coords.size(),
+                    center: rect_shape.rect.center(),
+                    size: rect_shape.rect.size(),
                     corner_radius,
                     stroke,
                 }))
             }
         };
-        let draw_data = self.layer_mut();
+
+        let draw_data = self.draw_data_mut();
         draw_data.set_sdf_params(maybe_sdf_params);
 
-        let fill = fill.unwrap_or(Fill::new(Rgba8::TRANSPARENT));
-        self.push_rect_filled(coords, fill);
+        self.push_rect_filled(rect, brush.unwrap_or(Brush::Solid(Rgba8::TRANSPARENT)));
     }
 
     pub fn clear(&mut self) {

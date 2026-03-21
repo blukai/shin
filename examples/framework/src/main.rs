@@ -71,9 +71,11 @@ fn draw_text(
                     .bounds()
                     .translate(sx::Vec2::new(x_offset, position.y + font_ascent)),
             )
-            .with_fill(Some(sx::Fill::new(fg).with_texture(Some(
-                sx::FillTexture::new(glyph.texture_handle(), glyph.texture_coords()),
-            )))),
+            .with_brush(Some(sx::Brush::Texture(
+                sx::TextureBrush::new(glyph.texture_handle())
+                    .with_coords(glyph.texture_coords())
+                    .with_base_color(fg),
+            ))),
         );
         x_offset += glyph_advance_width;
     }
@@ -187,7 +189,8 @@ impl Context {
         {
             let center_rect = sx::Rect::from_center_size(logical_size * 0.5, 64.0);
             self.draw_buffer.push_rect(
-                sx::RectShape::new(center_rect).with_fill(Some(sx::Fill::new(sx::Rgba8::MAROON))),
+                sx::RectShape::new(center_rect)
+                    .with_brush(Some(sx::Brush::Solid(sx::Rgba8::MAROON))),
             );
 
             let other_rect = center_rect
@@ -195,10 +198,10 @@ impl Context {
                 .translate(sx::Vec2::splat(16.0));
             self.draw_buffer.push_rect(
                 sx::RectShape::new(other_rect)
-                    .with_fill(Some(sx::Fill::new(sx::Rgba8::RED)))
+                    .with_brush(Some(sx::Brush::Solid(sx::Rgba8::RED)))
                     .with_corner_radius(Some(12.0))
                     .with_stroke(Some(
-                        sx::Stroke::new(8.0, sx::Rgba8::WHITE.with_af(0.5))
+                        sx::Stroke::new(8.0, sx::Brush::Solid(sx::Rgba8::WHITE.with_af(0.5)))
                             .with_alignment(sx::StrokeAlignment::Center),
                     )),
             );
