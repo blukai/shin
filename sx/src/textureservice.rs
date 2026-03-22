@@ -1,8 +1,8 @@
-use std::collections::HashMap;
-use std::hash::Hash;
 use std::ops::Range;
 
-use mars::nohash::{NoBuildHasher, NoHash};
+use mars::alloc;
+use mars::array::GrowableArray;
+use mars::handlearray::{Handle, HandleArray};
 use mars::rangealloc::RangeAlloc;
 
 // TODO: consider using word "image" instead of "texture"
@@ -37,11 +37,7 @@ pub struct TextureDesc {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TextureHandle {
-    id: u32,
-}
-
-impl NoHash for TextureHandle {}
+pub struct TextureHandle(Handle<TextureDesc>);
 
 #[derive(Debug, Clone)]
 pub struct TextureRegion {
@@ -66,23 +62,19 @@ pub struct TextureCommand<Desc, Buf> {
 
 #[derive(Default)]
 pub struct TextureService {
-    next_id: u32,
-
-    buf: Vec<u8>,
+    buf: GrowableArray<u8, alloc::Global>,
     range_alloc: RangeAlloc<usize>,
 
-    descs: HashMap<TextureHandle, TextureDesc, NoBuildHasher<TextureHandle>>,
-    commands: Vec<TextureCommand<(), Range<usize>>>,
+    // TODO: maybe parametrize texture service with allocator.
+    descs: HandleArray<TextureDesc, alloc::Global>,
+    commands: GrowableArray<TextureCommand<(), Range<usize>>, alloc::Global>,
 }
 
 impl TextureService {
     pub fn create(&mut self, desc: TextureDesc) -> TextureHandle {
-        let handle = TextureHandle { id: self.next_id };
-        self.next_id += 1;
+        log::debug!("TextureService::create: {desc:?})");
 
-        log::debug!("TextureService::create: ({handle:?}: {desc:?})");
-
-        self.descs.insert(handle, desc);
+        let handle = TextureHandle(self.descs.push(desc));
         self.commands.push(TextureCommand {
             handle,
             kind: TextureCommandKind::Create { desc: () },
@@ -91,34 +83,26 @@ impl TextureService {
     }
 
     /// NOTE: returned buffer points into dirty memory. you need to write each and every byte.
-    pub fn get_upload_buf_mut(
-        &mut self,
-        handle: TextureHandle,
-        region: TextureRegion,
-    ) -> &mut [u8] {
-        let block_size = self
-            .descs
-            .get(&handle)
-            .map(|desc| desc.format.block_size())
-            .expect("invalid handle");
-        let buffer_size = (region.w * region.h * block_size as u32) as usize;
+    pub fn get_upload_buf(&mut self, handle: TextureHandle, region: TextureRegion) -> &mut [u8] {
+        let desc = self.descs.get(handle.0);
+        let buf_size = (region.w * region.h * desc.format.block_size() as u32) as usize;
 
-        let buf_range = self
-            .range_alloc
-            .allocate(buffer_size)
-            // buf can't fit region, grow it.
-            .unwrap_or_else(|_| {
-                let full_range = self.range_alloc.full_range();
-                let delta = full_range.len().max(buffer_size);
-                let new_end = full_range.end + delta;
+        let buf_range = if let Ok(buf_range) = self.range_alloc.allocate(buf_size) {
+            buf_range
+        } else {
+            // NOTE: buf can't fit region, grow it.
 
-                self.buf.reserve_exact(delta);
-                assert!(self.buf.capacity() == new_end);
-                unsafe { self.buf.set_len(new_end) };
+            let full_range = self.range_alloc.full_range();
+            let delta = full_range.len().max(buf_size);
+            let new_end = full_range.end + delta;
 
-                self.range_alloc.grow(new_end);
-                self.range_alloc.allocate(buffer_size).unwrap()
-            });
+            self.buf.reserve_exact(delta);
+            debug_assert!(self.buf.cap() == new_end);
+            unsafe { self.buf.set_len(new_end) };
+
+            self.range_alloc.grow(new_end);
+            self.range_alloc.allocate(buf_size).unwrap()
+        };
 
         self.commands.push(TextureCommand {
             handle,
@@ -134,8 +118,7 @@ impl TextureService {
     pub fn delete(&mut self, handle: TextureHandle) {
         log::debug!("TextureService::delete: ({handle:?})");
 
-        let desc = self.descs.remove(&handle);
-        assert!(desc.is_some());
+        self.descs.remove(handle.0);
         self.commands.push(TextureCommand {
             handle,
             kind: TextureCommandKind::Delete,
@@ -146,7 +129,7 @@ impl TextureService {
         self.commands.drain(..).map(|cmd| {
             let kind = match cmd.kind {
                 TextureCommandKind::Create { desc: _ } => TextureCommandKind::Create {
-                    desc: self.descs.get(&cmd.handle).expect("invalid handle"),
+                    desc: self.descs.get(cmd.handle.0),
                 },
                 TextureCommandKind::Upload {
                     region,

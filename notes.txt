@@ -30,5 +30,6 @@ TODO:
       - https://fyrox-book.github.io/rendering/shaders.html
   - look into https://silverspaceship.com/inner/imgui/
     + https://archive.org/details/GDM_September_2005/page/n35/mode/2up (page 35)
-  - don't destructure mars imports
-  - shader brush
+  - go around and re-evaluate your use of nohash thing
+  - switch fontservcie to mars array from std vec
+  - switch drawbuffer to mars array from std vec

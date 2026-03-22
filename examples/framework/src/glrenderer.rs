@@ -9,7 +9,7 @@ use anyhow::{Context as _, anyhow};
 use gl::wrap::Adapter;
 use mars::alloc::{self, Allocator, TempAllocator};
 use mars::arraymemory::GrowableArrayMemory;
-use mars::fxhash::FxHasher;
+use mars::fxhash::{FxBuildHasher, FxHasher};
 use mars::nohash::NoBuildHasher;
 use mars::scopeguard::ScopeGuard;
 use mars::sortedarray::SpillableSortedArrayMap;
@@ -511,7 +511,7 @@ pub struct GlRenderer {
     shaders: HashMap<u64, Shader, NoBuildHasher<u64>>,
 
     default_white_texture: Texture,
-    textures: HashMap<sx::TextureHandle, Texture, NoBuildHasher<sx::TextureHandle>>,
+    textures: HashMap<sx::TextureHandle, Texture, FxBuildHasher>,
 }
 
 impl GlRenderer {

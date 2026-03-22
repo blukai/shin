@@ -120,7 +120,7 @@ fn rasterize_glyph(
         .get_entry(texture_packer_entry_idx);
 
     if let Some(og) = &outlined_glyph {
-        let upload_buffer = texture_service.get_upload_buf_mut(
+        let upload_buf = texture_service.get_upload_buf(
             texture_page.texture_handle,
             TextureRegion {
                 x: texture_packer_entry.x,
@@ -133,7 +133,7 @@ fn rasterize_glyph(
             assert!(x <= texture_packer_entry.w);
             assert!(y <= texture_packer_entry.h);
             let pixel = y * texture_packer_entry.w + x;
-            upload_buffer[pixel as usize] = ((u8::MAX as f32) * c.clamp(0.0, 1.0)) as u8;
+            upload_buf[pixel as usize] = ((u8::MAX as f32) * c.clamp(0.0, 1.0)) as u8;
         });
     } else {
         // NOTE: should be true if char is empty
