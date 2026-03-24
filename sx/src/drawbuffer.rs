@@ -5,17 +5,14 @@ use std::vec::Drain;
 
 use crate::{Rect, Rgba8, TextureHandle, Vec2};
 
-// TODO: i am not quite happy with the word "brush" here, but i got no better ideas atm; it's
-// better and more correct then "fill" that i used previously.
-
 #[derive(Debug, Clone, PartialEq)]
-pub struct TextureBrush {
+pub struct TextureFill {
     pub handle: TextureHandle,
     pub coords: Rect,
     pub base_color: Rgba8,
 }
 
-impl TextureBrush {
+impl TextureFill {
     pub fn new(handle: TextureHandle) -> Self {
         Self {
             handle,
@@ -35,12 +32,10 @@ impl TextureBrush {
     }
 }
 
-// TODO: shader brush
-
 #[derive(Debug, Clone, PartialEq)]
-pub enum Brush {
-    Solid(Rgba8),
-    Texture(TextureBrush),
+pub enum Fill {
+    Color(Rgba8),
+    Texture(TextureFill),
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
@@ -57,16 +52,16 @@ pub enum StrokeAlignment {
 pub struct Stroke {
     pub width: f32,
     pub alignment: StrokeAlignment,
-    pub brush: Brush,
+    pub color: Rgba8,
 }
 
 impl Stroke {
     // NOTE: alignment is omitted because in major majority of cases it's center (the default).
-    pub fn new(width: f32, brush: Brush) -> Self {
+    pub fn new(width: f32, color: Rgba8) -> Self {
         Self {
             width,
             alignment: StrokeAlignment::default(),
-            brush,
+            color,
         }
     }
 
@@ -79,7 +74,7 @@ impl Stroke {
 #[derive(Debug)]
 pub struct RectShape {
     pub rect: Rect,
-    pub brush: Option<Brush>,
+    pub fill: Option<Fill>,
     // TODO: i want to be able to specify rect stroke per-side.
     //   top and left, or maybe only bottom, etc.
     //   would that still be called "stroke"?
@@ -92,14 +87,14 @@ impl RectShape {
     pub fn new(rect: Rect) -> Self {
         Self {
             rect,
-            brush: None,
+            fill: None,
             stroke: None,
             corner_radius: None,
         }
     }
 
-    pub fn with_brush(mut self, brush: Option<Brush>) -> Self {
-        self.brush = brush;
+    pub fn with_fill(mut self, fill: Option<Fill>) -> Self {
+        self.fill = fill;
         self
     }
 
@@ -343,10 +338,10 @@ impl DrawBuffer {
         self.draw_data_mut().set_scissor_rect(rect)
     }
 
-    fn push_rect_filled(&mut self, rect: Rect, brush: Brush) {
-        let (color, tex_coords, tex_handle) = match brush {
-            Brush::Solid(color) => (color, Rect::new(Vec2::splat(0.0), Vec2::splat(1.0)), None),
-            Brush::Texture(TextureBrush {
+    fn push_rect_filled(&mut self, rect: Rect, fill: Fill) {
+        let (color, tex_coords, tex_handle) = match fill {
+            Fill::Color(color) => (color, Rect::new(Vec2::splat(0.0), Vec2::splat(1.0)), None),
+            Fill::Texture(TextureFill {
                 handle,
                 coords,
                 base_color,
@@ -404,15 +399,15 @@ impl DrawBuffer {
         }
 
         let [a, b] = line_shape.points;
-        let Stroke { width, brush, .. } = line_shape.stroke;
+        let Stroke { width, color, .. } = line_shape.stroke;
         let offset = compute_line_width_offset(a, b, width);
-        self.push_rect_filled(Rect::new(a + offset, b - offset), brush);
+        self.push_rect_filled(Rect::new(a + offset, b - offset), Fill::Color(color));
     }
 
     pub fn push_rect(&mut self, rect_shape: RectShape) {
         let RectShape {
             mut rect,
-            brush,
+            fill,
             stroke,
             corner_radius,
         } = rect_shape;
@@ -438,7 +433,7 @@ impl DrawBuffer {
         let draw_data = self.draw_data_mut();
         draw_data.set_sdf_params(maybe_sdf_params);
 
-        self.push_rect_filled(rect, brush.unwrap_or(Brush::Solid(Rgba8::TRANSPARENT)));
+        self.push_rect_filled(rect, fill.unwrap_or(Fill::Color(Rgba8::TRANSPARENT)));
     }
 
     pub fn clear(&mut self) {

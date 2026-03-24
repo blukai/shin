@@ -996,15 +996,7 @@ impl GlRenderer {
                                     unreachable!();
                                 };
                                 let c = if let Some(ref stroke) = rect_sdf.stroke {
-                                    match stroke.brush {
-                                        sx::Brush::Solid(color) => color,
-                                        // TODO: support texture brushes for sdf strokes.
-                                        //   you must split the main part of the rect, and render
-                                        //   stroke separately.
-                                        sx::Brush::Texture(sx::TextureBrush { .. }) => {
-                                            unimplemented!()
-                                        }
-                                    }
+                                    stroke.color
                                 } else {
                                     sx::Rgba8::TRANSPARENT
                                 }
