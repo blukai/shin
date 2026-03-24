@@ -2,6 +2,11 @@ use std::ffi::{CStr, c_void};
 
 use crate::libgl as gl;
 
+// TODO: uniform slices.
+//   probably replace all of the uniform_1f , uniform_1i , uniform_2f , uniform_4f with their slice
+//   variants.
+//   change args of uniform_matrix_4fv to operate on f32 slice.
+
 // NOTE: why not just use glow?
 // i very don't like that its Api trait does not exactly mirror gl spec.
 // i don't like that it abstracts away certain thigs, i don't want that.
@@ -26,6 +31,8 @@ pub trait Adapter {
     unsafe fn attach_shader(&self, program: Self::Program, shader: Self::Shader);
     unsafe fn bind_attrib_location(&self, program: Self::Program, index: gl::GLuint, name: &CStr);
     unsafe fn bind_buffer(&self, target: gl::GLenum, buffer: Option<Self::Buffer>);
+    unsafe fn bind_buffer_base(&self, target: gl::GLenum, index: gl::GLuint, buffer: Option<Self::Buffer>);
+    unsafe fn bind_buffer_range(&self, target: gl::GLenum, index: gl::GLuint, buffer: Option<Self::Buffer>, offset: gl::GLintptr, size: gl::GLsizeiptr);
     unsafe fn bind_framebuffer(&self, target: gl::GLenum, framebuffer: Option<Self::Framebuffer>);
     unsafe fn bind_renderbuffer(&self, target: gl::GLenum, renderbuffer: Option<Self::Renderbuffer>);
     unsafe fn bind_texture(&self, target: gl::GLenum, texture: Option<Self::Texture>);
@@ -75,6 +82,7 @@ pub trait Adapter {
     unsafe fn get_shader_parameter(&self, shader: Self::Shader, pname: gl::GLenum) -> gl::GLint;
     // TODO: docs say that glGetString returns pointer to a static string. why are we allocating? 
     unsafe fn get_string(&self, name: gl::GLenum) -> Option<String>;
+    unsafe fn get_uniform_block_index(&self, program: gl::GLuint, uniform_block_name: &CStr) -> Option<gl::GLuint>;
     unsafe fn get_uniform_location(&self, program: Self::Program, name: &CStr) -> Option<Self::UniformLocation>;
     unsafe fn link_program(&self, program: Self::Program);
     unsafe fn pixel_storei(&self, pname: gl::GLenum, param: gl::GLint);
@@ -91,6 +99,7 @@ pub trait Adapter {
     unsafe fn uniform_1i(&self, location: Self::UniformLocation, v0: gl::GLint);
     unsafe fn uniform_2f(&self, location: Self::UniformLocation, v0: gl::GLfloat, v1: gl::GLfloat);
     unsafe fn uniform_4f(&self, location: Self::UniformLocation, v0: gl::GLfloat, v1: gl::GLfloat, v2: gl::GLfloat, v3: gl::GLfloat);
+    unsafe fn uniform_block_binding(&self, program: Self::Program, uniform_block_index: gl::GLuint, uniform_block_binding: gl::GLuint);
     unsafe fn uniform_matrix_4fv(&self, location: Self::UniformLocation, count: gl::GLsizei, transpose: gl::GLboolean, value: *const gl::GLfloat);
     unsafe fn use_program(&self, program: Option<Self::Program>);
     unsafe fn vertex_attrib_pointer(&self, index: gl::GLuint, size: gl::GLint, r#type: gl::GLenum, normalized: gl::GLboolean, stride: gl::GLsizei, pointer: *const c_void);
@@ -151,6 +160,30 @@ mod gl46 {
         #[inline]
         unsafe fn bind_buffer(&self, target: gl::GLenum, buffer: Option<Self::Buffer>) {
             unsafe { self.api.BindBuffer(target, buffer.unwrap_or(0)) };
+        }
+
+        #[inline]
+        unsafe fn bind_buffer_base(
+            &self,
+            target: gl::GLenum,
+            index: gl::GLuint,
+            buffer: Option<Self::Buffer>,
+        ) {
+            unsafe { self.api.BindBufferBase(target, index, buffer.unwrap_or(0)) };
+        }
+
+        unsafe fn bind_buffer_range(
+            &self,
+            target: gl::GLenum,
+            index: gl::GLuint,
+            buffer: Option<Self::Buffer>,
+            offset: gl::GLintptr,
+            size: gl::GLsizeiptr,
+        ) {
+            unsafe {
+                self.api
+                    .BindBufferRange(target, index, buffer.unwrap_or(0), offset, size)
+            };
         }
 
         #[inline]
@@ -492,6 +525,23 @@ mod gl46 {
         }
 
         #[inline]
+        unsafe fn get_uniform_block_index(
+            &self,
+            program: gl::GLuint,
+            uniform_block_name: &CStr,
+        ) -> Option<gl::GLuint> {
+            let ret = unsafe {
+                self.api
+                    .GetUniformBlockIndex(program, uniform_block_name.as_ptr())
+            };
+            if ret == gl::INVALID_INDEX {
+                None
+            } else {
+                Some(ret)
+            }
+        }
+
+        #[inline]
         unsafe fn get_uniform_location(
             &self,
             program: Self::Program,
@@ -663,6 +713,19 @@ mod gl46 {
             v3: gl::GLfloat,
         ) {
             unsafe { self.api.Uniform4f(location as gl::GLint, v0, v1, v2, v3) };
+        }
+
+        #[inline]
+        unsafe fn uniform_block_binding(
+            &self,
+            program: Self::Program,
+            uniform_block_index: gl::GLuint,
+            uniform_block_binding: gl::GLuint,
+        ) {
+            unsafe {
+                self.api
+                    .UniformBlockBinding(program, uniform_block_index, uniform_block_binding)
+            };
         }
 
         #[inline]

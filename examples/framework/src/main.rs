@@ -71,8 +71,8 @@ fn draw_text(
                     .bounds()
                     .translate(sx::Vec2::new(x_offset, position.y + font_ascent)),
             )
-            .with_brush(Some(sx::Brush::Texture(
-                sx::TextureBrush::new(glyph.texture_handle())
+            .with_fill(Some(sx::Fill::Texture(
+                sx::TextureFill::new(glyph.texture_handle())
                     .with_coords(glyph.texture_coords())
                     .with_base_color(fg),
             ))),
@@ -189,8 +189,7 @@ impl Context {
         {
             let center_rect = sx::Rect::from_center_size(logical_size * 0.5, 64.0);
             self.draw_buffer.push_rect(
-                sx::RectShape::new(center_rect)
-                    .with_brush(Some(sx::Brush::Solid(sx::Rgba8::MAROON))),
+                sx::RectShape::new(center_rect).with_fill(Some(sx::Fill::Color(sx::Rgba8::MAROON))),
             );
 
             let other_rect = center_rect
@@ -198,10 +197,10 @@ impl Context {
                 .translate(sx::Vec2::splat(16.0));
             self.draw_buffer.push_rect(
                 sx::RectShape::new(other_rect)
-                    .with_brush(Some(sx::Brush::Solid(sx::Rgba8::RED)))
-                    .with_corner_radius(Some(12.0))
+                    .with_fill(Some(sx::Fill::Color(sx::Rgba8::RED)))
+                    .with_corner_radius(Some(8.0))
                     .with_stroke(Some(
-                        sx::Stroke::new(8.0, sx::Brush::Solid(sx::Rgba8::WHITE.with_af(0.5)))
+                        sx::Stroke::new(8.0, sx::Rgba8::WHITE.with_af(0.5))
                             .with_alignment(sx::StrokeAlignment::Center),
                     )),
             );
@@ -227,6 +226,19 @@ impl Context {
                     ),
                 &mut self.texture_service,
                 &mut self.draw_buffer,
+            );
+        }
+
+        {
+            let center_rect = sx::Rect::from_center_size(logical_size * 0.5, 256.0);
+            self.draw_buffer.push_rect(
+                sx::RectShape::new(center_rect)
+                    .with_fill(Some(sx::Fill::Color(sx::Rgba8::TRANSPARENT)))
+                    .with_corner_radius(Some(128.0))
+                    .with_stroke(Some(
+                        sx::Stroke::new(2.0, sx::Rgba8::PURPLE.with_af(0.3))
+                            .with_alignment(sx::StrokeAlignment::Center),
+                    )),
             );
         }
 

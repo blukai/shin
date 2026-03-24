@@ -60,12 +60,12 @@ pub struct TextureCommand<Desc, Buf> {
     pub kind: TextureCommandKind<Desc, Buf>,
 }
 
+// TODO: maybe parametrize texture service with allocator.
 #[derive(Default)]
 pub struct TextureService {
     buf: GrowableArray<u8, alloc::Global>,
     range_alloc: RangeAlloc<usize>,
 
-    // TODO: maybe parametrize texture service with allocator.
     descs: HandleArray<TextureDesc, alloc::Global>,
     commands: GrowableArray<TextureCommand<(), Range<usize>>, alloc::Global>,
 }
@@ -126,8 +126,9 @@ impl TextureService {
     }
 
     pub fn drain_comands(&mut self) -> impl Iterator<Item = TextureCommand<&TextureDesc, &[u8]>> {
-        self.commands.drain(..).map(|cmd| {
-            let kind = match cmd.kind {
+        self.commands.drain(..).map(|cmd| TextureCommand {
+            handle: cmd.handle,
+            kind: match cmd.kind {
                 TextureCommandKind::Create { desc: _ } => TextureCommandKind::Create {
                     desc: self.descs.get(cmd.handle.0),
                 },
@@ -143,11 +144,7 @@ impl TextureService {
                     }
                 }
                 TextureCommandKind::Delete => TextureCommandKind::Delete,
-            };
-            TextureCommand {
-                handle: cmd.handle,
-                kind,
-            }
+            },
         })
     }
 }
