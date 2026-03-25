@@ -36,12 +36,13 @@ const A_TEX_COORD_LOC: gl::GLuint = 1;
 const A_COLOR_LOC: gl::GLuint = 2;
 
 const SHADER: &str = "
+uniform mat4 u_projection;
+uniform float u_scale;
+
 #if defined(SHADER_STAGE_VERTEX)
 layout(location = 0) in vec2 a_position;
 layout(location = 1) in vec2 a_tex_coord;
 layout(location = 2) in vec4 a_color;
-
-uniform mat4 u_projection;
 
 out vec2 v_tex_coord;
 out vec4 v_color;
@@ -158,10 +159,10 @@ void main() {
     FragColor = sdf_rect(
         gl_FragCoord.xy,
         FragColor,
-        u_sdf_rect_center,
-        u_sdf_rect_size,
-        u_sdf_rect_corner_radius,
-        u_sdf_rect_stroke_width,
+        u_sdf_rect_center * u_scale,
+        u_sdf_rect_size * u_scale,
+        u_sdf_rect_corner_radius * u_scale,
+        u_sdf_rect_stroke_width * u_scale,
         u_sdf_rect_stroke_alignment,
         u_sdf_rect_stroke_color
     );
@@ -841,6 +842,10 @@ impl GlRenderer {
                                 sx::ShaderUniformType::Mat4,
                             ),
                             (
+                                sx::ShaderUniformName::new_fixed().with_str("u_scale"),
+                                sx::ShaderUniformType::Float,
+                            ),
+                            (
                                 sx::ShaderUniformName::new_fixed().with_str("u_sampler"),
                                 sx::ShaderUniformType::Sampler2D,
                             ),
@@ -942,10 +947,9 @@ impl GlRenderer {
                                     gl::FALSE,
                                     projection_matrix.as_ptr().cast(),
                                 );
-
-                                gl_api.active_texture(gl::TEXTURE0);
-                                gl_api.bind_texture(gl::TEXTURE_2D, Some(texture.gl_handle));
-                                gl_api.uniform_1i(*location, 0);
+                            }
+                            "u_scale" => {
+                                gl_api.uniform_1f(*location, scale_factor);
                             }
                             "u_sampler" => {
                                 gl_api.active_texture(gl::TEXTURE0);
@@ -954,72 +958,41 @@ impl GlRenderer {
                             }
 
                             "u_sdf_rect_center" => {
-                                let Some(sx::SdfParams::Rect(rect_sdf)) = sdf_params.as_ref()
-                                else {
+                                let Some(sx::SdfParams::Rect(p)) = sdf_params.as_ref() else {
                                     unreachable!();
                                 };
-                                let center = rect_sdf.center * scale_factor;
-                                gl_api.uniform_2f(*location, center.x, center.y);
+                                gl_api.uniform_2f(*location, p.center[0], p.center[1]);
                             }
                             "u_sdf_rect_size" => {
-                                let Some(sx::SdfParams::Rect(rect_sdf)) = sdf_params.as_ref()
-                                else {
+                                let Some(sx::SdfParams::Rect(p)) = sdf_params.as_ref() else {
                                     unreachable!();
                                 };
-                                let size = rect_sdf.size * scale_factor;
-                                gl_api.uniform_2f(*location, size.x, size.y);
+                                gl_api.uniform_2f(*location, p.size[0], p.size[1]);
                             }
                             "u_sdf_rect_corner_radius" => {
-                                let Some(sx::SdfParams::Rect(rect_sdf)) = sdf_params.as_ref()
-                                else {
+                                let Some(sx::SdfParams::Rect(p)) = sdf_params.as_ref() else {
                                     unreachable!();
                                 };
-                                let corner_radius =
-                                    rect_sdf.corner_radius.unwrap_or(0.0) * scale_factor;
-                                gl_api.uniform_1f(*location, corner_radius);
+                                gl_api.uniform_1f(*location, p.corner_radius);
                             }
                             "u_sdf_rect_stroke_width" => {
-                                let Some(sx::SdfParams::Rect(rect_sdf)) = sdf_params.as_ref()
-                                else {
+                                let Some(sx::SdfParams::Rect(p)) = sdf_params.as_ref() else {
                                     unreachable!();
                                 };
-                                let stroke_width = if let Some(ref stroke) = rect_sdf.stroke {
-                                    stroke.width
-                                } else {
-                                    0.0
-                                } * scale_factor;
-                                gl_api.uniform_1f(*location, stroke_width);
+                                gl_api.uniform_1f(*location, p.stroke_width);
                             }
                             "u_sdf_rect_stroke_color" => {
-                                let Some(sx::SdfParams::Rect(rect_sdf)) = sdf_params.as_ref()
-                                else {
+                                let Some(sx::SdfParams::Rect(p)) = sdf_params.as_ref() else {
                                     unreachable!();
                                 };
-                                let c = if let Some(ref stroke) = rect_sdf.stroke {
-                                    stroke.color
-                                } else {
-                                    sx::Rgba8::TRANSPARENT
-                                }
-                                .to_f32_array();
+                                let c = p.stroke_color;
                                 gl_api.uniform_4f(*location, c[0], c[1], c[2], c[3]);
                             }
                             "u_sdf_rect_stroke_alignment" => {
-                                let Some(sx::SdfParams::Rect(rect_sdf)) = sdf_params.as_ref()
-                                else {
+                                let Some(sx::SdfParams::Rect(p)) = sdf_params.as_ref() else {
                                     unreachable!();
                                 };
-                                // NOTE: stroke alignment value convention must be in-sync with the
-                                // shader.
-                                let stroke_alignment = if let Some(ref stroke) = rect_sdf.stroke {
-                                    match stroke.alignment {
-                                        sx::StrokeAlignment::Inside => -1,
-                                        sx::StrokeAlignment::Outside => 1,
-                                        sx::StrokeAlignment::Center => 0,
-                                    }
-                                } else {
-                                    0
-                                };
-                                gl_api.uniform_1i(*location, stroke_alignment);
+                                gl_api.uniform_1i(*location, p.stroke_alignment);
                             }
 
                             other => {

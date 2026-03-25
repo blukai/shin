@@ -39,20 +39,21 @@ pub enum Fill {
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
+#[repr(i32)]
 pub enum StrokeAlignment {
-    Inside,
-    Outside,
+    Inside = -1,
+    Outside = 1,
     // TODO: consider changing default stroke alignment from center to outside.
-    // NOTE: center alignment wouldn't work well with 1px width.
+    // NOTE: center alignment doesn't work well with 1px width.
     #[default]
-    Center,
+    Center = 0,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stroke {
     pub width: f32,
-    pub alignment: StrokeAlignment,
     pub color: Rgba8,
+    pub alignment: StrokeAlignment,
 }
 
 impl Stroke {
@@ -60,8 +61,8 @@ impl Stroke {
     pub fn new(width: f32, color: Rgba8) -> Self {
         Self {
             width,
-            alignment: StrokeAlignment::default(),
             color,
+            alignment: StrokeAlignment::default(),
         }
     }
 
@@ -109,16 +110,6 @@ impl RectShape {
     }
 }
 
-// TODO: get rid of RectSdf.
-//   you want composable shader brushes or something.
-#[derive(Debug, Clone, PartialEq)]
-pub struct RectSdf {
-    pub center: Vec2,
-    pub size: Vec2,
-    pub corner_radius: Option<f32>,
-    pub stroke: Option<Stroke>,
-}
-
 #[derive(Debug)]
 pub struct LineShape {
     pub points: [Vec2; 2],
@@ -137,14 +128,19 @@ impl LineShape {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum SdfParams {
-    Rect(RectSdf),
+pub struct RectSdfParams {
+    pub center: [f32; 2],
+    pub size: [f32; 2],
+    pub corner_radius: f32,
+    pub stroke_width: f32,
+    pub stroke_color: [f32; 4],
+    pub stroke_alignment: i32, // -1 inside, 0 center, 1 outside
 }
 
-// TODO: instancing (to enable batching (vertices will be able to exist in 0..1 coordinate space
-// (probably) and then they can be translated, scaled, rotated with instance transforms (for
-// example this will allow to render all rects within a single draw call? or am i being
-// delusional?))).
+#[derive(Debug, Clone, PartialEq)]
+pub enum SdfParams {
+    Rect(RectSdfParams),
+}
 
 #[repr(C)]
 #[derive(Debug)]
@@ -162,30 +158,30 @@ pub struct Vertex {
 #[derive(Debug)]
 pub struct DrawCommand {
     pub index_range: Range<u32>,
-    pub texture: Option<TextureHandle>,
     pub scissor: Option<Rect>,
+    pub texture: Option<TextureHandle>,
     pub sdf_params: Option<SdfParams>,
 }
 
 #[derive(Debug, Default)]
-pub struct DrawLayerData {
+pub struct DrawData {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
     pub commands: Vec<DrawCommand>,
     pending_indices: u32,
-    current_texture: Option<TextureHandle>,
     current_scissor_rect: Option<Rect>,
+    current_texture: Option<TextureHandle>,
     current_sdf_params: Option<SdfParams>,
 }
 
-impl DrawLayerData {
+impl DrawData {
     fn clear(&mut self) {
         self.vertices.clear();
         self.indices.clear();
         self.commands.clear();
         assert_eq!(self.pending_indices, 0);
-        self.current_texture = None;
         self.current_scissor_rect = None;
+        self.current_texture = None;
         self.current_sdf_params = None;
     }
 
@@ -198,20 +194,12 @@ impl DrawLayerData {
         let start_index = end_index - self.pending_indices;
         self.commands.push(DrawCommand {
             index_range: start_index..end_index,
-            texture: self.current_texture,
             scissor: self.current_scissor_rect,
+            texture: self.current_texture,
             sdf_params: self.current_sdf_params.clone(),
         });
 
         self.pending_indices = 0;
-    }
-
-    fn set_texture(&mut self, texture: Option<TextureHandle>) {
-        if self.current_texture == texture {
-            return;
-        }
-        self.flush();
-        self.current_texture = texture;
     }
 
     fn set_scissor_rect(&mut self, rect: Option<Rect>) {
@@ -225,6 +213,14 @@ impl DrawLayerData {
         }
         self.flush();
         self.current_scissor_rect = next;
+    }
+
+    fn set_texture(&mut self, texture: Option<TextureHandle>) {
+        if self.current_texture == texture {
+            return;
+        }
+        self.flush();
+        self.current_texture = texture;
     }
 
     fn set_sdf_params(&mut self, sdf_params: Option<SdfParams>) {
@@ -243,11 +239,25 @@ impl DrawLayerData {
         });
     }
 
-    fn push_triangle(&mut self, zero: u32, ichi: u32, ni: u32) {
-        self.indices.push(zero);
-        self.indices.push(ichi);
-        self.indices.push(ni);
+    fn push_indices(&mut self, i0: u32, i1: u32, i2: u32) {
+        self.indices.push(i0);
+        self.indices.push(i1);
+        self.indices.push(i2);
         self.pending_indices += 3;
+    }
+
+    fn push_quad(&mut self, rect: Rect, color: Rgba8, tex_coords: Rect) {
+        let i = self.vertices.len() as u32;
+
+        self.push_vertex(rect.top_left(), color, tex_coords.top_left());
+        self.push_vertex(rect.top_right(), color, tex_coords.top_right());
+        self.push_vertex(rect.bottom_right(), color, tex_coords.bottom_right());
+        self.push_vertex(rect.bottom_left(), color, tex_coords.bottom_left());
+
+        // top left -> top right -> bottom right
+        self.push_indices(i + 0, i + 1, i + 2);
+        // bottom right -> bottom left -> top left
+        self.push_indices(i + 2, i + 3, i + 0);
     }
 }
 
@@ -259,7 +269,7 @@ pub struct DrawLayerFlush<'a> {
 }
 
 pub struct DrawLayersDrain<'a> {
-    iter: slice::IterMut<'a, DrawLayerData>,
+    iter: slice::IterMut<'a, DrawData>,
     ptr: NonNull<DrawBuffer>,
 }
 
@@ -303,17 +313,17 @@ impl DrawLayer {
 #[derive(Debug, Default)]
 pub struct DrawBuffer {
     layer: DrawLayer,
-    layers: [DrawLayerData; DrawLayer::MAX],
+    layers: [DrawData; DrawLayer::MAX],
 }
 
 impl DrawBuffer {
     #[inline(always)]
-    fn draw_data(&self) -> &DrawLayerData {
+    fn draw_data(&self) -> &DrawData {
         &self.layers[self.layer as usize]
     }
 
     #[inline(always)]
-    fn draw_data_mut(&mut self) -> &mut DrawLayerData {
+    fn draw_data_mut(&mut self) -> &mut DrawData {
         &mut self.layers[self.layer as usize]
     }
 
@@ -350,17 +360,7 @@ impl DrawBuffer {
 
         let draw_data = self.draw_data_mut();
         draw_data.set_texture(tex_handle);
-        let idx = draw_data.vertices.len() as u32;
-
-        draw_data.push_vertex(rect.top_left(), color, tex_coords.top_left());
-        draw_data.push_vertex(rect.top_right(), color, tex_coords.top_right());
-        draw_data.push_vertex(rect.bottom_right(), color, tex_coords.bottom_right());
-        draw_data.push_vertex(rect.bottom_left(), color, tex_coords.bottom_left());
-
-        // top left -> top right -> bottom right
-        draw_data.push_triangle(idx + 0, idx + 1, idx + 2);
-        // bottom right -> bottom left -> top left
-        draw_data.push_triangle(idx + 2, idx + 3, idx + 0);
+        draw_data.push_quad(rect, color, tex_coords);
     }
 
     pub fn push_line(&mut self, line_shape: LineShape) {
@@ -405,33 +405,47 @@ impl DrawBuffer {
     }
 
     pub fn push_rect(&mut self, rect_shape: RectShape) {
+        let draw_data = self.draw_data_mut();
+
         let RectShape {
             mut rect,
             fill,
             stroke,
             corner_radius,
         } = rect_shape;
-        let maybe_sdf_params = match (stroke, corner_radius) {
-            (None, None) => None,
+        match (stroke, corner_radius) {
+            (None, None) => {
+                draw_data.set_sdf_params(None);
+            }
             (stroke, corner_radius) => {
+                let mut rect_sdf = RectSdfParams {
+                    center: rect.center().to_array(),
+                    size: rect.size().to_array(),
+                    corner_radius: corner_radius.unwrap_or(0.0),
+                    stroke_width: 0.0,
+                    stroke_color: Rgba8::TRANSPARENT.to_f32_array(),
+                    stroke_alignment: StrokeAlignment::default() as i32,
+                };
                 if let Some(ref stroke) = stroke {
-                    rect = match stroke.alignment {
-                        StrokeAlignment::Inside => rect,
-                        StrokeAlignment::Outside => rect.inflate(Vec2::splat(stroke.width)),
-                        StrokeAlignment::Center => rect.inflate(Vec2::splat(stroke.width * 0.5)),
-                    };
+                    rect_sdf.stroke_width = stroke.width;
+                    rect_sdf.stroke_color = stroke.color.to_f32_array();
+                    rect_sdf.stroke_alignment = stroke.alignment as i32;
+                    match stroke.alignment {
+                        StrokeAlignment::Inside => {}
+                        // NOTE: in cases of outside/center outline rect needs to be scaled up.
+                        // this does not change size of the rect, no; but "reserves" space for the
+                        // outline.
+                        StrokeAlignment::Outside => {
+                            rect = rect.inflate(Vec2::splat(stroke.width));
+                        }
+                        StrokeAlignment::Center => {
+                            rect = rect.inflate(Vec2::splat(stroke.width * 0.5));
+                        }
+                    }
                 }
-                Some(SdfParams::Rect(RectSdf {
-                    center: rect_shape.rect.center(),
-                    size: rect_shape.rect.size(),
-                    corner_radius,
-                    stroke,
-                }))
+                draw_data.set_sdf_params(Some(SdfParams::Rect(rect_sdf)));
             }
         };
-
-        let draw_data = self.draw_data_mut();
-        draw_data.set_sdf_params(maybe_sdf_params);
 
         self.push_rect_filled(rect, fill.unwrap_or(Fill::Color(Rgba8::TRANSPARENT)));
     }
