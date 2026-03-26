@@ -1,7 +1,4 @@
 use std::ops::Range;
-use std::ptr::NonNull;
-use std::slice;
-use std::vec::Drain;
 
 use crate::{Rect, Rgba8, TextureHandle, Vec2};
 
@@ -261,70 +258,23 @@ impl DrawData {
     }
 }
 
-pub struct DrawLayerFlush<'a> {
-    pub vertices: &'a [Vertex],
-    pub indices: &'a [u32],
-    // drain so that you can take ownership of values
-    pub commands: Drain<'a, DrawCommand>,
-}
-
-pub struct DrawLayersDrain<'a> {
-    iter: slice::IterMut<'a, DrawData>,
-    ptr: NonNull<DrawBuffer>,
-}
-
-impl<'a> Iterator for DrawLayersDrain<'a> {
-    type Item = DrawLayerFlush<'a>;
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(|layer| {
-            layer.flush();
-            DrawLayerFlush {
-                vertices: layer.vertices.as_slice(),
-                indices: layer.indices.as_slice(),
-                commands: layer.commands.drain(..),
-            }
-        })
-    }
-}
-
-impl<'a> Drop for DrawLayersDrain<'a> {
-    fn drop(&mut self) {
-        // SAFETY: we have exclusive access to draw buffer
-        unsafe { self.ptr.as_mut() }.clear();
-    }
-}
-
-// NOTE: the initial idea for why i did implement this didn't work out, but it doesn't mean that
-// the implementation is completely useless. this will probably work pretty well for tooptips and
-// stuff.
-#[repr(usize)]
-#[derive(Debug, Default, Clone, Copy)]
-pub enum DrawLayer {
-    #[default]
-    Main,
-}
-
-impl DrawLayer {
-    pub const MAX: usize = 1;
-}
-
+// NOTE: this will go away (i think).
 #[derive(Debug, Default)]
 pub struct DrawBuffer {
-    layer: DrawLayer,
-    layers: [DrawData; DrawLayer::MAX],
+    draw_data: DrawData,
 }
 
 impl DrawBuffer {
-    #[inline(always)]
-    fn draw_data(&self) -> &DrawData {
-        &self.layers[self.layer as usize]
+    pub fn flush(&mut self) {
+        self.draw_data.flush();
     }
 
-    #[inline(always)]
-    fn draw_data_mut(&mut self) -> &mut DrawData {
-        &mut self.layers[self.layer as usize]
+    pub fn draw_data(&self) -> &DrawData {
+        &self.draw_data
+    }
+
+    pub fn clear(&mut self) {
+        self.draw_data.clear();
     }
 
     // NOTE: you don't this to have methods that return ScopeGuard.
@@ -332,20 +282,12 @@ impl DrawBuffer {
     // rules).
     // if you want scope guard thing - you should implement it at application-level.
 
-    pub fn layer(&mut self) -> DrawLayer {
-        self.layer
-    }
-
-    pub fn set_layer(&mut self, layer: DrawLayer) {
-        self.layer = layer;
-    }
-
     pub fn scissor_rect(&self) -> Option<Rect> {
-        self.draw_data().current_scissor_rect
+        self.draw_data.current_scissor_rect
     }
 
     pub fn set_scissor_rect(&mut self, rect: Option<Rect>) {
-        self.draw_data_mut().set_scissor_rect(rect)
+        self.draw_data.set_scissor_rect(rect)
     }
 
     fn push_rect_filled(&mut self, rect: Rect, fill: Fill) {
@@ -358,9 +300,8 @@ impl DrawBuffer {
             }) => (base_color, coords, Some(handle)),
         };
 
-        let draw_data = self.draw_data_mut();
-        draw_data.set_texture(tex_handle);
-        draw_data.push_quad(rect, color, tex_coords);
+        self.draw_data.set_texture(tex_handle);
+        self.draw_data.push_quad(rect, color, tex_coords);
     }
 
     pub fn push_line(&mut self, line_shape: LineShape) {
@@ -373,8 +314,7 @@ impl DrawBuffer {
         ));
 
         // NOTE: there's no sdf params for line.
-        let draw_data = self.draw_data_mut();
-        draw_data.set_sdf_params(None);
+        self.draw_data.set_sdf_params(None);
 
         // computes the vertex position offset away the from center caused by line width.
         #[inline]
@@ -405,8 +345,6 @@ impl DrawBuffer {
     }
 
     pub fn push_rect(&mut self, rect_shape: RectShape) {
-        let draw_data = self.draw_data_mut();
-
         let RectShape {
             mut rect,
             fill,
@@ -415,7 +353,7 @@ impl DrawBuffer {
         } = rect_shape;
         match (stroke, corner_radius) {
             (None, None) => {
-                draw_data.set_sdf_params(None);
+                self.draw_data.set_sdf_params(None);
             }
             (stroke, corner_radius) => {
                 let mut rect_sdf = RectSdfParams {
@@ -443,23 +381,11 @@ impl DrawBuffer {
                         }
                     }
                 }
-                draw_data.set_sdf_params(Some(SdfParams::Rect(rect_sdf)));
+                self.draw_data
+                    .set_sdf_params(Some(SdfParams::Rect(rect_sdf)));
             }
         };
 
         self.push_rect_filled(rect, fill.unwrap_or(Fill::Color(Rgba8::TRANSPARENT)));
-    }
-
-    pub fn clear(&mut self) {
-        for layer in &mut self.layers {
-            layer.clear();
-        }
-    }
-
-    pub fn drain_layers<'a>(&'a mut self) -> DrawLayersDrain<'a> {
-        DrawLayersDrain {
-            ptr: unsafe { NonNull::new_unchecked(self) },
-            iter: self.layers.iter_mut(),
-        }
     }
 }

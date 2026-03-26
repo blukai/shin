@@ -709,7 +709,7 @@ impl GlRenderer {
         &mut self,
         logical_size: sx::Vec2,
         scale_factor: f32,
-        draw_layers: sx::DrawLayersDrain<'_>,
+        draw_data: &sx::DrawData,
         gl_api: &gl::wrap::Api,
         temp: &TempAllocator<'_>,
     ) -> anyhow::Result<()> {
@@ -772,242 +772,238 @@ impl GlRenderer {
             gl_api.bind_vertex_array(Some(self.vao));
         }
 
-        for sx::DrawLayerFlush {
+        let sx::DrawData {
             vertices,
             indices,
             commands,
-        } in draw_layers
+            ..
+        } = draw_data;
+        unsafe {
+            // TODO: should probably do buffer_sub_data here?
+            gl_api.buffer_data(
+                gl::ARRAY_BUFFER,
+                (vertices.len() * size_of::<sx::Vertex>()) as gl::GLsizeiptr,
+                vertices.as_ptr().cast(),
+                gl::STREAM_DRAW,
+            );
+            gl_api.buffer_data(
+                gl::ELEMENT_ARRAY_BUFFER,
+                (indices.len() * size_of::<u32>()) as gl::GLsizeiptr,
+                indices.as_ptr().cast(),
+                gl::STREAM_DRAW,
+            );
+        }
+
+        for sx::DrawCommand {
+            index_range,
+            texture,
+            scissor,
+            sdf_params,
+        } in commands
         {
-            unsafe {
-                // TODO: should probably do buffer_sub_data here?
-                gl_api.buffer_data(
-                    gl::ARRAY_BUFFER,
-                    (vertices.len() * size_of::<sx::Vertex>()) as gl::GLsizeiptr,
-                    vertices.as_ptr().cast(),
-                    gl::STREAM_DRAW,
+            let _maybe_scissor_guard = scissor.map(|logical_rect| {
+                // NOTE: scissor needs to be aware of y flip.
+                //   projection matrix does not flip y, it's opengl-specific.
+                //   glBlitFramebuffer flips y.
+                //
+                // NOTE: everything on the cpu is in @LogicalPixels.
+                //   scissor rect needs to be scaled.
+                let physical_rect = logical_rect.scale(scale_factor);
+                let x = physical_rect.min.x as i32;
+                let y = physical_rect.min.y as i32;
+                let w = physical_rect.width() as i32;
+                let h = physical_rect.height() as i32;
+                unsafe {
+                    gl_api.enable(gl::SCISSOR_TEST);
+                    gl_api.scissor(x, y, w, h);
+                }
+                ScopeGuard::new(|| unsafe { gl_api.disable(gl::SCISSOR_TEST) })
+            });
+
+            let mut shader_desc = sx::ShaderDesc {
+                vertex_stage: sx::ShaderStageDesc {
+                    source: SHADER_SOURCE.clone(),
+                    defines: sx::ShaderDefines::default().with_iter(
+                        [sx::ShaderDefine::new_fixed().with_str("SHADER_STAGE_VERTEX")].into_iter(),
+                    ),
+                },
+                fragment_stage: sx::ShaderStageDesc {
+                    source: SHADER_SOURCE.clone(),
+                    defines: sx::ShaderDefines::default().with_iter(
+                        [sx::ShaderDefine::new_fixed().with_str("SHADER_STAGE_FRAGMENT")]
+                            .into_iter(),
+                    ),
+                },
+                uniforms: sx::ShaderUniformDescs::default().with_iter(
+                    [
+                        (
+                            sx::ShaderUniformName::new_fixed().with_str("u_projection"),
+                            sx::ShaderUniformType::Mat4,
+                        ),
+                        (
+                            sx::ShaderUniformName::new_fixed().with_str("u_scale"),
+                            sx::ShaderUniformType::Float,
+                        ),
+                        (
+                            sx::ShaderUniformName::new_fixed().with_str("u_sampler"),
+                            sx::ShaderUniformType::Sampler2D,
+                        ),
+                    ]
+                    .into_iter(),
+                ),
+            };
+
+            let texture = if let Some(handle) = texture {
+                self.textures.get(&handle).expect("invalid handle")
+            } else {
+                &self.default_white_texture
+            };
+            shader_desc
+                .fragment_stage
+                .defines
+                .insert(
+                    sx::ShaderDefine::new_fixed().with_str(match texture.format {
+                        sx::TextureFormat::Rgba8Unorm => "TEXTURE_FORMAT_RGBA8",
+                        sx::TextureFormat::R8Unorm => "TEXTURE_FORMAT_R8",
+                    }),
                 );
-                gl_api.buffer_data(
-                    gl::ELEMENT_ARRAY_BUFFER,
-                    (indices.len() * size_of::<u32>()) as gl::GLsizeiptr,
-                    indices.as_ptr().cast(),
-                    gl::STREAM_DRAW,
-                );
+
+            if let Some(sdf_params) = sdf_params.as_ref() {
+                use sx::ShaderUniformType as Type;
+                match sdf_params {
+                    sx::SdfParams::Rect(..) => {
+                        shader_desc.fragment_stage.defines.extend_from_iter(
+                            [sx::ShaderDefine::new_fixed().with_str("SDF_RECT")].into_iter(),
+                        );
+
+                        shader_desc.uniforms.extend_from_iter(
+                            [
+                                (
+                                    sx::ShaderUniformName::new_fixed()
+                                        .with_str("u_sdf_rect_center"),
+                                    Type::Vec2,
+                                ),
+                                (
+                                    sx::ShaderUniformName::new_fixed().with_str("u_sdf_rect_size"),
+                                    Type::Vec2,
+                                ),
+                                (
+                                    sx::ShaderUniformName::new_fixed()
+                                        .with_str("u_sdf_rect_corner_radius"),
+                                    Type::Float,
+                                ),
+                                (
+                                    sx::ShaderUniformName::new_fixed()
+                                        .with_str("u_sdf_rect_stroke_width"),
+                                    Type::Float,
+                                ),
+                                (
+                                    sx::ShaderUniformName::new_fixed()
+                                        .with_str("u_sdf_rect_stroke_color"),
+                                    Type::Vec4,
+                                ),
+                                (
+                                    sx::ShaderUniformName::new_fixed()
+                                        .with_str("u_sdf_rect_stroke_alignment"),
+                                    Type::Int,
+                                ),
+                            ]
+                            .into_iter(),
+                        );
+                    }
+                }
             }
 
-            for sx::DrawCommand {
-                index_range,
-                texture,
-                scissor,
-                sdf_params,
-            } in commands
-            {
-                let _maybe_scissor_guard = scissor.map(|logical_rect| {
-                    // NOTE: scissor needs to be aware of y flip.
-                    //   projection matrix does not flip y, it's opengl-specific.
-                    //   glBlitFramebuffer flips y.
-                    //
-                    // NOTE: everything on the cpu is in @LogicalPixels.
-                    //   scissor rect needs to be scaled.
-                    let physical_rect = logical_rect.scale(scale_factor);
-                    let x = physical_rect.min.x as i32;
-                    let y = physical_rect.min.y as i32;
-                    let w = physical_rect.width() as i32;
-                    let h = physical_rect.height() as i32;
-                    unsafe {
-                        gl_api.enable(gl::SCISSOR_TEST);
-                        gl_api.scissor(x, y, w, h);
-                    }
-                    ScopeGuard::new(|| unsafe { gl_api.disable(gl::SCISSOR_TEST) })
-                });
+            let shader_key = hash_shader_desc(&shader_desc);
+            let shader = match self.shaders.entry(shader_key) {
+                hash_map::Entry::Occupied(x) => x.into_mut(),
+                hash_map::Entry::Vacant(x) => {
+                    let shader = Shader::new(&shader_desc, gl_api, temp).with_context(|| {
+                        // TODO: can i use temp alloc here? it needs to be send+sync for some
+                        // fucking reason.
+                        std::format!("could not create shader\n{shader_desc:?}")
+                    })?;
+                    x.insert(shader)
+                }
+            };
 
-                let mut shader_desc = sx::ShaderDesc {
-                    vertex_stage: sx::ShaderStageDesc {
-                        source: SHADER_SOURCE.clone(),
-                        defines: sx::ShaderDefines::default().with_iter(
-                            [sx::ShaderDefine::new_fixed().with_str("SHADER_STAGE_VERTEX")]
-                                .into_iter(),
-                        ),
-                    },
-                    fragment_stage: sx::ShaderStageDesc {
-                        source: SHADER_SOURCE.clone(),
-                        defines: sx::ShaderDefines::default().with_iter(
-                            [sx::ShaderDefine::new_fixed().with_str("SHADER_STAGE_FRAGMENT")]
-                                .into_iter(),
-                        ),
-                    },
-                    uniforms: sx::ShaderUniformDescs::default().with_iter(
-                        [
-                            (
-                                sx::ShaderUniformName::new_fixed().with_str("u_projection"),
-                                sx::ShaderUniformType::Mat4,
-                            ),
-                            (
-                                sx::ShaderUniformName::new_fixed().with_str("u_scale"),
-                                sx::ShaderUniformType::Float,
-                            ),
-                            (
-                                sx::ShaderUniformName::new_fixed().with_str("u_sampler"),
-                                sx::ShaderUniformType::Sampler2D,
-                            ),
-                        ]
-                        .into_iter(),
-                    ),
-                };
+            unsafe {
+                gl_api.use_program(Some(shader.gl_handle));
 
-                let texture = if let Some(handle) = texture {
-                    self.textures.get(&handle).expect("invalid handle")
-                } else {
-                    &self.default_white_texture
-                };
-                shader_desc
-                    .fragment_stage
-                    .defines
-                    .insert(
-                        sx::ShaderDefine::new_fixed().with_str(match texture.format {
-                            sx::TextureFormat::Rgba8Unorm => "TEXTURE_FORMAT_RGBA8",
-                            sx::TextureFormat::R8Unorm => "TEXTURE_FORMAT_R8",
-                        }),
-                    );
-
-                if let Some(sdf_params) = sdf_params.as_ref() {
-                    use sx::ShaderUniformType as Type;
-                    match sdf_params {
-                        sx::SdfParams::Rect(..) => {
-                            shader_desc.fragment_stage.defines.extend_from_iter(
-                                [sx::ShaderDefine::new_fixed().with_str("SDF_RECT")].into_iter(),
+                // NOTE: everything on the cpu is in @LogicalPixels.
+                //   uniforms that carry size/coord data must be scaled.
+                //
+                // NOTE: this is somewhat awkward,
+                //   but still i prefer this loop over individual lookups for each loc.
+                for (name, location) in shader.uniform_locations.0.iter() {
+                    match name.as_str() {
+                        "u_projection" => {
+                            gl_api.uniform_matrix_4fv(
+                                *location,
+                                1,
+                                gl::FALSE,
+                                projection_matrix.as_ptr().cast(),
                             );
+                        }
+                        "u_scale" => {
+                            gl_api.uniform_1f(*location, scale_factor);
+                        }
+                        "u_sampler" => {
+                            gl_api.active_texture(gl::TEXTURE0);
+                            gl_api.bind_texture(gl::TEXTURE_2D, Some(texture.gl_handle));
+                            gl_api.uniform_1i(*location, 0);
+                        }
 
-                            shader_desc.uniforms.extend_from_iter(
-                                [
-                                    (
-                                        sx::ShaderUniformName::new_fixed()
-                                            .with_str("u_sdf_rect_center"),
-                                        Type::Vec2,
-                                    ),
-                                    (
-                                        sx::ShaderUniformName::new_fixed()
-                                            .with_str("u_sdf_rect_size"),
-                                        Type::Vec2,
-                                    ),
-                                    (
-                                        sx::ShaderUniformName::new_fixed()
-                                            .with_str("u_sdf_rect_corner_radius"),
-                                        Type::Float,
-                                    ),
-                                    (
-                                        sx::ShaderUniformName::new_fixed()
-                                            .with_str("u_sdf_rect_stroke_width"),
-                                        Type::Float,
-                                    ),
-                                    (
-                                        sx::ShaderUniformName::new_fixed()
-                                            .with_str("u_sdf_rect_stroke_color"),
-                                        Type::Vec4,
-                                    ),
-                                    (
-                                        sx::ShaderUniformName::new_fixed()
-                                            .with_str("u_sdf_rect_stroke_alignment"),
-                                        Type::Int,
-                                    ),
-                                ]
-                                .into_iter(),
-                            );
+                        "u_sdf_rect_center" => {
+                            let Some(sx::SdfParams::Rect(p)) = sdf_params.as_ref() else {
+                                unreachable!();
+                            };
+                            gl_api.uniform_2f(*location, p.center[0], p.center[1]);
+                        }
+                        "u_sdf_rect_size" => {
+                            let Some(sx::SdfParams::Rect(p)) = sdf_params.as_ref() else {
+                                unreachable!();
+                            };
+                            gl_api.uniform_2f(*location, p.size[0], p.size[1]);
+                        }
+                        "u_sdf_rect_corner_radius" => {
+                            let Some(sx::SdfParams::Rect(p)) = sdf_params.as_ref() else {
+                                unreachable!();
+                            };
+                            gl_api.uniform_1f(*location, p.corner_radius);
+                        }
+                        "u_sdf_rect_stroke_width" => {
+                            let Some(sx::SdfParams::Rect(p)) = sdf_params.as_ref() else {
+                                unreachable!();
+                            };
+                            gl_api.uniform_1f(*location, p.stroke_width);
+                        }
+                        "u_sdf_rect_stroke_color" => {
+                            let Some(sx::SdfParams::Rect(p)) = sdf_params.as_ref() else {
+                                unreachable!();
+                            };
+                            let c = p.stroke_color;
+                            gl_api.uniform_4f(*location, c[0], c[1], c[2], c[3]);
+                        }
+                        "u_sdf_rect_stroke_alignment" => {
+                            let Some(sx::SdfParams::Rect(p)) = sdf_params.as_ref() else {
+                                unreachable!();
+                            };
+                            gl_api.uniform_1i(*location, p.stroke_alignment);
+                        }
+
+                        other => {
+                            log::warn!("uniform {other} was left unset");
                         }
                     }
                 }
 
-                let shader_key = hash_shader_desc(&shader_desc);
-                let shader = match self.shaders.entry(shader_key) {
-                    hash_map::Entry::Occupied(x) => x.into_mut(),
-                    hash_map::Entry::Vacant(x) => {
-                        let shader =
-                            Shader::new(&shader_desc, gl_api, temp).with_context(|| {
-                                // TODO: can i use temp alloc here? it needs to be send+sync for some
-                                // fucking reason.
-                                std::format!("could not create shader\n{shader_desc:?}")
-                            })?;
-                        x.insert(shader)
-                    }
-                };
-
-                unsafe {
-                    gl_api.use_program(Some(shader.gl_handle));
-
-                    // NOTE: everything on the cpu is in @LogicalPixels.
-                    //   uniforms that carry size/coord data must be scaled.
-                    //
-                    // NOTE: this is somewhat awkward,
-                    //   but still i prefer this loop over individual lookups for each loc.
-                    for (name, location) in shader.uniform_locations.0.iter() {
-                        match name.as_str() {
-                            "u_projection" => {
-                                gl_api.uniform_matrix_4fv(
-                                    *location,
-                                    1,
-                                    gl::FALSE,
-                                    projection_matrix.as_ptr().cast(),
-                                );
-                            }
-                            "u_scale" => {
-                                gl_api.uniform_1f(*location, scale_factor);
-                            }
-                            "u_sampler" => {
-                                gl_api.active_texture(gl::TEXTURE0);
-                                gl_api.bind_texture(gl::TEXTURE_2D, Some(texture.gl_handle));
-                                gl_api.uniform_1i(*location, 0);
-                            }
-
-                            "u_sdf_rect_center" => {
-                                let Some(sx::SdfParams::Rect(p)) = sdf_params.as_ref() else {
-                                    unreachable!();
-                                };
-                                gl_api.uniform_2f(*location, p.center[0], p.center[1]);
-                            }
-                            "u_sdf_rect_size" => {
-                                let Some(sx::SdfParams::Rect(p)) = sdf_params.as_ref() else {
-                                    unreachable!();
-                                };
-                                gl_api.uniform_2f(*location, p.size[0], p.size[1]);
-                            }
-                            "u_sdf_rect_corner_radius" => {
-                                let Some(sx::SdfParams::Rect(p)) = sdf_params.as_ref() else {
-                                    unreachable!();
-                                };
-                                gl_api.uniform_1f(*location, p.corner_radius);
-                            }
-                            "u_sdf_rect_stroke_width" => {
-                                let Some(sx::SdfParams::Rect(p)) = sdf_params.as_ref() else {
-                                    unreachable!();
-                                };
-                                gl_api.uniform_1f(*location, p.stroke_width);
-                            }
-                            "u_sdf_rect_stroke_color" => {
-                                let Some(sx::SdfParams::Rect(p)) = sdf_params.as_ref() else {
-                                    unreachable!();
-                                };
-                                let c = p.stroke_color;
-                                gl_api.uniform_4f(*location, c[0], c[1], c[2], c[3]);
-                            }
-                            "u_sdf_rect_stroke_alignment" => {
-                                let Some(sx::SdfParams::Rect(p)) = sdf_params.as_ref() else {
-                                    unreachable!();
-                                };
-                                gl_api.uniform_1i(*location, p.stroke_alignment);
-                            }
-
-                            other => {
-                                log::warn!("uniform {other} was left unset");
-                            }
-                        }
-                    }
-
-                    gl_api.draw_elements(
-                        gl::TRIANGLES,
-                        index_range.len() as gl::GLsizei,
-                        gl::UNSIGNED_INT,
-                        (index_range.start * size_of::<u32>() as u32) as *const c_void,
-                    );
-                }
+                gl_api.draw_elements(
+                    gl::TRIANGLES,
+                    index_range.len() as gl::GLsizei,
+                    gl::UNSIGNED_INT,
+                    (index_range.start * size_of::<u32>() as u32) as *const c_void,
+                );
             }
         }
 

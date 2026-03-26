@@ -233,14 +233,15 @@ impl Context {
         self.gl_renderer
             .handle_texture_commands(texture_commands, &self.gl_context.api)?;
 
-        let draw_layers = self.draw_buffer.drain_layers();
+        self.draw_buffer.flush();
         self.gl_renderer.render(
             logical_size,
             scale_factor,
-            draw_layers,
+            self.draw_buffer.draw_data(),
             &self.gl_context.api,
             temp,
         )?;
+        self.draw_buffer.clear();
 
         self.gl_renderer.render_to_screen(&self.gl_context.api)?;
         self.gl_context.swap_window_buffers(raw_window_handle)?;
