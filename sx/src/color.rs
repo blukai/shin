@@ -71,6 +71,11 @@ impl Rgba8 {
         ]
     }
 
+    #[inline]
+    pub const fn to_array(self) -> [u8; 4] {
+        unsafe { mem::transmute(self) }
+    }
+
     pub const fn with_a(mut self, a: u8) -> Self {
         self.a = a;
         self

@@ -1,11 +1,66 @@
 use std::ops::Range;
+use std::slice;
 
-use mars::alloc;
+use mars::alloc::{self, Allocator};
 use mars::array::GrowableArray;
 use mars::sortedarray::SpillableSortedArrayMap;
 use mars::string::FixedString;
 
 use crate::{Rect, Rgba8, TextureHandle, Vec2};
+
+pub const NAME_MAX_LEN: usize = 32;
+pub const VERTEX_ATTRIBUTES_INITIAL_CAP: usize = 5;
+
+// TODO: move cast slice somewhere more appropriate.
+
+// TODO: draw data with attribute layout set at creation.
+//   do only 2d xcu for now.
+//   keep only indices, and 2d xcu vertex and quad.
+
+// TODO: cast's A and B must be Copy.
+//   > Copy represents values that can be cloned via memcpy and which lack destructors
+//   ("plain old data").
+//   - https://smallcultfollowing.com/babysteps/blog/2024/06/26/claim-followup-1/
+//
+// NOTE: this is stolen from bytemuck.
+//
+// PANICS:
+//   - if attempting to cast between a zst and a non-zst
+//   - if the total bytes can't be evenly divided by the target type's size
+//   - if the target type's alignment exceeds the source pointer's alignment
+#[inline]
+pub fn cast_slice<A, B>(a: &[A]) -> &[B] {
+    // TODO: might want to throw a cold hint onto this branch
+    // handle zero-sized types (zsts)
+    if size_of::<A>() == 0 || size_of::<B>() == 0 {
+        assert!(
+            size_of::<A>() == size_of::<B>(),
+            "cannot cast between zst and non-zst types"
+        );
+        assert!(
+            align_of::<B>() <= align_of::<A>(),
+            "zst target alignment can't exceed source"
+        );
+
+        // for zsts, the length remains the same as no actual data is stored.
+        return unsafe { slice::from_raw_parts(a.as_ptr().cast(), a.len()) };
+    }
+
+    // ensure total bytes are divisible by the size of B
+    assert!(
+        size_of_val(a) % size_of::<B>() == 0,
+        "slice length is incompatible"
+    );
+
+    // check alignment compatibility
+    assert!(
+        a.as_ptr().align_offset(align_of::<B>()) == 0,
+        "pointer is not aligned"
+    );
+
+    let new_len = size_of_val(a) / size_of::<B>();
+    unsafe { slice::from_raw_parts(a.as_ptr() as *const B, new_len) }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PipelineId(pub u32);
@@ -16,29 +71,118 @@ impl Default for PipelineId {
     }
 }
 
-// TODO: do the dynamic vertex attribute thing.
-#[repr(C)]
-#[derive(Debug)]
-pub struct Vertex {
-    /// screen pixel coordinates.
-    /// 0, 0 is the top left corner of the screen.
-    pub position: Vec2,
-    pub color: Rgba8,
-    /// normalized texture coordinates.
-    /// 0, 0 is the top left corner of the texture.
-    /// 1, 1 is the bottom right corner of the texture.
-    pub uv: Vec2,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum VertexAttributeSemantic {
+    Position,
+    Normal,
+    Tangent,
+    Uv(u8),
+    Color(u8),
+    Joints(u8),
+    Weights(u8),
+    Custom(u32),
 }
 
-pub const NAME_MAX_LEN: usize = 32;
-pub type Name = FixedString<NAME_MAX_LEN>;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum VertexAttributeFormat {
+    Float32x2,
+    Float32x3,
+    Float32x4,
+    Unorm8x4,
+}
+
+impl VertexAttributeFormat {
+    pub fn components(&self) -> usize {
+        match self {
+            Self::Float32x2 => 2,
+            Self::Float32x3 => 3,
+            Self::Float32x4 => 4,
+            Self::Unorm8x4 => 4,
+        }
+    }
+
+    pub fn size(&self) -> usize {
+        match self {
+            Self::Float32x2 => size_of::<f32>() * 2,
+            Self::Float32x3 => size_of::<f32>() * 3,
+            Self::Float32x4 => size_of::<f32>() * 4,
+            Self::Unorm8x4 => size_of::<u8>() * 4,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct VertexAttribute {
+    // TODO: name.
+    // pub name: FixedString<NAME_MAX_LEN>,
+    pub semantic: VertexAttributeSemantic,
+    pub format: VertexAttributeFormat,
+}
+
+impl VertexAttribute {
+    pub const POSITION2: VertexAttribute = VertexAttribute {
+        semantic: VertexAttributeSemantic::Position,
+        format: VertexAttributeFormat::Float32x2,
+    };
+    pub const COLOR: VertexAttribute = VertexAttribute {
+        semantic: VertexAttributeSemantic::Color(0),
+        format: VertexAttributeFormat::Unorm8x4,
+    };
+    pub const UV2: VertexAttribute = VertexAttribute {
+        semantic: VertexAttributeSemantic::Uv(0),
+        format: VertexAttributeFormat::Float32x2,
+    };
+}
+
+#[derive(Debug, Clone)]
+pub enum VertexAttributeValues<A: Allocator> {
+    Float32x2(GrowableArray<[f32; 2], A>),
+    Float32x3(GrowableArray<[f32; 3], A>),
+    Float32x4(GrowableArray<[f32; 4], A>),
+    Unorm8x4(GrowableArray<[u8; 4], A>),
+}
+
+impl<A: Allocator> VertexAttributeValues<A> {
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Float32x2(values) => values.len(),
+            Self::Float32x3(values) => values.len(),
+            Self::Float32x4(values) => values.len(),
+            Self::Unorm8x4(values) => values.len(),
+        }
+    }
+
+    pub fn clear(&mut self) {
+        match self {
+            Self::Float32x2(values) => values.clear(),
+            Self::Float32x3(values) => values.clear(),
+            Self::Float32x4(values) => values.clear(),
+            Self::Unorm8x4(values) => values.clear(),
+        }
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        match self {
+            Self::Float32x2(values) => cast_slice(values),
+            Self::Float32x3(values) => cast_slice(values),
+            Self::Float32x4(values) => cast_slice(values),
+            Self::Unorm8x4(values) => cast_slice(values),
+        }
+    }
+
+    pub fn format(&self) -> VertexAttributeFormat {
+        match self {
+            Self::Float32x2(_) => VertexAttributeFormat::Float32x2,
+            Self::Float32x3(_) => VertexAttributeFormat::Float32x3,
+            Self::Float32x4(_) => VertexAttributeFormat::Float32x4,
+            Self::Unorm8x4(_) => VertexAttributeFormat::Unorm8x4,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UniformValue {
     Int(i32),
-    Int2([i32; 2]),
-    Int3([i32; 3]),
-    Int4([i32; 4]),
     Float(f32),
     Float2([f32; 2]),
     Float3([f32; 3]),
@@ -55,8 +199,10 @@ pub struct MaterialDesc<'a> {
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Material {
     pub pipeline: PipelineId,
-    pub textures: SpillableSortedArrayMap<Name, TextureHandle, 2, alloc::Global>,
-    pub uniforms: SpillableSortedArrayMap<Name, UniformValue, 16, alloc::Global>,
+    pub textures:
+        SpillableSortedArrayMap<FixedString<NAME_MAX_LEN>, TextureHandle, 2, alloc::Global>,
+    pub uniforms:
+        SpillableSortedArrayMap<FixedString<NAME_MAX_LEN>, UniformValue, 16, alloc::Global>,
 }
 
 impl Material {
@@ -68,34 +214,34 @@ impl Material {
         };
         for (name, handle) in desc.textures.iter() {
             this.textures
-                .insert(Name::new_fixed().with_str(name), *handle);
+                .insert(FixedString::new_fixed().with_str(name), *handle);
         }
         for (name, value) in desc.uniforms.iter() {
             this.uniforms
-                .insert(Name::new_fixed().with_str(name), *value);
+                .insert(FixedString::new_fixed().with_str(name), *value);
         }
         this
     }
 
     pub fn set_texture(&mut self, name: &str, handle: TextureHandle) {
         self.textures
-            .insert(Name::new_fixed().with_str(name), handle);
+            .insert(FixedString::new_fixed().with_str(name), handle);
     }
 
     pub fn get_texture(&self, name: &str) -> Option<TextureHandle> {
         self.textures
-            .get(&Name::new_fixed().with_str(name))
+            .get(&FixedString::new_fixed().with_str(name))
             .copied()
     }
 
     pub fn set_uniform(&mut self, name: &str, value: UniformValue) {
         self.uniforms
-            .insert(Name::new_fixed().with_str(name), value);
+            .insert(FixedString::new_fixed().with_str(name), value);
     }
 
     pub fn get_uniform(&self, name: &str) -> Option<UniformValue> {
         self.uniforms
-            .get(&Name::new_fixed().with_str(name))
+            .get(&FixedString::new_fixed().with_str(name))
             .copied()
     }
 }
@@ -183,7 +329,12 @@ pub struct DrawCommand {
 
 #[derive(Debug, Default)]
 pub struct DrawData {
-    pub vertices: GrowableArray<Vertex, alloc::Global>,
+    pub attributes: SpillableSortedArrayMap<
+        VertexAttribute,
+        VertexAttributeValues<alloc::Global>,
+        VERTEX_ATTRIBUTES_INITIAL_CAP,
+        alloc::Global,
+    >,
     pub indices: GrowableArray<u32, alloc::Global>,
     pub commands: GrowableArray<DrawCommand, alloc::Global>,
     pending_indices: u32,
@@ -193,7 +344,9 @@ pub struct DrawData {
 
 impl DrawData {
     pub fn clear(&mut self) {
-        self.vertices.clear();
+        for (_, values) in self.attributes.0.iter_mut() {
+            values.clear()
+        }
         self.indices.clear();
         self.commands.clear();
         assert_eq!(self.pending_indices, 0);
@@ -253,15 +406,52 @@ impl DrawData {
     //   guard sucked.
 
     fn push_vertex_xcu2(&mut self, position: Vec2, color: Rgba8, uv: Vec2) {
-        self.vertices.push(Vertex {
-            position,
-            color,
-            uv,
-        });
+        if !self.attributes.contains(&VertexAttribute::POSITION2) {
+            self.attributes.insert(
+                VertexAttribute::POSITION2,
+                VertexAttributeValues::Float32x2(GrowableArray::default()),
+            );
+        }
+        let Some(VertexAttributeValues::Float32x2(values)) =
+            self.attributes.get_mut(&VertexAttribute::POSITION2)
+        else {
+            unreachable!();
+        };
+        values.push(position.to_array());
+
+        if !self.attributes.contains(&VertexAttribute::COLOR) {
+            self.attributes.insert(
+                VertexAttribute::COLOR,
+                VertexAttributeValues::Unorm8x4(GrowableArray::default()),
+            );
+        }
+        let Some(VertexAttributeValues::Unorm8x4(values)) =
+            self.attributes.get_mut(&VertexAttribute::COLOR)
+        else {
+            unreachable!();
+        };
+        values.push(color.to_array());
+
+        if !self.attributes.contains(&VertexAttribute::UV2) {
+            self.attributes.insert(
+                VertexAttribute::UV2,
+                VertexAttributeValues::Float32x2(GrowableArray::default()),
+            );
+        }
+        let Some(VertexAttributeValues::Float32x2(values)) =
+            self.attributes.get_mut(&VertexAttribute::UV2)
+        else {
+            unreachable!();
+        };
+        values.push(uv.to_array());
     }
 
     fn push_quad_xcu2(&mut self, position: Quad<Vec2>, color: Quad<Rgba8>, uv: Quad<Vec2>) {
-        let base = self.vertices.len() as u32;
+        let base = if let Some(values) = self.attributes.get(&VertexAttribute::POSITION2) {
+            values.len() as u32
+        } else {
+            0
+        };
 
         self.push_vertex_xcu2(position.nw, color.nw, uv.nw);
         self.push_vertex_xcu2(position.ne, color.ne, uv.ne);
@@ -401,50 +591,3 @@ impl DrawData {
 //
 // fn push_line_x_color      (draw_data: &mut DrawData, x_color: PipelineHandle,
 //   p1: Vec2, p2: Vec2, width: f32, color: Rgba8) {}
-
-//
-//
-//
-// dead:
-//
-//
-//
-// pub fn push_line(&mut self, line_shape: LineShape) {
-//     // NOTE: line's stroke may only be centered.
-//     //   specifying outside/inside stroke alignment makes sense only for shapes that need an
-//     //   outline (/ need to be stroked).
-//     assert!(matches!(
-//         line_shape.stroke.alignment,
-//         StrokeAlignment::Center
-//     ));
-//
-//     // NOTE: there's no sdf params for line.
-//     self.draw_data.set_sdf_params(None);
-//
-//     // computes the vertex position offset away the from center caused by line width.
-//     #[inline]
-//     fn compute_line_width_offset(a: Vec2, b: Vec2, width: f32) -> Vec2 {
-//         // direction defines how the line is oriented in space. it allows to know
-//         // which way to move the vertices to create the desired width.
-//         let dir = b - a;
-//
-//         // normalizing the direction vector converts it into a unit vector (length
-//         // of 1). normalization ensures that the offset is proportional to the line
-//         // width, regardless of the line's length.
-//         let norm_dir = dir.normalize_or_zero();
-//
-//         // create a vector that points outward from the line. we want to move the
-//         // vertices away from the center of the line, not along its length.
-//         let perp = norm_dir.perp();
-//
-//         // to distribute the offset evenly on both sides of the line
-//         let offset = perp * (width * 0.5);
-//
-//         offset
-//     }
-//
-//     let [a, b] = line_shape.points;
-//     let Stroke { width, color, .. } = line_shape.stroke;
-//     let offset = compute_line_width_offset(a, b, width);
-//     self.push_rect_filled(Rect::new(a + offset, b - offset), Fill::Color(color));
-// }

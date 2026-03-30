@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::fmt::{self, Write as _};
-use std::mem::offset_of;
 use std::ptr::null;
 
 use anyhow::{Context as _, anyhow};
@@ -11,7 +10,7 @@ use mars::arraymemory::FixedArrayMemory;
 use mars::fxhash::FxBuildHasher;
 use mars::scopeguard::ScopeGuard;
 use mars::sortedarray::SpillableSortedArrayMap;
-use mars::string::{GrowableString, String};
+use mars::string::{FixedString, GrowableString, String};
 
 // TODO: maybe ubo
 // TODO: do i want to generate uniforms from shader desc?
@@ -90,9 +89,9 @@ use shader_consts::*;
 //   - `a_` for attributes
 //   - `v_` for vertex-to-fragment outputs
 
-const A_POSITION_LOC: gl::GLuint = 0;
-const A_UV_LOC: gl::GLuint = 1;
-const A_COLOR_LOC: gl::GLuint = 2;
+const A_POSITION2_LOC: gl::GLuint = 0;
+const A_COLOR_LOC: gl::GLuint = 1;
+const A_UV2_LOC: gl::GLuint = 2;
 
 const SHADER_XCU2_COLOR: &str = "
 uniform mat4  projection_matrix;
@@ -100,8 +99,8 @@ uniform float scale_factor;
 
 #if defined(SHADER_STAGE_VERTEX)
 layout(location = 0) in vec2 a_position;
-layout(location = 1) in vec2 a_uv;
-layout(location = 2) in vec4 a_color;
+layout(location = 1) in vec4 a_color;
+layout(location = 2) in vec2 a_uv;
 
 out vec2 v_uv;
 out vec4 v_color;
@@ -131,8 +130,8 @@ uniform float scale_factor;
 
 #if defined(SHADER_STAGE_VERTEX)
 layout(location = 0) in vec2 a_position;
-layout(location = 1) in vec2 a_uv;
-layout(location = 2) in vec4 a_color;
+layout(location = 1) in vec4 a_color;
+layout(location = 2) in vec2 a_uv;
 
 out vec2 v_uv;
 out vec4 v_color;
@@ -165,21 +164,21 @@ uniform float scale_factor;
 
 #if defined(SHADER_STAGE_VERTEX)
 layout(location = 0) in vec2 a_position;
-layout(location = 1) in vec2 a_tex_coord;
-layout(location = 2) in vec4 a_color;
+layout(location = 1) in vec4 a_color;
+layout(location = 2) in vec2 a_uv;
 
-out vec2 v_tex_coord;
+out vec2 v_uv;
 out vec4 v_color;
 
 void main() {
-    v_tex_coord = a_tex_coord;
+    v_uv = a_uv;
     v_color = a_color / 255.0; // normalize 0..255 to 0.0..1.0
     gl_Position = projection_matrix * vec4(a_position, 0.0, 1.0);
 }
 #endif
 
 #if defined(SHADER_STAGE_FRAGMENT)
-in vec2 v_tex_coord;
+in vec2 v_uv;
 in vec4 v_color;
 
 uniform vec2  center;
@@ -380,12 +379,13 @@ unsafe fn create_program(
 struct Shader {
     gl_handle: gl::wrap::Program,
     uniform_locations: SpillableSortedArrayMap<
-        sx::Name,
+        FixedString<{ sx::NAME_MAX_LEN }>,
         gl::wrap::UniformLocation,
         INITIAL_UNIFORMS_CAP,
         alloc::Global,
     >,
-    texture_units: SpillableSortedArrayMap<sx::Name, gl::GLenum, 2, alloc::Global>,
+    texture_units:
+        SpillableSortedArrayMap<FixedString<{ sx::NAME_MAX_LEN }>, gl::GLenum, 2, alloc::Global>,
 }
 
 impl Shader {
@@ -410,7 +410,7 @@ impl Shader {
 
         let mut uniform_locations = SpillableSortedArrayMap::default();
         for name in desc.uniforms {
-            let name = sx::Name::new_fixed().with_str(name);
+            let name = FixedString::new_fixed().with_str(name);
             let Some(location) = ({
                 let _guard = temp.checkpoint();
                 let cname =
@@ -424,7 +424,7 @@ impl Shader {
 
         let mut texture_units = SpillableSortedArrayMap::default();
         for (i, name) in desc.textures.iter().enumerate() {
-            let name = sx::Name::new_fixed().with_str(name);
+            let name = FixedString::new_fixed().with_str(name);
             let Some(location) = ({
                 let _guard = temp.checkpoint();
                 let cname =
@@ -707,7 +707,9 @@ fn compute_orthographic_projection_matrix(
 pub struct GlRenderer {
     framebuffer: Option<Framebuffer>,
 
-    vbo: gl::wrap::Buffer,
+    vbo_positions: gl::wrap::Buffer,
+    vbo_colors: gl::wrap::Buffer,
+    vbo_uvs: gl::wrap::Buffer,
     ebo: gl::wrap::Buffer,
     vao: gl::wrap::VertexArray,
 
@@ -723,47 +725,34 @@ impl GlRenderer {
         //   via checkpoint-based gl allocator
 
         unsafe {
-            let vbo = gl_api.create_buffer().context("could not create vbo")?;
+            let vbo_positions = gl_api.create_buffer().context("could not create vbo")?;
+            let vbo_colors = gl_api.create_buffer().context("could not create vbo")?;
+            let vbo_uvs = gl_api.create_buffer().context("could not create vbo")?;
             let ebo = gl_api.create_buffer().context("could not create ebo")?;
             let vao = {
                 let vao = gl_api
                     .create_vertex_array()
                     .context("could not create vao")?;
-
                 gl_api.bind_vertex_array(Some(vao));
-                gl_api.bind_buffer(gl::ARRAY_BUFFER, Some(vbo));
 
-                const STRIDE: gl::GLsizei = size_of::<sx::Vertex>() as gl::GLsizei;
+                gl_api.bind_buffer(gl::ARRAY_BUFFER, Some(vbo_positions));
+                gl_api.vertex_attrib_pointer(A_POSITION2_LOC, 2, gl::FLOAT, gl::FALSE, 0, null());
+                gl_api.enable_vertex_attrib_array(A_POSITION2_LOC);
 
-                gl_api.vertex_attrib_pointer(
-                    A_POSITION_LOC,
-                    2,
-                    gl::FLOAT,
-                    gl::FALSE,
-                    STRIDE,
-                    offset_of!(sx::Vertex, position) as *const c_void,
-                );
-                gl_api.enable_vertex_attrib_array(A_POSITION_LOC);
-
-                gl_api.vertex_attrib_pointer(
-                    A_UV_LOC,
-                    2,
-                    gl::FLOAT,
-                    gl::FALSE,
-                    STRIDE,
-                    offset_of!(sx::Vertex, uv) as *const c_void,
-                );
-                gl_api.enable_vertex_attrib_array(A_UV_LOC);
-
+                gl_api.bind_buffer(gl::ARRAY_BUFFER, Some(vbo_colors));
                 gl_api.vertex_attrib_pointer(
                     A_COLOR_LOC,
                     4,
                     gl::UNSIGNED_BYTE,
                     gl::FALSE,
-                    STRIDE,
-                    offset_of!(sx::Vertex, color) as *const c_void,
+                    0,
+                    null(),
                 );
                 gl_api.enable_vertex_attrib_array(A_COLOR_LOC);
+
+                gl_api.bind_buffer(gl::ARRAY_BUFFER, Some(vbo_uvs));
+                gl_api.vertex_attrib_pointer(A_UV2_LOC, 2, gl::FLOAT, gl::FALSE, 0, null());
+                gl_api.enable_vertex_attrib_array(A_UV2_LOC);
 
                 vao
             };
@@ -782,7 +771,9 @@ impl GlRenderer {
             Ok(Self {
                 framebuffer: None,
 
-                vbo,
+                vbo_positions,
+                vbo_colors,
+                vbo_uvs,
                 ebo,
                 vao,
 
@@ -802,7 +793,9 @@ impl GlRenderer {
                 delete_framebuffer(framebuffer, gl_api);
             }
 
-            gl_api.delete_buffer(self.vbo);
+            gl_api.delete_buffer(self.vbo_positions);
+            gl_api.delete_buffer(self.vbo_colors);
+            gl_api.delete_buffer(self.vbo_uvs);
             gl_api.delete_buffer(self.ebo);
             gl_api.delete_buffer(self.vao);
 
@@ -958,6 +951,13 @@ impl GlRenderer {
             unreachable!();
         };
 
+        let sx::DrawData {
+            attributes,
+            indices,
+            commands,
+            ..
+        } = draw_data;
+
         unsafe {
             gl_api.bind_framebuffer(gl::FRAMEBUFFER, Some(framebuffer.framebuffer));
 
@@ -980,28 +980,47 @@ impl GlRenderer {
                 gl::ONE_MINUS_SRC_ALPHA,
             );
 
-            gl_api.bind_buffer(gl::ARRAY_BUFFER, Some(self.vbo));
-            gl_api.bind_buffer(gl::ELEMENT_ARRAY_BUFFER, Some(self.ebo));
             gl_api.bind_vertex_array(Some(self.vao));
-        }
 
-        let sx::DrawData {
-            vertices,
-            indices,
-            commands,
-            ..
-        } = draw_data;
-        unsafe {
             // TODO: should probably do buffer_sub_data here?
+
+            let positions = attributes
+                .get(&sx::VertexAttribute::POSITION2)
+                .context("could not get position2")?;
+            gl_api.bind_buffer(gl::ARRAY_BUFFER, Some(self.vbo_positions));
             gl_api.buffer_data(
                 gl::ARRAY_BUFFER,
-                (vertices.len() * size_of::<sx::Vertex>()) as gl::GLsizeiptr,
-                vertices.as_ptr().cast(),
+                (size_of::<[f32; 2]>() * positions.len()) as gl::GLsizeiptr,
+                positions.as_bytes().as_ptr().cast(),
                 gl::STREAM_DRAW,
             );
+
+            let colors = attributes
+                .get(&sx::VertexAttribute::COLOR)
+                .context("could not get colors")?;
+            gl_api.bind_buffer(gl::ARRAY_BUFFER, Some(self.vbo_colors));
+            gl_api.buffer_data(
+                gl::ARRAY_BUFFER,
+                (size_of::<[u32; 4]>() * colors.len()) as gl::GLsizeiptr,
+                colors.as_bytes().as_ptr().cast(),
+                gl::STREAM_DRAW,
+            );
+
+            let uvs = attributes
+                .get(&sx::VertexAttribute::UV2)
+                .context("could not get uv2")?;
+            gl_api.bind_buffer(gl::ARRAY_BUFFER, Some(self.vbo_uvs));
+            gl_api.buffer_data(
+                gl::ARRAY_BUFFER,
+                (size_of::<[f32; 2]>() * uvs.len()) as gl::GLsizeiptr,
+                uvs.as_bytes().as_ptr().cast(),
+                gl::STREAM_DRAW,
+            );
+
+            gl_api.bind_buffer(gl::ELEMENT_ARRAY_BUFFER, Some(self.ebo));
             gl_api.buffer_data(
                 gl::ELEMENT_ARRAY_BUFFER,
-                (indices.len() * size_of::<u32>()) as gl::GLsizeiptr,
+                (size_of::<u32>() * indices.len()) as gl::GLsizeiptr,
                 indices.as_ptr().cast(),
                 gl::STREAM_DRAW,
             );
