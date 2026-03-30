@@ -2,7 +2,9 @@ use std::iter;
 use std::mem::MaybeUninit;
 
 use anyhow::{Context as _, anyhow};
-use example_framework::{GlContext, GlRenderer};
+use example_framework::{
+    GlContext, GlRenderer, PIPELINE_XCU2_COLOR, PIPELINE_XCU2_MONOCHROME, PIPELINE_XCU2_SDF_RECT,
+};
 use mars::alloc::TempAllocator;
 use raw_window_handle as rwh;
 use window::{Event, Window, WindowAttrs, WindowEvent};
@@ -58,25 +60,24 @@ fn draw_text(
     fg: sx::Rgba8,
     position: sx::Vec2,
     texture_service: &mut sx::TextureService,
-    draw_buffer: &mut sx::DrawBuffer,
+    draw_data: &mut sx::DrawData,
 ) {
     let font_ascent = font_instance.ascent();
     let mut x_offset: f32 = position.x;
     for ch in text.chars() {
         let glyph = font_instance.get_or_rasterize_glyph(ch, texture_service);
         let glyph_advance_width = glyph.advance_width();
-        draw_buffer.push_rect(
-            sx::RectShape::new(
-                glyph
-                    .bounds()
-                    .translate(sx::Vec2::new(x_offset, position.y + font_ascent)),
-            )
-            .with_fill(Some(sx::Fill::Texture(
-                sx::TextureFill::new(glyph.texture_handle())
-                    .with_coords(glyph.texture_coords())
-                    .with_base_color(fg),
-            ))),
+
+        draw_data.push_rect_xcu2_monochrome(
+            PIPELINE_XCU2_MONOCHROME,
+            glyph
+                .bounds()
+                .translate(sx::Vec2::new(x_offset, position.y + font_ascent)),
+            fg,
+            glyph.texture_coords(),
+            glyph.texture_handle(),
         );
+
         x_offset += glyph_advance_width;
     }
 }
@@ -90,12 +91,12 @@ struct Context {
     texture_service: sx::TextureService,
     font_service: sx::FontService,
     default_font_handle: sx::FontHandle,
-    draw_buffer: sx::DrawBuffer,
+    draw_data: sx::DrawData,
     gl_renderer: GlRenderer,
 }
 
 impl Context {
-    fn new() -> anyhow::Result<Self> {
+    fn new(temp: &TempAllocator<'_>) -> anyhow::Result<Self> {
         let window =
             window::create_window(WindowAttrs::default()).context("could not create window")?;
 
@@ -134,7 +135,7 @@ impl Context {
             .context("default font is invalid")?;
 
         let gl_renderer =
-            GlRenderer::new(&gl_context.api).context("could not create gl renderer")?;
+            GlRenderer::new(&gl_context.api, temp).context("could not create gl renderer")?;
 
         Ok(Self {
             window,
@@ -145,7 +146,7 @@ impl Context {
             texture_service: sx::TextureService::default(),
             font_service,
             default_font_handle,
-            draw_buffer: sx::DrawBuffer::default(),
+            draw_data: sx::DrawData::default(),
             gl_renderer,
         })
     }
@@ -188,21 +189,34 @@ impl Context {
 
         {
             let center_rect = sx::Rect::from_center_size(logical_size * 0.5, 64.0);
-            self.draw_buffer.push_rect(
-                sx::RectShape::new(center_rect).with_fill(Some(sx::Fill::Color(sx::Rgba8::MAROON))),
+            self.draw_data.push_rect_xcu2_color(
+                PIPELINE_XCU2_COLOR,
+                center_rect,
+                sx::Rgba8::PURPLE,
             );
 
-            let other_rect = center_rect
+            let rounded_rect = center_rect
                 .inflate(-sx::Vec2::splat(8.0))
                 .translate(sx::Vec2::splat(16.0));
-            self.draw_buffer.push_rect(
-                sx::RectShape::new(other_rect)
-                    .with_fill(Some(sx::Fill::Color(sx::Rgba8::RED)))
-                    .with_corner_radius(Some(12.0))
-                    .with_stroke(Some(
-                        sx::Stroke::new(8.0, sx::Rgba8::WHITE.with_af(0.5))
-                            .with_alignment(sx::StrokeAlignment::Center),
-                    )),
+            self.draw_data.push_rect_xcu2_sdf_stroked(
+                PIPELINE_XCU2_SDF_RECT,
+                rounded_rect,
+                sx::Rgba8::GREEN,
+                12.0,
+                8.0,
+                sx::Rgba8::WHITE.with_af(0.3),
+                sx::StrokeAlignment::Center,
+            );
+
+            let circle_rect = center_rect.inflate(sx::Vec2::splat(128.0));
+            self.draw_data.push_rect_xcu2_sdf_stroked(
+                PIPELINE_XCU2_SDF_RECT,
+                circle_rect,
+                sx::Rgba8::TRANSPARENT,
+                circle_rect.width() / 2.0,
+                2.0,
+                sx::Rgba8::PURPLE,
+                sx::StrokeAlignment::Inside,
             );
         }
 
@@ -225,7 +239,7 @@ impl Context {
                         font_instance.height() / 2.0,
                     ),
                 &mut self.texture_service,
-                &mut self.draw_buffer,
+                &mut self.draw_data,
             );
         }
 
@@ -233,15 +247,15 @@ impl Context {
         self.gl_renderer
             .handle_texture_commands(texture_commands, &self.gl_context.api)?;
 
-        self.draw_buffer.flush();
+        self.draw_data.flush();
         self.gl_renderer.render(
             logical_size,
             scale_factor,
-            self.draw_buffer.draw_data(),
+            &self.draw_data,
             &self.gl_context.api,
             temp,
         )?;
-        self.draw_buffer.clear();
+        self.draw_data.clear();
 
         self.gl_renderer.render_to_screen(&self.gl_context.api)?;
         self.gl_context.swap_window_buffers(raw_window_handle)?;
@@ -292,7 +306,7 @@ fn main() {
 
     Logger::init();
 
-    let mut ctx = Context::new().expect("could not create app");
+    let mut ctx = Context::new(&temp).expect("could not create app");
 
     #[cfg(not(target_family = "wasm"))]
     while !ctx.close_requested {

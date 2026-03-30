@@ -69,60 +69,17 @@ pub enum ShaderSourceKind {
     // TODO: FilePath.
 }
 
-impl fmt::Debug for ShaderSourceKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Static(..) => f.write_str("<static>"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum GlslProfile {
-    Core,
-    Compatibility,
-    Es,
-}
-
-#[derive(Debug, Clone)]
-pub enum ShaderSourceDesc {
-    // NOTE: glsl source is not expected to contain version string.
-    //   #version number profile_opt
-    //   https://registry.khronos.org/OpenGL/specs/gl/GLSLangSpec.4.60.pdf
-    Glsl { version: u16, profile: GlslProfile },
-}
-
 #[derive(Debug, Clone)]
 pub struct ShaderSource {
     pub kind: ShaderSourceKind,
     pub desc: ShaderSourceDesc,
 }
 
-// ----
-// shader stage
-
-#[derive(Debug, Clone, Copy)]
-pub enum ShaderStageKind {
-    Vertex,
-    Fragment,
-}
-
-#[derive(Debug)]
-pub struct ShaderStageDesc {
-    pub source: ShaderSource,
-    pub defines: ShaderDefines,
-}
-
 #[derive(Debug)]
 pub struct ShaderStage {
-    pub kind: ShaderStageKind,
     pub desc: ShaderStageDesc,
 }
 
-// TODO: most likely get rid of this? or maybe it should operate not on stage descs, but on stage
-// handles / already created stages?
-//
-// TODO: ShaderDesc might need to change to be able to accommodate compute?
 #[derive(Debug)]
 pub struct ShaderDesc {
     pub vertex_stage: ShaderStageDesc,
@@ -131,7 +88,3 @@ pub struct ShaderDesc {
     //   but obviously some can be visible/used only in vertex stage, some in fragment, etc.
     pub uniforms: ShaderUniformDescs,
 }
-
-// TODO: shader service
-//   must make it possible to attach shaders (fragment-only, or full pipeline thing) to draw buffer
-//   shapes?

@@ -144,6 +144,7 @@ impl From<&(f32, f32)> for Vec2 {
 
 impl Vec2 {
     pub const ZERO: Self = Self::splat(0.0);
+    pub const ONE: Self = Self::splat(1.0);
 
     #[inline]
     #[must_use]
@@ -444,46 +445,46 @@ impl Rect {
     // sugary stuff
 
     #[must_use]
-    pub fn top_left(&self) -> Vec2 {
+    pub fn northwest(&self) -> Vec2 {
         self.min
     }
 
     #[must_use]
-    pub fn top_right(&self) -> Vec2 {
+    pub fn northeast(&self) -> Vec2 {
         Vec2::new(self.max.x, self.min.y)
     }
 
     #[must_use]
-    pub fn bottom_left(&self) -> Vec2 {
+    pub fn southwest(&self) -> Vec2 {
         Vec2::new(self.min.x, self.max.y)
     }
 
     #[must_use]
-    pub fn bottom_right(&self) -> Vec2 {
+    pub fn southeast(&self) -> Vec2 {
         self.max
     }
 
     #[must_use]
-    pub fn with_top_left(mut self, top_left: Vec2) -> Self {
+    pub fn with_northwest(mut self, top_left: Vec2) -> Self {
         self.min = top_left;
         self
     }
 
     #[must_use]
-    pub fn with_top_right(mut self, top_right: Vec2) -> Self {
+    pub fn with_northeast(mut self, top_right: Vec2) -> Self {
         self.min = Vec2::new(self.min.x, top_right.y);
         self.max = Vec2::new(top_right.x, self.max.y);
         self
     }
 
     #[must_use]
-    pub fn with_bottom_right(mut self, bottom_right: Vec2) -> Self {
+    pub fn with_southeast(mut self, bottom_right: Vec2) -> Self {
         self.max = bottom_right;
         self
     }
 
     #[must_use]
-    pub fn with_bottom_left(mut self, bottom_left: Vec2) -> Self {
+    pub fn with_southwest(mut self, bottom_left: Vec2) -> Self {
         self.min = Vec2::new(bottom_left.x, self.min.y);
         self.max = Vec2::new(self.max.x, bottom_left.y);
         self

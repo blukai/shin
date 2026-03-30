@@ -65,7 +65,6 @@ pub struct TextureService {
     buf: GrowableArray<u8, alloc::Global>,
     range_alloc: RangeAlloc<usize>,
 
-    // TODO: maybe parametrize texture service with allocator.
     descs: HandleArray<TextureDesc, alloc::Global>,
     commands: GrowableArray<TextureCommand<(), Range<usize>>, alloc::Global>,
 }
