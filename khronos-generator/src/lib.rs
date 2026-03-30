@@ -172,7 +172,7 @@ fn parse_enum_token_attrs<'a>(
             "comment" => comment.replace(attr.value),
             other => bail!("unexpected attr: {:?}", other),
         };
-        if prev.is_some() {
+        if let Some(prev) = prev {
             bail!("duplicate attr: {prev:?}");
         }
     }
@@ -198,15 +198,12 @@ fn parse_enum_block_into<'a>(
         .map(|attr| attr.value);
     while let Some(element) = element_iterator.next() {
         match element {
-            Element::EmptyTag(empty) => match empty.name {
-                "enum" => {
-                    let token = parse_enum_token_attrs(empty, block_type)
-                        .context("could not parse enum token attrs")?;
-                    enums.push(token);
-                }
-                "unused" => {}
-                other => bail!("unexpected empty: {:?}", other),
-            },
+            Element::EmptyTag(empty) if empty.name == "enum" => {
+                let token = parse_enum_token_attrs(empty, block_type)
+                    .context("could not parse enum token attrs")?;
+                enums.push(token);
+            }
+            Element::EmptyTag(empty) if empty.name == "unused" => {}
             Element::Text(text) if text.chars().all(|c| c.is_whitespace()) => {}
             Element::EndTag(end) if end.name == "enums" => break,
             Element::Comment(_) => {}
@@ -231,8 +228,10 @@ fn parse_command_part<'a>(
             }
             Element::StartTag(start) => match start.name {
                 "name" => {
-                    assert!(name.is_none());
-                    name = Some(expect_text(element_iterator)?);
+                    let prev = name.replace(expect_text(element_iterator)?);
+                    if let Some(prev) = prev {
+                        bail!("duplicate name: {prev:?}");
+                    }
                     expect_end_tag(element_iterator)?;
                 }
                 "ptype" => {
@@ -258,17 +257,16 @@ fn parse_command<'a>(element_iterator: &mut ElementIterator<'a>) -> anyhow::Resu
         match element {
             Element::StartTag(start) => match start.name {
                 "proto" => {
-                    assert!(proto.is_none());
-                    proto = Some(
-                        parse_command_part("proto", element_iterator)
-                            .context("could not parse command proto")?,
-                    );
+                    let command_part = parse_command_part("proto", element_iterator)
+                        .context("could not parse command proto")?;
+                    if let Some(prev) = proto.replace(command_part) {
+                        bail!("duplicate proto: {prev:?}");
+                    }
                 }
                 "param" => {
-                    params.push(
-                        parse_command_part("param", element_iterator)
-                            .context("could not parse command param")?,
-                    );
+                    let command_part = parse_command_part("param", element_iterator)
+                        .context("could not parse command param")?;
+                    params.push(command_part);
                 }
                 other => bail!("unexpected start: {other}"),
             },

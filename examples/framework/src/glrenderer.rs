@@ -8,12 +8,12 @@ use std::ptr::null;
 use anyhow::{Context as _, anyhow};
 use gl::wrap::Adapter;
 use mars::alloc::{self, Allocator, TempAllocator};
-use mars::arraymemory::GrowableArrayMemory;
+use mars::cstring::GrowableCString;
+use mars::dropguard::DropGuard;
 use mars::fxhash::{FxBuildHasher, FxHasher};
 use mars::nohash::NoBuildHasher;
-use mars::scopeguard::ScopeGuard;
 use mars::sortedarray::SpillableSortedArrayMap;
-use mars::string::{GrowableString, String};
+use mars::string::GrowableString;
 
 // TODO: maybe ubo
 // TODO: do i want to generate uniforms from shader desc?
@@ -215,10 +215,11 @@ fn prefix_stage_source<A: Allocator>(
         defines,
     } = stage_desc;
 
+    let mut ret = GrowableString::new_in(alloc);
+
     const APPROX_DEFINE_LEN: usize = 32;
     const APPROX_EXTRA_CAP: usize = 128;
-    let mut ret = String::new_growable_in(alloc)
-        .with_cap(code.len() + defines.0.len() * APPROX_DEFINE_LEN + APPROX_EXTRA_CAP);
+    ret.reserve_exact(code.len() + defines.0.len() * APPROX_DEFINE_LEN + APPROX_EXTRA_CAP);
 
     match (version, profile) {
         (version, sx::GlslProfile::Core) => {
@@ -327,8 +328,7 @@ impl Shader {
         for (name, _) in desc.uniforms.0.iter() {
             if let Some(location) = {
                 let _guard = temp.checkpoint();
-                let name = name
-                    .try_to_c_string_in(GrowableArrayMemory::new_in(temp))
+                let name = GrowableCString::try_from_str_in(name, temp)
                     .expect("could not convier uniform name to cstring");
                 unsafe { gl_api.get_uniform_location(program, name.as_c_str()) }
             } {
@@ -412,7 +412,7 @@ fn create_framebuffer(
     width: u32,
     height: u32,
 ) -> anyhow::Result<Framebuffer> {
-    // TODO: scopeguard to cleanup created resources if something fails
+    // TODO: dropguard to cleanup created resources if something fails
     //   via checkpoint-based gl allocator
 
     unsafe {
@@ -517,7 +517,7 @@ pub struct GlRenderer {
 
 impl GlRenderer {
     pub fn new(gl_api: &gl::wrap::Api) -> anyhow::Result<Self> {
-        // TODO: scopeguard to cleanup created resources if something fails
+        // TODO: dropguard to cleanup created resources if something fails
         //   via checkpoint-based gl allocator
 
         unsafe {
@@ -817,40 +817,51 @@ impl GlRenderer {
                     gl_api.enable(gl::SCISSOR_TEST);
                     gl_api.scissor(x, y, w, h);
                 }
-                ScopeGuard::new(|| unsafe { gl_api.disable(gl::SCISSOR_TEST) })
+                DropGuard::new(|| unsafe { gl_api.disable(gl::SCISSOR_TEST) })
             });
 
             let mut shader_desc = sx::ShaderDesc {
                 vertex_stage: sx::ShaderStageDesc {
                     source: SHADER_SOURCE.clone(),
-                    defines: sx::ShaderDefines::default().with_iter(
-                        [sx::ShaderDefine::new_fixed().with_str("SHADER_STAGE_VERTEX")].into_iter(),
-                    ),
+                    defines: {
+                        let mut defines = sx::ShaderDefines::default();
+                        defines.extend_from_iter(
+                            [sx::ShaderDefine::from_str("SHADER_STAGE_VERTEX")].into_iter(),
+                        );
+                        defines
+                    },
                 },
                 fragment_stage: sx::ShaderStageDesc {
                     source: SHADER_SOURCE.clone(),
-                    defines: sx::ShaderDefines::default().with_iter(
-                        [sx::ShaderDefine::new_fixed().with_str("SHADER_STAGE_FRAGMENT")]
-                            .into_iter(),
-                    ),
+                    defines: {
+                        let mut defines = sx::ShaderDefines::default();
+                        defines.extend_from_iter(
+                            [sx::ShaderDefine::from_str("SHADER_STAGE_FRAGMENT")].into_iter(),
+                        );
+                        defines
+                    },
                 },
-                uniforms: sx::ShaderUniformDescs::default().with_iter(
-                    [
-                        (
-                            sx::ShaderUniformName::new_fixed().with_str("u_projection"),
-                            sx::ShaderUniformType::Mat4,
-                        ),
-                        (
-                            sx::ShaderUniformName::new_fixed().with_str("u_scale"),
-                            sx::ShaderUniformType::Float,
-                        ),
-                        (
-                            sx::ShaderUniformName::new_fixed().with_str("u_sampler"),
-                            sx::ShaderUniformType::Sampler2D,
-                        ),
-                    ]
-                    .into_iter(),
-                ),
+                uniforms: {
+                    let mut uniforms = sx::ShaderUniformDescs::default();
+                    uniforms.extend_from_iter(
+                        [
+                            (
+                                sx::ShaderUniformName::from_str("u_projection"),
+                                sx::ShaderUniformType::Mat4,
+                            ),
+                            (
+                                sx::ShaderUniformName::from_str("u_scale"),
+                                sx::ShaderUniformType::Float,
+                            ),
+                            (
+                                sx::ShaderUniformName::from_str("u_sampler"),
+                                sx::ShaderUniformType::Sampler2D,
+                            ),
+                        ]
+                        .into_iter(),
+                    );
+                    uniforms
+                },
             };
 
             let texture = if let Some(handle) = texture {
@@ -861,50 +872,44 @@ impl GlRenderer {
             shader_desc
                 .fragment_stage
                 .defines
-                .insert(
-                    sx::ShaderDefine::new_fixed().with_str(match texture.format {
-                        sx::TextureFormat::Rgba8Unorm => "TEXTURE_FORMAT_RGBA8",
-                        sx::TextureFormat::R8Unorm => "TEXTURE_FORMAT_R8",
-                    }),
-                );
+                .insert(sx::ShaderDefine::from_str(match texture.format {
+                    sx::TextureFormat::Rgba8Unorm => "TEXTURE_FORMAT_RGBA8",
+                    sx::TextureFormat::R8Unorm => "TEXTURE_FORMAT_R8",
+                }));
 
             if let Some(sdf_params) = sdf_params.as_ref() {
                 use sx::ShaderUniformType as Type;
                 match sdf_params {
                     sx::SdfParams::Rect(..) => {
-                        shader_desc.fragment_stage.defines.extend_from_iter(
-                            [sx::ShaderDefine::new_fixed().with_str("SDF_RECT")].into_iter(),
-                        );
+                        shader_desc
+                            .fragment_stage
+                            .defines
+                            .extend_from_iter([sx::ShaderDefine::from_str("SDF_RECT")].into_iter());
 
                         shader_desc.uniforms.extend_from_iter(
                             [
                                 (
-                                    sx::ShaderUniformName::new_fixed()
-                                        .with_str("u_sdf_rect_center"),
+                                    sx::ShaderUniformName::from_str("u_sdf_rect_center"),
                                     Type::Vec2,
                                 ),
                                 (
-                                    sx::ShaderUniformName::new_fixed().with_str("u_sdf_rect_size"),
+                                    sx::ShaderUniformName::from_str("u_sdf_rect_size"),
                                     Type::Vec2,
                                 ),
                                 (
-                                    sx::ShaderUniformName::new_fixed()
-                                        .with_str("u_sdf_rect_corner_radius"),
+                                    sx::ShaderUniformName::from_str("u_sdf_rect_corner_radius"),
                                     Type::Float,
                                 ),
                                 (
-                                    sx::ShaderUniformName::new_fixed()
-                                        .with_str("u_sdf_rect_stroke_width"),
+                                    sx::ShaderUniformName::from_str("u_sdf_rect_stroke_width"),
                                     Type::Float,
                                 ),
                                 (
-                                    sx::ShaderUniformName::new_fixed()
-                                        .with_str("u_sdf_rect_stroke_color"),
+                                    sx::ShaderUniformName::from_str("u_sdf_rect_stroke_color"),
                                     Type::Vec4,
                                 ),
                                 (
-                                    sx::ShaderUniformName::new_fixed()
-                                        .with_str("u_sdf_rect_stroke_alignment"),
+                                    sx::ShaderUniformName::from_str("u_sdf_rect_stroke_alignment"),
                                     Type::Int,
                                 ),
                             ]

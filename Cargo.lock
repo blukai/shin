@@ -36,7 +36,7 @@ name = "alloc"
 version = "0.0.0"
 dependencies = [
  "allocator-api2",
- "scopeguard",
+ "dropguard",
 ]
 
 [[package]]
@@ -226,7 +226,7 @@ name = "containers"
 version = "0.0.0"
 dependencies = [
  "alloc",
- "scopeguard",
+ "dropguard",
 ]
 
 [[package]]
@@ -307,6 +307,10 @@ name = "dpi"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f25c0e292a7ca6d6498557ff1df68f32c99850012b6ea401cf8daf771f22ff53"
+
+[[package]]
+name = "dropguard"
+version = "0.0.0"
 
 [[package]]
 name = "dynlib"
@@ -556,9 +560,9 @@ version = "0.0.0"
 dependencies = [
  "alloc",
  "containers",
+ "dropguard",
  "hash",
  "rangealloc",
- "scopeguard",
 ]
 
 [[package]]
@@ -998,10 +1002,6 @@ name = "scoped-tls"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1cf6437eb19a8f4a6cc0f7dca544973b0b78843adbfeb3683d1a94a0024a294"
-
-[[package]]
-name = "scopeguard"
-version = "0.0.0"
 
 [[package]]
 name = "sctk-adwaita"
