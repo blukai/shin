@@ -297,15 +297,6 @@ impl FontInstance {
         }
     }
 
-    pub fn compute_text_width(&mut self, text: &str, texture_service: &mut TextureService) -> f32 {
-        let mut width: f32 = 0.0;
-        for ch in text.chars() {
-            let glyph = self.get_or_rasterize_glyph(ch, texture_service);
-            width += glyph.glyph.advance_width;
-        }
-        width
-    }
-
     pub fn iter_texture_pages(&self) -> impl Iterator<Item = &TexturePage> {
         self.texture_pages.iter()
     }

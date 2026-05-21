@@ -1,9 +1,9 @@
 use std::ops::Range;
 
 use mars::alloc;
-use mars::array::GrowableArray;
+use mars::array::ResizableArray;
 use mars::handlearray::{Handle, HandleArray};
-use mars::rangealloc::RangeAlloc;
+use mars::rangealloc::RangeAllocator;
 
 // TODO: consider using word "image" instead of "texture"
 //   but that makes naming of a thing like TexturePacker not so simple, idk.
@@ -62,12 +62,12 @@ pub struct TextureCommand<Desc, Buf> {
 
 #[derive(Default)]
 pub struct TextureService {
-    buf: GrowableArray<u8, alloc::Global>,
-    range_alloc: RangeAlloc<usize>,
+    buf: ResizableArray<u8, alloc::Global>,
+    range_alloc: RangeAllocator<usize, alloc::Global>,
 
     // TODO: maybe parametrize texture service with allocator.
     descs: HandleArray<TextureDesc, alloc::Global>,
-    commands: GrowableArray<TextureCommand<(), Range<usize>>, alloc::Global>,
+    commands: ResizableArray<TextureCommand<(), Range<usize>>, alloc::Global>,
 }
 
 impl TextureService {
@@ -87,7 +87,7 @@ impl TextureService {
         let desc = self.descs.get(handle.0);
         let buf_size = (region.w * region.h * desc.format.block_size() as u32) as usize;
 
-        let buf_range = if let Ok(buf_range) = self.range_alloc.allocate(buf_size) {
+        let buf_range = if let Ok(buf_range) = self.range_alloc.allocate(buf_size, 1) {
             buf_range
         } else {
             // NOTE: buf can't fit region, grow it.
@@ -101,7 +101,7 @@ impl TextureService {
             unsafe { self.buf.set_len(new_end) };
 
             self.range_alloc.grow(new_end);
-            self.range_alloc.allocate(buf_size).unwrap()
+            self.range_alloc.allocate(buf_size, 1).unwrap()
         };
 
         self.commands.push(TextureCommand {

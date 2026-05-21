@@ -37,7 +37,6 @@ impl<T> Node<T> {
 struct Tree<T> {
     nodes: Vec<Option<Node<T>>>,
     root_index: usize,
-    free_indices: Vec<usize>,
 }
 
 impl<T> Tree<T> {
@@ -45,7 +44,6 @@ impl<T> Tree<T> {
         Self {
             nodes: vec![Some(Node::new(value))],
             root_index: 0,
-            free_indices: vec![],
         }
     }
 
@@ -78,11 +76,11 @@ impl<T> Tree<T> {
         maybe_after_index: Option<usize>,
         child_value: T,
     ) -> usize {
-        let child_index = self.free_indices.pop().unwrap_or_else(|| {
+        let child_index = {
             let ret = self.nodes.len();
             self.nodes.push(None);
             ret
-        });
+        };
         let mut child_node = Node::new(child_value);
 
         child_node.parent = Some(parent_index);

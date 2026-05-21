@@ -5,4 +5,4 @@ edition.workspace = true
 
 [dependencies]
 # my other repos
-mars = { workspace = true, features = ["hash"] }
+mars = { workspace = true }

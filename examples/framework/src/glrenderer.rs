@@ -8,12 +8,12 @@ use std::ptr::null;
 use anyhow::{Context as _, anyhow};
 use gl::wrap::Adapter;
 use mars::alloc::{self, Allocator, TempAllocator};
-use mars::cstring::GrowableCString;
+use mars::cstring::ResizableCString;
 use mars::dropguard::DropGuard;
 use mars::fxhash::{FxBuildHasher, FxHasher};
 use mars::nohash::NoBuildHasher;
 use mars::sortedarray::SpillableSortedArrayMap;
-use mars::string::GrowableString;
+use mars::string::ResizableString;
 
 // TODO: maybe ubo
 // TODO: do i want to generate uniforms from shader desc?
@@ -205,7 +205,7 @@ fn hash_shader_desc(shader_desc: &sx::ShaderDesc) -> u64 {
 fn prefix_stage_source<A: Allocator>(
     stage_desc: &sx::ShaderStageDesc,
     alloc: A,
-) -> Result<GrowableString<A>, fmt::Error> {
+) -> Result<ResizableString<A>, fmt::Error> {
     let sx::ShaderStageDesc {
         source:
             sx::ShaderSource {
@@ -215,7 +215,7 @@ fn prefix_stage_source<A: Allocator>(
         defines,
     } = stage_desc;
 
-    let mut ret = GrowableString::new_in(alloc);
+    let mut ret = ResizableString::new_in(alloc);
 
     const APPROX_DEFINE_LEN: usize = 32;
     const APPROX_EXTRA_CAP: usize = 128;
@@ -328,7 +328,7 @@ impl Shader {
         for (name, _) in desc.uniforms.0.iter() {
             if let Some(location) = {
                 let _guard = temp.checkpoint();
-                let name = GrowableCString::try_from_str_in(name, temp)
+                let name = ResizableCString::try_from_str_in(name, temp)
                     .expect("could not convier uniform name to cstring");
                 unsafe { gl_api.get_uniform_location(program, name.as_c_str()) }
             } {

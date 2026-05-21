@@ -3,7 +3,7 @@ use std::mem::MaybeUninit;
 
 use anyhow::{Context as _, anyhow};
 use example_framework::{GlContext, GlRenderer};
-use mars::alloc::TempAllocator;
+use mars::alloc::{self, TempAllocator};
 use raw_window_handle as rwh;
 use window::{Event, Window, WindowAttrs, WindowEvent};
 
@@ -288,7 +288,7 @@ fn main() {
     }));
 
     let mut temp_data = MaybeUninit::<[u8; 40 << 10]>::uninit();
-    let temp = TempAllocator::new(unsafe { temp_data.assume_init_mut() });
+    let temp = TempAllocator::new(unsafe { temp_data.assume_init_mut() }, &alloc::Global, None);
 
     Logger::init();
 
