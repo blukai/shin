@@ -10,10 +10,13 @@ use raw_window_handle as rwh;
 
 #[cfg(unix)]
 struct GlContextEgl {
-    egl_connection: egl::wrap::Connection,
-    egl_context: egl::wrap::Context,
+    // NOTE: rust drops struct fields in declaration order. window surfaces must be dropped before
+    // connection and connection before context.
+    //
     // NOTE: would you want more then 16? 16 is prob too excessive?
     egl_window_surfaces: [Option<(*mut c_void, egl::wrap::WindowSurface)>; 16],
+    egl_connection: egl::wrap::Connection,
+    egl_context: egl::wrap::Context,
 }
 
 #[cfg(unix)]
