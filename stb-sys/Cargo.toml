@@ -1,0 +1,18 @@
+[package]
+name = "stb-sys"
+version = "0.0.0"
+edition.workspace = true
+
+[lib]
+path = "stb.rs"
+
+[dependencies]
+mars = { workspace = true }
+
+[build-dependencies]
+bindgen = { workspace = true }
+cc = { workspace = true }
+
+[[example]]
+name = "truetype"
+path = "truetype_example.rs"

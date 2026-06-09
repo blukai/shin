@@ -8,5 +8,7 @@ edition.workspace = true
 ab_glyph = { workspace = true }
 anyhow = { workspace = true }
 log = { workspace = true }
+# workspace
+stb-sys = { workspace = true }
 # my other repos
 mars = { workspace = true }

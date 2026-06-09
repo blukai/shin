@@ -3,7 +3,7 @@ use std::mem::MaybeUninit;
 
 use anyhow::{Context as _, anyhow};
 use example_framework::{GlContext, GlRenderer};
-use mars::alloc::{self, TempAllocator};
+use mars::alloc::{self, ErasedAllocator, TempAllocator};
 use raw_window_handle as rwh;
 use window::{Event, Window, WindowAttrs, WindowEvent};
 
@@ -54,7 +54,7 @@ impl Logger {
 
 fn draw_text(
     text: &str,
-    font_instance: &mut sx::FontInstance,
+    font_instance: &mut sx::fontservice::FontInstance,
     fg: sx::Rgba8,
     position: sx::Vec2,
     texture_service: &mut sx::TextureService,
@@ -88,8 +88,10 @@ struct Context {
     gl_context: GlContext,
 
     texture_service: sx::TextureService,
-    font_service: sx::FontService,
-    default_font_handle: sx::FontHandle,
+    font_service: sx::fontservice::FontService,
+    default_font_handle: sx::fontservice::FontHandle,
+    font_service2: sx::fontservice2::FontService,
+    default_font_handle2: sx::fontservice2::FontHandle,
     draw_buffer: sx::DrawBuffer,
     gl_renderer: GlRenderer,
 }
@@ -128,9 +130,15 @@ impl Context {
             }
         };
 
-        let mut font_service = sx::FontService::default();
+        let mut font_service = sx::fontservice::FontService::default();
         let default_font_handle = font_service
             .register_font_slice(DEFAULT_FONT_DATA)
+            .context("default font is invalid")?;
+
+        let mut font_service2 =
+            sx::fontservice2::FontService::new_in(unsafe { ErasedAllocator::new(&alloc::Global) });
+        let default_font_handle2 = font_service2
+            .register_font(sx::fontservice2::FontData::Static(DEFAULT_FONT_DATA))
             .context("default font is invalid")?;
 
         let gl_renderer =
@@ -145,6 +153,8 @@ impl Context {
             texture_service: sx::TextureService::default(),
             font_service,
             default_font_handle,
+            font_service2,
+            default_font_handle2,
             draw_buffer: sx::DrawBuffer::default(),
             gl_renderer,
         })
@@ -207,11 +217,13 @@ impl Context {
         }
 
         {
-            let font_instance = self.font_service.get_font_instance_mut(sx::FontDesc {
-                handle: self.default_font_handle,
-                pt_size: 16.0,
-                scale_factor,
-            });
+            let font_instance =
+                self.font_service
+                    .get_font_instance_mut(sx::fontservice::FontDesc {
+                        handle: self.default_font_handle,
+                        pt_size: 16.0,
+                        scale_factor,
+                    });
             let text = "hello sailor!";
             // NOTE: typical_advance_width works for centering monospace fonts.
             //   for non-monospace font you would want to measure advance width of each char.
