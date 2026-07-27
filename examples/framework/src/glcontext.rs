@@ -15,8 +15,8 @@ struct GlContextEgl {
     //
     // NOTE: would you want more then 16? 16 is prob too excessive?
     egl_window_surfaces: [Option<(*mut c_void, egl::wrap::WindowSurface)>; 16],
-    egl_connection: egl::wrap::Connection,
     egl_context: egl::wrap::Context,
+    egl_connection: egl::wrap::Connection,
 }
 
 #[cfg(unix)]
@@ -98,9 +98,9 @@ impl GlContextEgl {
         // unsafe { egl_connection.api.SwapInterval(*egl_connection.display, 0) };
 
         Ok(Self {
-            egl_connection,
-            egl_context,
             egl_window_surfaces: array::from_fn(|_| None),
+            egl_context,
+            egl_connection,
         })
     }
 

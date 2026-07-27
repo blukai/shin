@@ -2,8 +2,8 @@ use std::ops::Range;
 
 use mars::alloc;
 use mars::array::ResizableArray;
-use mars::handlearray::{Handle, HandleArray};
 use mars::rangealloc::RangeAllocator;
+use mars::unmanagedhandlearray::{Handle, UnmanagedHandleArray};
 
 // TODO: consider using word "image" instead of "texture"
 //   but that makes naming of a thing like TexturePacker not so simple, idk.
@@ -66,7 +66,7 @@ pub struct TextureService {
     range_alloc: RangeAllocator<usize, alloc::Global>,
 
     // TODO: maybe parametrize texture service with allocator.
-    descs: HandleArray<TextureDesc, alloc::Global>,
+    descs: UnmanagedHandleArray<TextureDesc>,
     commands: ResizableArray<TextureCommand<(), Range<usize>>, alloc::Global>,
 }
 
@@ -74,7 +74,7 @@ impl TextureService {
     pub fn create(&mut self, desc: TextureDesc) -> TextureHandle {
         log::debug!("TextureService::create: {desc:?})");
 
-        let handle = TextureHandle(self.descs.push(desc));
+        let handle = TextureHandle(self.descs.push(alloc::Global, desc));
         self.commands.push(TextureCommand {
             handle,
             kind: TextureCommandKind::Create { desc: () },
@@ -84,7 +84,7 @@ impl TextureService {
 
     /// NOTE: returned buffer points into dirty memory. you need to write each and every byte.
     pub fn get_upload_buf(&mut self, handle: TextureHandle, region: TextureRegion) -> &mut [u8] {
-        let desc = self.descs.get(handle.0);
+        let desc = &self.descs[handle.0];
         let buf_size = (region.w * region.h * desc.format.block_size() as u32) as usize;
 
         let buf_range = if let Ok(buf_range) = self.range_alloc.allocate(buf_size, 1) {
@@ -129,7 +129,7 @@ impl TextureService {
         self.commands.drain(..).map(|cmd| {
             let kind = match cmd.kind {
                 TextureCommandKind::Create { desc: _ } => TextureCommandKind::Create {
-                    desc: self.descs.get(cmd.handle.0),
+                    desc: &self.descs[cmd.handle.0],
                 },
                 TextureCommandKind::Upload {
                     region,
@@ -149,5 +149,11 @@ impl TextureService {
                 kind,
             }
         })
+    }
+}
+
+impl Drop for TextureService {
+    fn drop(&mut self) {
+        self.descs.deinit(alloc::Global);
     }
 }
